@@ -5,11 +5,8 @@ import OpenAI from "openai";
 import FormData from "form-data";
 
 const app = express();
-app.use(express.json({ limit: "25mb" }));
+app.use(express.json({ limit: "2mb" }));
 
-// =====================
-// ENV
-// =====================
 const { PORT = 3000, OPENAI_API_KEY, OPENAI_MODEL = "gpt-5.2", OPENAI_TRANSCRIBE_MODEL = "gpt-4o-mini-transcribe" } =
   process.env;
 
@@ -19,15 +16,7 @@ if (!OPENAI_API_KEY) {
 
 const openai = new OpenAI({ apiKey: OPENAI_API_KEY });
 
-// =====================
-// In-memory message history per WhatsApp number
-// Stores last 6 CLIENT messages only
-// =====================
-const lastClientMessages = new Map(); // key: wa_number, value: string[]
-
-// =====================
-// STRICT SYSTEM PROMPT (Digitronics rules)
-// =====================
+// STRICT SYSTEM PROMPT (your Digitronics rules)
 const SYSTEM_PROMPT = `
 You are DigiBot for Digitronics.ma.
 
@@ -126,66 +115,33 @@ If info not included: "ma kaynach had l-ma3louma 3ndna daba"
 
 ORDER BY FORM (HIGHEST PRIORITY):
 If client wants to order/buy (intent = purchase), do NOT ask for name/phone/address in chat.
-Send ONLY this (Darija latin):
+Send ONLY this:
 "mzyan! 3mr had formulaire bach nkmlo l-commande: https://docs.google.com/forms/d/e/1FAIpQLScmDNagYSpUPfsIT2s2t35KH7U1OWSNkUCIWmcJJm1R_aITQQ/viewform?usp=header"
 If client says they filled the form:
 "choukran! wsltna lma3loumat dyalk, ghadi ntslô bik قريب باش nconfirmiw l-commande"
 If client sends personal info anyway:
 "choukran! bash nkmlo b sro3a 3mr had formulaire: https://docs.google.com/forms/d/e/1FAIpQLScmDNagYSpUPfsIT2s2t35KH7U1OWSNkUCIWmcJJm1R_aITQQ/viewform?usp=header"
-After sending form link once, do not resend unless client asks again or says they cannot open it.
-
-AUTODETECTION (IMPORTANT):
-- You will receive "LAST_6_CLIENT_MESSAGES" and "LAST_MESSAGE".
-- Use them to detect brand/model/size.
-- If brand+size is mentioned (e.g., "visio 43"), pick the closest matching model from offers and reply with model + price + (delivery included) + (free wall mount if TV).
-- If client asks Google TV/QLED/Android, answer using rules above.
 `;
 
-// Utility: block Arabic script just in case
+// block Arabic script
 function containsArabicScript(s) {
   return /[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF]/.test(s);
 }
 
-function shorten(text, max = 420) {
-  const t = String(text || "").trim();
-  return t.length > max ? t.slice(0, max).trim() : t;
-}
-
-function pushClientMessage(waNumber, msg) {
-  const key = waNumber || "unknown";
-  const arr = lastClientMessages.get(key) || [];
-  arr.push(String(msg || "").trim());
-  const last6 = arr.filter(Boolean).slice(-6);
-  lastClientMessages.set(key, last6);
-  return last6;
-}
-
-// =====================
-// Health check
-// =====================
 app.get("/", (req, res) => {
   res.status(200).send("OK - DigiTronics WhatsApp Bot is running");
 });
 
-// =====================
-// WANotifier endpoint
-// =====================
 app.post("/wanotifier", async (req, res) => {
   try {
+    // DEBUG: view what WANotifier sends
     console.log("WANOTIFIER BODY:", JSON.stringify(req.body));
 
-    const waNumber =
-      req.body?.wa_number ??
-      req.body?.whatsapp_number ??
-      req.body?.phone ??
-      "unknown";
+    const text = (req.body?.text ?? req.body?.message ?? "").toString().trim();
+    const mediaUrl = (req.body?.media_url ?? req.body?.mediaUrl ?? "").toString().trim();
 
-    const text = req.body?.text ?? req.body?.message ?? "";
-    const mediaUrl = req.body?.media_url ?? req.body?.mediaUrl ?? req.body?.media ?? "";
+    let userText = text;
 
-    let userText = String(text || "").trim();
-
-    // If no text, try voice note via media URL (ONLY if downloadable)
     if (!userText && mediaUrl) {
       const audioBuffer = await downloadPublicMedia(mediaUrl);
       userText = await transcribeAudio(audioBuffer);
@@ -194,14 +150,13 @@ app.post("/wanotifier", async (req, res) => {
     if (!userText) {
       return res.status(400).json({
         ok: false,
-        error: "No text and no downloadable media_url received",
+        error: "No text and no media_url received",
+        debug: { hasText: !!text, hasMediaUrl: !!mediaUrl },
       });
     }
 
-    // Save last 6 messages for this WhatsApp number
-    const last6 = pushClientMessage(waNumber, userText);
+    const reply = await generateReply(userText);
 
-    const reply = await generateReply(last6, userText);
     return res.status(200).json({ ok: true, reply });
   } catch (err) {
     console.error("WANOTIFIER ERROR:", err?.response?.data || err?.message || err);
@@ -209,13 +164,11 @@ app.post("/wanotifier", async (req, res) => {
   }
 });
 
-// Downloads a file from a public URL (WANotifier media URL)
 async function downloadPublicMedia(url) {
   const r = await axios.get(url, { responseType: "arraybuffer" });
   return Buffer.from(r.data);
 }
 
-// Transcribe audio buffer using OpenAI Audio Transcriptions endpoint
 async function transcribeAudio(buffer) {
   const form = new FormData();
   form.append("model", OPENAI_TRANSCRIBE_MODEL);
@@ -228,44 +181,26 @@ async function transcribeAudio(buffer) {
     },
   });
 
-  return String(r.data?.text || "").trim();
+  return (r.data?.text ?? "").toString().trim();
 }
 
-// Generate reply using last 6 messages + last message
-async function generateReply(last6, lastMessage) {
-  const userPayload =
-    `LAST_6_CLIENT_MESSAGES:\n` +
-    (last6 || []).map((m, i) => `${i + 1}) ${m}`).join("\n") +
-    `\n\nLAST_MESSAGE:\n${lastMessage}`;
-
+async function generateReply(text) {
   const r = await openai.responses.create({
     model: OPENAI_MODEL,
     input: [
       { role: "system", content: SYSTEM_PROMPT },
-      { role: "user", content: userPayload },
+      { role: "user", content: `LAST_MESSAGE: ${text}` },
     ],
   });
 
   let out = (r.output_text || "").trim();
 
-  // If it outputs Arabic script, retry once with a stronger reminder
+  // safety: if model outputs Arabic script, force fallback
   if (!out || containsArabicScript(out)) {
-    const r2 = await openai.responses.create({
-      model: OPENAI_MODEL,
-      input: [
-        { role: "system", content: SYSTEM_PROMPT },
-        { role: "user", content: userPayload + "\n\nIMPORTANT: jawab ghir b darija latin (bla arabic script)." },
-      ],
-    });
-    out = (r2.output_text || "").trim();
+    out = "ma kaynach had l-ma3louma 3ndna daba";
   }
 
-  // Final guard
-  if (!out || containsArabicScript(out)) {
-    out = "ghadi njawb 3la had l-moudou3 mnn ba3d bach nkoon mttaakd";
-  }
-
-  return shorten(out, 420);
+  return out;
 }
 
 app.listen(Number(PORT), () => {
