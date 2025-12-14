@@ -130,7 +130,12 @@ const AFTER_SALE_SERVICE = {
     "Tanger: 07 01 01 78 08",
     "Marrakech: 08 08 50 39 03",
   ],
-  tcl: ["TCL SAV: service.mo@tcl.com", "TCL SAV: +212 7 00 00 96 88", "Lun–Ven: 9h00–13h00, 14h00–17h00", "Sam: 8h30–12h00"],
+  tcl: [
+    "TCL SAV: service.mo@tcl.com",
+    "TCL SAV: +212 7 00 00 96 88",
+    "Lun–Ven: 9h00–13h00, 14h00–17h00",
+    "Sam: 8h30–12h00",
+  ],
   fitco: ["Fitco SAV: 05 22 35 14 45"],
   echolink: ["Echolink SAV: 06 61 51 03 09"],
   haier: ["Haier SAV: 07 02 04 09 93"],
@@ -246,13 +251,32 @@ function getLastBrandFromHistory(last6) {
 
 function isGreeting(text) {
   const s = safeLower(text).trim();
-  return s === "salam" || s === "slm" || s === "salam alikoum" || s === "salam 3likom" || s === "salut" || s === "bonjour" || s === "hello" || s === "hi";
+  return (
+    s === "salam" ||
+    s === "slm" ||
+    s === "salam alikoum" ||
+    s === "salam 3likom" ||
+    s === "salut" ||
+    s === "bonjour" ||
+    s === "hello" ||
+    s === "hi"
+  );
 }
 
 // SAV intent detection (only when asked)
 function isAfterSaleIntent(text) {
   const s = safeLower(text);
-  return s.includes("sav") || s.includes("service") || s.includes("garantie") || s.includes("reparation") || s.includes("réparation") || s.includes("panne") || s.includes("tsli7") || s.includes("slih") || s.includes("support");
+  return (
+    s.includes("sav") ||
+    s.includes("service") ||
+    s.includes("garantie") ||
+    s.includes("reparation") ||
+    s.includes("réparation") ||
+    s.includes("panne") ||
+    s.includes("tsli7") ||
+    s.includes("slih") ||
+    s.includes("support")
+  );
 }
 
 // purchase intent detection
@@ -278,7 +302,17 @@ function hasPurchaseIntent(text) {
 
 function looksLikeCannotOpenLink(text) {
   const s = safeLower(text);
-  return s.includes("ma9drtch") || s.includes("ma9dertch") || s.includes("ma khdamch") || s.includes("makhdamch") || s.includes("ma kayt7llch") || s.includes("makayt7llch") || s.includes("link") || s.includes("lien") || s.includes("3awd");
+  return (
+    s.includes("ma9drtch") ||
+    s.includes("ma9dertch") ||
+    s.includes("ma khdamch") ||
+    s.includes("makhdamch") ||
+    s.includes("ma kayt7llch") ||
+    s.includes("makayt7llch") ||
+    s.includes("link") ||
+    s.includes("lien") ||
+    s.includes("3awd")
+  );
 }
 
 function askedForLinkAgain(text) {
@@ -297,7 +331,19 @@ function detectUserLanguage(text) {
 
   const t = s.toLowerCase();
 
-  const frHits = ["bonjour", "svp", "s'il", "merci", "prix", "livraison", "garantie", "réparation", "reparation", "panne", "acheter"];
+  const frHits = [
+    "bonjour",
+    "svp",
+    "s'il",
+    "merci",
+    "prix",
+    "livraison",
+    "garantie",
+    "réparation",
+    "reparation",
+    "panne",
+    "acheter",
+  ];
   if (frHits.some((w) => t.includes(w))) return "fr";
 
   const enHits = ["hello", "price", "delivery", "warranty", "repair", "support", "cheapest", "largest", "buy"];
@@ -623,7 +669,14 @@ function extractTvInchesFromProduct(p) {
 
 function wantsOnlyPromos(text) {
   const s = safeLower(text);
-  return s.includes("only promo") || s.includes("only promos") || s.includes("promo") || s.includes("promotion") || s.includes("sold") || s.includes("solde");
+  return (
+    s.includes("only promo") ||
+    s.includes("only promos") ||
+    s.includes("promo") ||
+    s.includes("promotion") ||
+    s.includes("sold") ||
+    s.includes("solde")
+  );
 }
 
 function wantsCheapest(text) {
@@ -672,6 +725,7 @@ function applyModifiers(products, userText) {
     const withSize = out
       .map((p) => ({ p, size: extractTvInchesFromProduct(p) }))
       .filter((x) => typeof x.size === "number" && Number.isFinite(x.size));
+
     if (withSize.length) {
       withSize.sort((a, b) => b.size - a.size || parsePriceMAD(b.p) - parsePriceMAD(a.p));
       out = [withSize[0].p];
@@ -702,6 +756,26 @@ function productMatchesBrand(p, brandSlug) {
 }
 
 // =====================
+// TV intent + TV product filter
+// =====================
+function isTvIntent(text) {
+  const s = safeLower(text);
+  return s.includes("tv") || s.includes("tele") || s.includes("télé") || s.includes("smart tv") || s.includes("smart");
+}
+
+function productIsTv(p) {
+  const text = safeLower(`${p?.name ?? ""} ${p?.short_description ?? ""} ${p?.description ?? ""} ${p?.permalink ?? ""}`);
+  return (
+    text.includes(" tv") ||
+    text.includes("smart tv") ||
+    text.includes("télé") ||
+    text.includes("television") ||
+    text.includes("google tv") ||
+    (text.includes("android") && text.includes("tv"))
+  );
+}
+
+// =====================
 // Formatting (NO instock/promo labels)
 // =====================
 function formatProductLine(p) {
@@ -716,7 +790,12 @@ function formatProductLine(p) {
 
 function formatCatalogReply(products, L) {
   if (!products || products.length === 0) return L.notFound;
-  const top = products.slice(0, 3).map(formatProductLine).join("\n");
+
+  const top = products
+    .slice(0, 3)
+    .map((p) => formatProductLine(p))
+    .join("\n");
+
   return `${top}\n${L.rules}`;
 }
 
@@ -813,6 +892,11 @@ app.post("/wanotifier", async (req, res) => {
       // Free text search
       searchKey = userText;
       catalogMatches = await wcSearchCatalog(userText);
+    }
+
+    // TV intent enforcement (important for "visio" -> then "tv")
+    if (isTvIntent(userText)) {
+      catalogMatches = catalogMatches.filter(productIsTv);
     }
 
     // Apply modifiers
