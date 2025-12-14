@@ -1,12 +1,12 @@
+// server.js
 import "dotenv/config";
 import express from "express";
 import axios from "axios";
 import crypto from "crypto";
-import { XMLParser } from "fast-xml-parser";
 
 /**
- * DigiTronics WhatsApp Bot (WANotifier) — FEED edition
- * - Source of truth: Google Merchant XML feed (Woo Product Feed Pro)
+ * DigiTronics WhatsApp Bot (WANotifier)
+ * - Source of truth: WooCommerce REST API
  * - Language policy:
  *    - First reply per WhatsApp number: ALWAYS starts with a short French intro
  *    - Then continues in client's detected language (AR/FR/EN/Darija-latin)
@@ -14,8 +14,9 @@ import { XMLParser } from "fast-xml-parser";
  * - Audio/media: NOT supported
  * - SAV directory by brand (authoritative) — only when user asks SAV/support/garantie/etc.
  * - Product search:
- *    - If brand detected (message or history): STRICT filter by brand (prevents brand leakage)
- *    - Else: free text search (title/description/product_type)
+ *    - If brand detected (message or history): STRICT brand tag search (prevents brand leakage)
+ *      + optional intent filter (TV intent => only TV-like items)
+ *    - Else: text search -> SKU -> (brand tag fallback when detected)
  * - Context: remembers last brand (e.g., "visio" then "tv")
  * - Modifiers: cheapest, largest, android/google tv, only promos
  * - Output: NO "instock" and NO "promo" labels in message
@@ -31,36 +32,29 @@ app.use(express.json({ limit: "25mb" }));
 const {
   PORT = 3000,
 
-  // Your feed URL (set this in env; fallback to the one you provided)
-  FEED_URL = "https://digitronics.ma/wp-content/uploads/woo-product-feed-pro/xml/qabmtmj36y5zn83str17m1i4yp6nq4jo.xml",
+  WC_BASE_URL,
+  WC_CONSUMER_KEY,
+  WC_CONSUMER_SECRET,
 
-  AXIOS_TIMEOUT_MS = "20000",
-  HISTORY_TTL_MS = String(24 * 60 * 60 * 1000),
+  AXIOS_TIMEOUT_MS = "15000",
+  HISTORY_TTL_MS = String(24 * 60 * 60 * 1000), // 24h
   HISTORY_MAX_KEYS = "5000",
   RATE_LIMIT_WINDOW_MS = "60000",
   RATE_LIMIT_MAX = "25",
 
-  FEED_CACHE_TTL_MS = String(10 * 60 * 1000), // 10 min
+  CATALOG_CACHE_TTL_MS = String(10 * 60 * 1000), // 10 min
+  TAG_ID_CACHE_TTL_MS = String(24 * 60 * 60 * 1000), // 24h
 
-  FORM_LINK_TTL_MS = String(6 * 60 * 60 * 1000),
-  FIRST_INTRO_TTL_MS = String(90 * 24 * 60 * 60 * 1000),
+  FORM_LINK_TTL_MS = String(6 * 60 * 60 * 1000), // 6h
+  FIRST_INTRO_TTL_MS = String(90 * 24 * 60 * 60 * 1000), // 90 days
 } = process.env;
 
-const toInt = (v, d) => {
-  const n = Number(v);
-  return Number.isFinite(n) ? n : d;
-};
-
-const CFG = {
-  axiosTimeoutMs: toInt(AXIOS_TIMEOUT_MS, 20000),
-  historyTtlMs: toInt(HISTORY_TTL_MS, 24 * 60 * 60 * 1000),
-  historyMaxKeys: toInt(HISTORY_MAX_KEYS, 5000),
-  rateWindowMs: toInt(RATE_LIMIT_WINDOW_MS, 60000),
-  rateMax: toInt(RATE_LIMIT_MAX, 25),
-  feedCacheTtlMs: toInt(FEED_CACHE_TTL_MS, 10 * 60 * 1000),
-  formLinkTtlMs: toInt(FORM_LINK_TTL_MS, 6 * 60 * 60 * 1000),
-  firstIntroTtlMs: toInt(FIRST_INTRO_TTL_MS, 90 * 24 * 60 * 60 * 1000),
-};
+if (!WC_BASE_URL || !WC_CONSUMER_KEY || !WC_CONSUMER_SECRET) {
+  console.error(
+    "Missing WooCommerce env vars: WC_BASE_URL, WC_CONSUMER_KEY, WC_CONSUMER_SECRET"
+  );
+  process.exit(1);
+}
 
 // =====================
 // Constants
@@ -74,9 +68,10 @@ const DELIVERY_RULE_DZ = "livraison f ga3 lmdoun f lmaghrib, عادة 1 حتى 7
 const PAYMENT_RULE_DZ = "paiement ghir cash 3nd l-istilam";
 const WARRANTY_RULE_DZ = "garantie 3am wa7d";
 
-const FIRST_CONTACT_FR_INTRO = "Bonjour. Pour vous aider plus vite, merci d’écrire un message (pas d’audio).";
+const FIRST_CONTACT_FR_INTRO =
+  "Bonjour. Pour vous aider plus vite, merci d’écrire un message (pas d’audio).";
 
-// IMPORTANT: brand slugs/keywords you want to recognize from user messages
+// IMPORTANT: brand tag slugs (must match WooCommerce product tag slugs)
 const BRAND_KEYWORDS = [
   "daiko",
   "tcl",
@@ -152,19 +147,36 @@ const AFTER_SALE_SERVICE = {
 };
 
 // =====================
-// Utilities
+// Helpers / Config
 // =====================
+const toInt = (v, d) => {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : d;
+};
+
+const CFG = {
+  axiosTimeoutMs: toInt(AXIOS_TIMEOUT_MS, 15000),
+  historyTtlMs: toInt(HISTORY_TTL_MS, 24 * 60 * 60 * 1000),
+  historyMaxKeys: toInt(HISTORY_MAX_KEYS, 5000),
+  rateWindowMs: toInt(RATE_LIMIT_WINDOW_MS, 60000),
+  rateMax: toInt(RATE_LIMIT_MAX, 25),
+  catalogCacheTtlMs: toInt(CATALOG_CACHE_TTL_MS, 10 * 60 * 1000),
+  tagIdCacheTtlMs: toInt(TAG_ID_CACHE_TTL_MS, 24 * 60 * 60 * 1000),
+  formLinkTtlMs: toInt(FORM_LINK_TTL_MS, 6 * 60 * 60 * 1000),
+  firstIntroTtlMs: toInt(FIRST_INTRO_TTL_MS, 90 * 24 * 60 * 60 * 1000),
+};
+
 function stableReqId() {
   return crypto.randomBytes(8).toString("hex");
-}
-
-function safeLower(s) {
-  return String(s || "").toLowerCase();
 }
 
 function shorten(text, max = 420) {
   const t = String(text || "").trim();
   return t.length > max ? t.slice(0, max).trim() : t;
+}
+
+function safeLower(s) {
+  return String(s || "").toLowerCase();
 }
 
 function normalizeNumber(x) {
@@ -218,7 +230,8 @@ function looksLikeAudioMessage(body) {
   const hasMedia = Boolean(payload.media);
   const txt = safeLower(payload.text).trim();
   if (hasMedia && !txt) return true;
-  if (txt.includes("voice") || txt.includes("vocal") || txt.includes("audio")) return true;
+  if (txt.includes("voice") || txt.includes("vocal") || txt.includes("audio"))
+    return true;
   return false;
 }
 
@@ -272,7 +285,7 @@ function isAfterSaleIntent(text) {
   );
 }
 
-// Purchase intent detection
+// purchase intent detection
 function hasPurchaseIntent(text) {
   const s = safeLower(text);
   return (
@@ -310,7 +323,12 @@ function looksLikeCannotOpenLink(text) {
 
 function askedForLinkAgain(text) {
   const s = safeLower(text);
-  return s.includes("3awd") || s.includes("link") || s.includes("lien") || s.includes("sift");
+  return (
+    s.includes("3awd") ||
+    s.includes("link") ||
+    s.includes("lien") ||
+    s.includes("sift")
+  );
 }
 
 // =====================
@@ -324,10 +342,32 @@ function detectUserLanguage(text) {
 
   const t = s.toLowerCase();
 
-  const frHits = ["bonjour", "svp", "s'il", "merci", "prix", "livraison", "garantie", "réparation", "reparation", "panne", "acheter"];
+  const frHits = [
+    "bonjour",
+    "svp",
+    "s'il",
+    "merci",
+    "prix",
+    "livraison",
+    "garantie",
+    "réparation",
+    "reparation",
+    "panne",
+    "acheter",
+  ];
   if (frHits.some((w) => t.includes(w))) return "fr";
 
-  const enHits = ["hello", "price", "delivery", "warranty", "repair", "support", "cheapest", "largest", "buy"];
+  const enHits = [
+    "hello",
+    "price",
+    "delivery",
+    "warranty",
+    "repair",
+    "support",
+    "cheapest",
+    "largest",
+    "buy",
+  ];
   if (enHits.some((w) => t.includes(w))) return "en";
 
   return "dz"; // Darija latin default
@@ -335,39 +375,54 @@ function detectUserLanguage(text) {
 
 const T = {
   dz: {
-    greet: "salam! mrahba bik.\n3afak ktb msg b lktaba (bla vocal).\nktb smiya dyal produit / marque / taille.",
-    noAudio: "mrahba! 3afak ma tsiftch vocal/audio, ktb msg b lktaba bark bach n9dr n3awnk.",
-    savAskBrand: "3afak gol lina smiya dyal l-marque bach n3tik numéro dyal SAV.",
+    greet:
+      "salam! mrahba bik.\n3afak ktb msg b lktaba (bla vocal).\nktb smiya dyal produit / marque / taille.",
+    noAudio:
+      "mrahba! 3afak ma tsiftch vocal/audio, ktb msg b lktaba bark bach n9dr n3awnk.",
+    savAskBrand:
+      "3afak gol lina smiya dyal l-marque bach n3tik numéro dyal SAV.",
     orderForm: `mzyan! 3mr had formulaire bach nkmlo l-commande: ${FORM_LINK}`,
     notFound: `ma l9it 7tta produit b had smiya daba. t9der tzour site dyalna w tqelleb: ${COMPANY_SITE}`,
     rules: `${DELIVERY_RULE_DZ}. ${PAYMENT_RULE_DZ}. ${WARRANTY_RULE_DZ}.`,
     refinedNotFound: `ma l9it 7tta produit kaytla9a m3a talab dyalk daba. t9der tzour site dyalna: ${COMPANY_SITE}`,
   },
   ar: {
-    greet: "سلام! مرحبا بك.\nمن فضلك كتب رسالة (بلا فويس).\nكتب اسم المنتوج/الماركة/الحجم.",
-    noAudio: "مرحبا! من فضلك ما تبعثش فويس/أوديو، كتب غير رسالة باش نقدر نعاونك.",
-    savAskBrand: "من فضلك عطينا اسم الماركة باش نعطيك رقم خدمة ما بعد البيع.",
+    greet:
+      "سلام! مرحبا بك.\nمن فضلك كتب رسالة (بلا فويس).\nكتب اسم المنتوج/الماركة/الحجم.",
+    noAudio:
+      "مرحبا! من فضلك ما تبعثش فويس/أوديو، كتب غير رسالة باش نقدر نعاونك.",
+    savAskBrand:
+      "من فضلك عطينا اسم الماركة باش نعطيك رقم خدمة ما بعد البيع.",
     orderForm: `مزيان! عمر هاد الفورم باش نكملو الطلب: ${FORM_LINK}`,
     notFound: `ما لقيناش هاد المنتوج دابا. تقدر تزور الموقع ديالنا وتقلب: ${COMPANY_SITE}`,
-    rules: "التوصيل لجميع المدن فالمغرب (عادة 1 حتى 7 أيام). الأداء عند الاستلام كاش فقط. الضمان سنة.",
+    rules:
+      "التوصيل لجميع المدن فالمغرب (عادة 1 حتى 7 أيام). الأداء عند الاستلام كاش فقط. الضمان سنة.",
     refinedNotFound: `ما لقيناش منتوج كيتوافق مع الطلب دابا. تقدر تزور الموقع: ${COMPANY_SITE}`,
   },
   fr: {
-    greet: "Bonjour.\nMerci d’écrire (pas d’audio).\nDonnez le nom du produit / la marque / la taille.",
-    noAudio: "Bonjour. Merci de ne pas envoyer d’audio/vocal. Écrivez un message pour que je puisse vous aider.",
-    savAskBrand: "Pouvez-vous me donner la marque pour vous envoyer le contact SAV ?",
+    greet:
+      "Bonjour.\nMerci d’écrire (pas d’audio).\nDonnez le nom du produit / la marque / la taille.",
+    noAudio:
+      "Bonjour. Merci de ne pas envoyer d’audio/vocal. Écrivez un message pour que je puisse vous aider.",
+    savAskBrand:
+      "Pouvez-vous me donner la marque pour vous envoyer le contact SAV ?",
     orderForm: `Très bien. Remplissez ce formulaire pour finaliser la commande : ${FORM_LINK}`,
     notFound: `Je n’ai pas trouvé ce produit pour le moment. Vous pouvez chercher sur notre site : ${COMPANY_SITE}`,
-    rules: "Livraison partout au Maroc (en général 1 à 7 jours). Paiement à la livraison (cash). Garantie 1 an.",
+    rules:
+      "Livraison partout au Maroc (en général 1 à 7 jours). Paiement à la livraison (cash). Garantie 1 an.",
     refinedNotFound: `Je n’ai rien trouvé qui correspond à votre demande. Vous pouvez chercher ici : ${COMPANY_SITE}`,
   },
   en: {
-    greet: "Hello.\nPlease write (no audio).\nTell me the product name / brand / size.",
-    noAudio: "Hello. Please do not send voice notes/audio. Send a text message so I can help.",
-    savAskBrand: "Please tell me the brand so I can share the after-sales contact.",
+    greet:
+      "Hello.\nPlease write (no audio).\nTell me the product name / brand / size.",
+    noAudio:
+      "Hello. Please do not send voice notes/audio. Send a text message so I can help.",
+    savAskBrand:
+      "Please tell me the brand so I can share the after-sales contact.",
     orderForm: `Great. Please fill this form to complete the order: ${FORM_LINK}`,
     notFound: `I couldn’t find that product right now. You can browse our site: ${COMPANY_SITE}`,
-    rules: "Delivery across Morocco (usually 1–7 days). Cash on delivery only. 1-year warranty.",
+    rules:
+      "Delivery across Morocco (usually 1–7 days). Cash on delivery only. 1-year warranty.",
     refinedNotFound: `I couldn’t find a product matching your request. Please browse: ${COMPANY_SITE}`,
   },
 };
@@ -375,19 +430,21 @@ const T = {
 // =====================
 // Stores (memory)
 // =====================
-const historyStore = new Map();      // wa -> { msgs: string[], lastSeen: number }
+const historyStore = new Map(); // wa -> { msgs: string[], lastSeen: number }
 const formLinkSentStore = new Map(); // wa -> { lastSent: number }
-const rateStore = new Map();         // wa -> { windowStart: number, count: number }
-const firstIntroStore = new Map();   // wa -> { lastSent:number }
+const rateStore = new Map(); // wa -> { windowStart: number, count: number }
+const firstIntroStore = new Map(); // wa -> { lastSent:number }
 
-// feed cache
-const feedCache = new Map(); // key -> { value, expiresAt }
+// caches
+const catalogCache = new Map(); // key -> { value, expiresAt }
+const tagIdCache = new Map(); // tagSlug -> { value: number|null, expiresAt }
 
 function ensureCapacity(map, maxKeys) {
   if (map.size <= maxKeys) return;
   const entries = [];
   for (const [k, v] of map.entries()) {
-    const ts = v?.lastSeen ?? v?.lastSent ?? v?.windowStart ?? v?.expiresAt ?? 0;
+    const ts =
+      v?.lastSeen ?? v?.lastSent ?? v?.windowStart ?? v?.expiresAt ?? 0;
     entries.push([k, ts]);
   }
   entries.sort((a, b) => a[1] - b[1]);
@@ -480,164 +537,207 @@ function withFrenchIntroIfNeeded(waNumber, coreReply, lang) {
 // periodic cleanup
 setInterval(() => {
   const now = Date.now();
+
   for (const [k, v] of historyStore.entries()) {
-    if (!v?.lastSeen || now - v.lastSeen > CFG.historyTtlMs) historyStore.delete(k);
+    if (!v?.lastSeen || now - v.lastSeen > CFG.historyTtlMs)
+      historyStore.delete(k);
   }
   for (const [k, v] of rateStore.entries()) {
-    if (!v?.windowStart || now - v.windowStart > CFG.rateWindowMs * 2) rateStore.delete(k);
+    if (!v?.windowStart || now - v.windowStart > CFG.rateWindowMs * 2)
+      rateStore.delete(k);
   }
   for (const [k, v] of formLinkSentStore.entries()) {
-    if (!v?.lastSent || now - v.lastSent > CFG.formLinkTtlMs) formLinkSentStore.delete(k);
+    if (!v?.lastSent || now - v.lastSent > CFG.formLinkTtlMs)
+      formLinkSentStore.delete(k);
+  }
+  for (const [k, v] of catalogCache.entries()) {
+    if (!v?.expiresAt || now > v.expiresAt) catalogCache.delete(k);
+  }
+  for (const [k, v] of tagIdCache.entries()) {
+    if (!v?.expiresAt || now > v.expiresAt) tagIdCache.delete(k);
   }
   for (const [k, v] of firstIntroStore.entries()) {
-    if (!v?.lastSent || now - v.lastSent > CFG.firstIntroTtlMs) firstIntroStore.delete(k);
-  }
-  for (const [k, v] of feedCache.entries()) {
-    if (!v?.expiresAt || now > v.expiresAt) feedCache.delete(k);
+    if (!v?.lastSent || now - v.lastSent > CFG.firstIntroTtlMs)
+      firstIntroStore.delete(k);
   }
 }, 1000 * 60 * 10);
 
 // =====================
-// FEED adapter (Google Merchant XML)
+// WooCommerce adapter
 // =====================
-const xmlParser = new XMLParser({
-  ignoreAttributes: false,
-  attributeNamePrefix: "@_",
-  // Keep namespaces as part of keys (g:id, g:price, etc.)
-  removeNSPrefix: false,
-  parseTagValue: true,
-  trimValues: true,
-});
+const WC = {
+  base: String(WC_BASE_URL || "").replace(/\/$/, ""),
+  ck: WC_CONSUMER_KEY,
+  cs: WC_CONSUMER_SECRET,
+};
 
-function pick(obj, keys) {
-  for (const k of keys) {
-    const v = obj?.[k];
-    if (v !== undefined && v !== null && String(v).trim() !== "") return v;
-  }
-  return null;
+async function wcRequest(path, params = {}) {
+  const r = await axios.get(`${WC.base}${path}`, {
+    params,
+    auth: { username: WC.ck, password: WC.cs },
+    timeout: CFG.axiosTimeoutMs,
+    validateStatus: (s) => s >= 200 && s < 300,
+  });
+  return r.data;
 }
 
-function parsePriceToMADNumber(priceStr) {
-  // Feed often looks like: "15199 MAD" or "15199.00 MAD"
-  const s = String(priceStr || "").replace(",", ".").replace(/[^\d.]/g, "");
-  const n = Number(s);
-  return Number.isFinite(n) ? n : Infinity;
-}
-
-function normalizeFeedItem(item) {
-  // RSS2 items typically contain:
-  // title, link, description, g:id, g:price, g:sale_price, g:brand, g:product_type, etc.
-  const title = pick(item, ["title", "g:title"]) || "produit";
-  const link = pick(item, ["link", "g:link"]);
-  const id = pick(item, ["g:id", "id", "guid"]);
-  const description = pick(item, ["description", "g:description"]) || "";
-  const brand = pick(item, ["g:brand", "brand"]);
-  const productType = pick(item, ["g:product_type", "product_type", "g:google_product_category", "g:product_category"]);
-  const priceRaw = pick(item, ["g:price", "price"]);
-  const salePriceRaw = pick(item, ["g:sale_price", "sale_price"]);
-
-  const price = priceRaw ? parsePriceToMADNumber(priceRaw) : Infinity;
-  const sale_price = salePriceRaw ? parsePriceToMADNumber(salePriceRaw) : null;
-
+function normalizeWcProduct(p) {
   return {
-    id: id ? String(id) : null,
-    name: String(title).trim(),
-    permalink: link ? String(link).trim() : null,
-    description: String(description || ""),
-    brand: brand ? safeLower(String(brand)) : null,
-    product_type: productType ? safeLower(String(productType)) : null,
-    price_num: price,
-    price_raw: priceRaw ? String(priceRaw) : null,
-    sale_price_num: sale_price,
-    sale_price_raw: salePriceRaw ? String(salePriceRaw) : null,
+    id: p.id,
+    type: p.type,
+    name: p.name,
+    sku: p.sku || null,
+    price: p.price || null,
+    regular_price: p.regular_price || null,
+    sale_price: p.sale_price || null,
+    stock_status: p.stock_status || null,
+    in_stock: typeof p.in_stock === "boolean" ? p.in_stock : null,
+    permalink: p.permalink || null,
+    short_description: p.short_description || "",
+    description: p.description || "",
+    tags: Array.isArray(p.tags)
+      ? p.tags.map((t) => ({ id: t.id, slug: t.slug, name: t.name }))
+      : [],
   };
 }
 
-async function fetchFeedProducts() {
-  const cacheKey = "feed:items";
-  const cached = cacheGet(feedCache, cacheKey);
+async function wcGetVariations(productId, max = 6) {
+  const vars = await wcRequest(`/wp-json/wc/v3/products/${productId}/variations`, {
+    per_page: max,
+  });
+  if (!Array.isArray(vars)) return [];
+  return vars.map((v) => ({
+    id: v.id,
+    sku: v.sku || null,
+    price: v.price || null,
+    regular_price: v.regular_price || null,
+    sale_price: v.sale_price || null,
+    stock_status: v.stock_status || null,
+    in_stock: typeof v.in_stock === "boolean" ? v.in_stock : null,
+    attributes: (v.attributes || []).map((a) => ({ name: a.name, option: a.option })),
+  }));
+}
+
+async function wcGetTagIdBySlug(slug) {
+  const s = safeLower(slug).trim();
+  if (!s) return null;
+
+  const cached = cacheGet(tagIdCache, s);
+  if (cached !== null) return cached;
+
+  const tags = await wcRequest("/wp-json/wc/v3/products/tags", { slug: s, per_page: 1 });
+  const id = Array.isArray(tags) && tags[0]?.id ? Number(tags[0].id) : null;
+
+  cacheSet(tagIdCache, s, id, CFG.tagIdCacheTtlMs);
+  return id;
+}
+
+async function wcSearchByBrandTagSlug(brandSlug) {
+  const tagId = await wcGetTagIdBySlug(brandSlug);
+  if (!tagId) return [];
+  const products = await wcRequest("/wp-json/wc/v3/products", {
+    tag: tagId,
+    per_page: 24,
+    status: "publish",
+  });
+  const out = [];
+  if (!Array.isArray(products)) return out;
+  for (const p of products) {
+    const item = normalizeWcProduct(p);
+    item.variations = p.type === "variable" ? await wcGetVariations(p.id, 6) : [];
+    out.push(item);
+  }
+  return out;
+}
+
+// Multi-pass: text -> SKU -> brand tag fallback
+async function wcSearchCatalog(userText) {
+  const raw = String(userText || "").trim();
+  if (!raw) return [];
+
+  const q = safeLower(raw).trim();
+  const cacheKey = `wc:multi:${q}`;
+  const cached = cacheGet(catalogCache, cacheKey);
   if (cached) return cached;
 
-  // Many hosts return 403 unless you use a browser UA.
-  const resp = await axios.get(FEED_URL, {
-    timeout: CFG.axiosTimeoutMs,
-    headers: {
-      "User-Agent":
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-      Accept: "application/xml,text/xml,*/*",
-    },
-    responseType: "text",
-    validateStatus: (s) => s >= 200 && s < 300,
+  let products = [];
+
+  // 1) Text search
+  const textResults = await wcRequest("/wp-json/wc/v3/products", {
+    search: raw,
+    per_page: 24,
+    status: "publish",
   });
+  if (Array.isArray(textResults) && textResults.length) products = textResults;
 
-  const xml = String(resp.data || "");
-  const parsed = xmlParser.parse(xml);
+  // 2) SKU exact
+  if (products.length === 0) {
+    const skuMatch = q.match(/\b[a-z0-9\-]{3,24}\b/i);
+    if (skuMatch) {
+      const skuResults = await wcRequest("/wp-json/wc/v3/products", {
+        sku: skuMatch[0],
+        per_page: 24,
+        status: "publish",
+      });
+      if (Array.isArray(skuResults) && skuResults.length) products = skuResults;
+    }
+  }
 
-  // Common shapes:
-  // rss.channel.item[]
-  // or feed.entry[]
-  const items =
-    parsed?.rss?.channel?.item ??
-    parsed?.rss?.channel?.items ??
-    parsed?.feed?.entry ??
-    [];
+  // 3) Brand/tag fallback (only if still empty and brand detected)
+  if (products.length === 0) {
+    const brand = detectBrand(raw);
+    if (brand) {
+      const byTag = await wcSearchByBrandTagSlug(brand);
+      cacheSet(catalogCache, cacheKey, byTag, CFG.catalogCacheTtlMs);
+      return byTag;
+    }
+  }
 
-  const arr = Array.isArray(items) ? items : items ? [items] : [];
-  const normalized = arr.map(normalizeFeedItem).filter((p) => p?.name);
+  const normalized = [];
+  for (const p of Array.isArray(products) ? products : []) {
+    const item = normalizeWcProduct(p);
+    item.variations = p.type === "variable" ? await wcGetVariations(p.id, 6) : [];
+    normalized.push(item);
+  }
 
-  cacheSet(feedCache, cacheKey, normalized, CFG.feedCacheTtlMs);
+  cacheSet(catalogCache, cacheKey, normalized, CFG.catalogCacheTtlMs);
   return normalized;
 }
 
 // =====================
-// Search + Filters
+// Intent + Modifiers
 // =====================
-function tokenizeQuery(q) {
-  return safeLower(q)
-    .replace(/[^\p{L}\p{N}\s]/gu, " ")
-    .split(/\s+/)
-    .map((t) => t.trim())
-    .filter(Boolean)
-    .slice(0, 8);
-}
-
-function productText(p) {
-  return safeLower(`${p?.name ?? ""} ${p?.description ?? ""} ${p?.product_type ?? ""} ${p?.permalink ?? ""}`);
-}
-
-// Strict brand match from feed brand field (fallback: also allow brand keyword in product text)
-function productMatchesBrand(p, brandSlug) {
-  if (!brandSlug) return true;
-  const target = safeLower(String(brandSlug));
-
-  if (p?.brand && safeLower(p.brand) === target) return true;
-
-  // fallback: if feed brand missing, use text match
-  return productText(p).includes(target);
-}
-
-function isPromo(p) {
-  // "promo" means it has a real sale price lower than price
-  const sp = p?.sale_price_num;
-  const pr = p?.price_num;
-  if (!Number.isFinite(pr) || pr === Infinity) return false;
-  if (!Number.isFinite(sp)) return false;
-  return sp > 0 && sp < pr;
-}
-
 function wantsOnlyPromos(text) {
   const s = safeLower(text);
-  return s.includes("only promo") || s.includes("only promos") || s.includes("promo") || s.includes("promotion") || s.includes("sold") || s.includes("solde");
+  return (
+    s.includes("only promo") ||
+    s.includes("only promos") ||
+    s.includes("promo") ||
+    s.includes("promotion") ||
+    s.includes("sold") ||
+    s.includes("solde")
+  );
 }
 
 function wantsCheapest(text) {
   const s = safeLower(text);
-  return s.includes("cheapest") || s.includes("rkhis") || s.includes("arakhass") || s.includes("moins cher") || s.includes("aqall taman");
+  return (
+    s.includes("cheapest") ||
+    s.includes("rkhis") ||
+    s.includes("arakhass") ||
+    s.includes("moins cher") ||
+    s.includes("aqall taman")
+  );
 }
 
 function wantsLargest(text) {
   const s = safeLower(text);
-  return s.includes("largest") || s.includes("kbir") || s.includes("akbar") || s.includes("plus grand");
+  return (
+    s.includes("largest") ||
+    s.includes("kbir") ||
+    s.includes("akbar") ||
+    s.includes("plus grand")
+  );
 }
 
 function wantsGoogleTv(text) {
@@ -652,11 +752,24 @@ function wantsAndroidTv(text) {
 
 function isTvIntent(text) {
   const s = safeLower(text);
-  return s.includes("tv") || s.includes("tele") || s.includes("télé") || s.includes("smart tv") || s.includes("smart");
+  return (
+    s.includes("tv") ||
+    s.includes("tele") ||
+    s.includes("télé") ||
+    s.includes("smart tv") ||
+    s.includes("smart") ||
+    s.includes("google tv") ||
+    (s.includes("android") && s.includes("tv"))
+  );
+}
+
+function productTextForFilter(p) {
+  const t = `${p?.name ?? ""} ${p?.short_description ?? ""} ${p?.description ?? ""} ${p?.permalink ?? ""}`;
+  return safeLower(t);
 }
 
 function productIsTv(p) {
-  const t = productText(p);
+  const t = productTextForFilter(p);
   return (
     t.includes(" tv") ||
     t.includes("smart tv") ||
@@ -667,18 +780,34 @@ function productIsTv(p) {
   );
 }
 
-function extractTvInchesFromText(text) {
-  const s = safeLower(text);
-  const m1 = s.match(/\b(\d{2,3})\s*(?:\"|inch|inches|pouce|pouces)\b/);
-  if (m1) return Number(m1[1]);
-  const m2 = s.match(/\b(24|32|40|43|50|55|65|75|85)\b/);
-  if (m2) return Number(m2[1]);
-  return null;
+// Price parsing
+function parsePriceMAD(p) {
+  const s = String(p?.price ?? "").replace(/[^\d.]/g, "");
+  const n = Number(s);
+  return Number.isFinite(n) ? n : Infinity;
 }
 
+function isPromo(p) {
+  const sp = String(p?.sale_price ?? "").trim();
+  const rp = String(p?.regular_price ?? "").trim();
+  if (!sp) return false;
+  if (!rp) return true;
+  return sp !== rp;
+}
+
+// TV size extraction (inches) for "largest"
 function extractTvInchesFromProduct(p) {
-  const s = `${p?.name ?? ""} ${p?.description ?? ""}`;
-  return extractTvInchesFromText(s);
+  const text = `${p?.name ?? ""} ${p?.short_description ?? ""}`;
+  const s = safeLower(text);
+
+  const m1 = s.match(/\b(\d{2,3})\s*(?:\"|inch|inches|pouce|pouces)\b/);
+  if (m1) return Number(m1[1]);
+
+  if (s.includes("tv") || s.includes("smart")) {
+    const m2 = s.match(/\b(24|32|40|43|50|55|65|75|85|98)\b/);
+    if (m2) return Number(m2[1]);
+  }
+  return null;
 }
 
 function applyModifiers(products, userText) {
@@ -696,9 +825,10 @@ function applyModifiers(products, userText) {
 
   if (modifiers.googleTv || modifiers.androidTv) {
     out = out.filter((p) => {
-      const t = productText(p);
+      const t = productTextForFilter(p);
       const okGoogle = !modifiers.googleTv || t.includes("google tv");
-      const okAndroid = !modifiers.androidTv || (t.includes("android") && t.includes("tv"));
+      const okAndroid =
+        !modifiers.androidTv || (t.includes("android") && t.includes("tv"));
       return okGoogle && okAndroid;
     });
   }
@@ -709,69 +839,72 @@ function applyModifiers(products, userText) {
       .filter((x) => typeof x.size === "number" && Number.isFinite(x.size));
 
     if (withSize.length) {
-      withSize.sort((a, b) => b.size - a.size || (a.p.price_num ?? Infinity) - (b.p.price_num ?? Infinity));
+      withSize.sort(
+        (a, b) => b.size - a.size || parsePriceMAD(b.p) - parsePriceMAD(a.p)
+      );
       out = [withSize[0].p];
     } else {
-      out.sort((a, b) => (b.price_num ?? Infinity) - (a.price_num ?? Infinity));
+      out.sort((a, b) => parsePriceMAD(b) - parsePriceMAD(a));
       out = out.slice(0, 1);
     }
   }
 
   if (modifiers.cheapest) {
-    out.sort((a, b) => (a.price_num ?? Infinity) - (b.price_num ?? Infinity));
+    out.sort((a, b) => parsePriceMAD(a) - parsePriceMAD(b));
     out = out.slice(0, 1);
   }
 
   return { products: out, modifiers };
 }
 
-function searchFeed(products, userText) {
-  const q = String(userText || "").trim();
-  if (!q) return [];
+// Brand enforcement (tag-first, then fallback text)
+function productMatchesBrand(p, brandSlug) {
+  if (!brandSlug) return true;
+  const target = String(brandSlug).toLowerCase();
 
-  // If user enters a model-like token (SKU/model), treat it as exact-ish match token
-  const tokens = tokenizeQuery(q);
-  if (!tokens.length) return [];
+  const tagSlugs = (p?.tags || [])
+    .map((t) => String(t?.slug || "").toLowerCase())
+    .filter(Boolean);
 
-  // Simple scoring: count token hits in product text
-  const scored = products.map((p) => {
-    const t = productText(p);
-    let score = 0;
-    for (const tok of tokens) {
-      if (t.includes(tok)) score += 1;
-    }
-    // slight bonus if token appears in name
-    const nameT = safeLower(p?.name ?? "");
-    for (const tok of tokens) {
-      if (nameT.includes(tok)) score += 0.5;
-    }
-    return { p, score };
-  });
+  if (tagSlugs.includes(target)) return true;
 
-  scored.sort((a, b) => b.score - a.score || (a.p.price_num ?? Infinity) - (b.p.price_num ?? Infinity));
-  return scored.filter((x) => x.score > 0).map((x) => x.p).slice(0, 12);
+  const text = productTextForFilter(p);
+  return text.includes(target);
+}
+
+// Context-aware search key (model/size/brand)
+function extractSearchKeyWithContext(text, last6) {
+  const s = safeLower(text);
+
+  // Model-like token
+  const modelMatch = s.match(/\b\d{2,3}[a-z0-9]{2,12}\b/i);
+  if (modelMatch) return modelMatch[0];
+
+  const brand = detectBrand(s) || getLastBrandFromHistory(last6);
+  const sizeMatch = s.match(/\b(24|32|40|43|50|55|65|75|85|98)\b/);
+
+  if (brand && isTvIntent(s) && sizeMatch) return `${brand} ${sizeMatch[1]} tv`;
+  if (brand && isTvIntent(s)) return `${brand} tv`;
+  if (brand && sizeMatch) return `${brand} ${sizeMatch[1]}`;
+  if (brand) return brand;
+
+  return text;
 }
 
 // =====================
 // Formatting (NO instock/promo labels)
 // =====================
-function formatPriceLine(p) {
-  // If a sale price exists, we still only show ONE price line to keep it clean.
-  // You can choose either: show sale price (preferred) or show regular price.
-  const sp = p?.sale_price_num;
-  const pr = p?.price_num;
-
-  if (Number.isFinite(sp) && sp > 0) return `${sp} MAD`;
-  if (Number.isFinite(pr) && pr !== Infinity) return `${pr} MAD`;
-  return "";
-}
-
 function formatProductLine(p) {
   const name = String(p?.name || "").trim() || "produit";
-  const price = formatPriceLine(p);
-  const parts = [name, price ? `— ${price}` : ""].filter(Boolean);
+  const priceNum = parsePriceMAD(p);
+  const price =
+    Number.isFinite(priceNum) && priceNum !== Infinity
+      ? `${priceNum} MAD`
+      : "";
 
+  const parts = [name, price ? `— ${price}` : ""].filter(Boolean);
   const link = p?.permalink ? `\n${p.permalink}` : "";
+
   return `${parts.join(" ")}${link}`;
 }
 
@@ -783,6 +916,7 @@ function formatCatalogReply(products, L) {
     .map((p) => formatProductLine(p))
     .join("\n");
 
+  // rules at the end
   return `${top}\n${L.rules}`;
 }
 
@@ -790,9 +924,12 @@ function formatCatalogReply(products, L) {
 // Routes
 // =====================
 app.get("/", (req, res) => {
-  res.status(200).send("OK - DigiTronics WhatsApp Bot is running (FEED)");
+  res.status(200).send("OK - DigiTronics WhatsApp Bot is running");
 });
 
+// =====================
+// WANotifier endpoint
+// =====================
 app.post("/wanotifier", async (req, res) => {
   const reqId = stableReqId();
   const t0 = Date.now();
@@ -802,7 +939,9 @@ app.post("/wanotifier", async (req, res) => {
     const payload = normalizeWanotifierPayload(body);
 
     const waNumber = normalizeNumber(payload.waNumber);
-    const lang = detectUserLanguage(payload.text || "");
+    const userText = String(payload.text || "").trim().slice(0, 2000);
+
+    const lang = detectUserLanguage(userText || "");
     const L = T[lang] || T.dz;
 
     if (!rateLimitOk(waNumber)) {
@@ -810,13 +949,7 @@ app.post("/wanotifier", async (req, res) => {
     }
 
     // Audio/media not supported
-    if (looksLikeAudioMessage(body)) {
-      const reply = withFrenchIntroIfNeeded(waNumber, L.noAudio, lang);
-      return res.status(200).json({ ok: true, reply: shorten(reply, 420) });
-    }
-
-    const userText = String(payload.text || "").trim().slice(0, 2000);
-    if (!userText) {
+    if (looksLikeAudioMessage(body) || !userText) {
       const reply = withFrenchIntroIfNeeded(waNumber, L.noAudio, lang);
       return res.status(200).json({ ok: true, reply: shorten(reply, 420) });
     }
@@ -864,43 +997,51 @@ app.post("/wanotifier", async (req, res) => {
     }
 
     // =====================
-    // Catalog search (FEED)
+    // Catalog search (STRICT brand-first + intent filtering)
     // =====================
     const enforcedBrand = detectBrand(userText) || getLastBrandFromHistory(last6);
-    const feedProducts = await fetchFeedProducts();
 
-    let candidates = feedProducts;
-    let searchKey = userText;
+    let catalogMatches = [];
+    const searchKey = extractSearchKeyWithContext(userText, last6);
 
-    // STRICT brand-first (prevents leakage)
     if (enforcedBrand) {
-      candidates = candidates.filter((p) => productMatchesBrand(p, enforcedBrand));
-      searchKey = enforcedBrand;
+      // Brand-only search (prevents leakage)
+      catalogMatches = await wcSearchByBrandTagSlug(enforcedBrand);
     } else {
-      // Free text search
-      candidates = searchFeed(candidates, userText);
+      // Free search (multi-pass)
+      catalogMatches = await wcSearchCatalog(searchKey);
     }
 
-    // TV intent enforcement (fixes your screenshot issue: "tv" returning chauffages)
+    // TV intent enforcement (prevents heaters when user says "tv")
     if (isTvIntent(userText)) {
-      candidates = candidates.filter(productIsTv);
+      catalogMatches = catalogMatches.filter(productIsTv);
     }
 
     // Apply modifiers
-    const { products: filtered, modifiers } = applyModifiers(candidates, userText);
-    candidates = filtered;
+    const { products: filtered, modifiers } = applyModifiers(
+      catalogMatches,
+      userText
+    );
+    catalogMatches = filtered;
 
     // Defensive brand enforcement (extra safety)
     if (enforcedBrand) {
-      candidates = candidates.filter((p) => productMatchesBrand(p, enforcedBrand));
+      catalogMatches = catalogMatches.filter((p) =>
+        productMatchesBrand(p, enforcedBrand)
+      );
     }
 
     // Format reply
-    let core = formatCatalogReply(candidates, L);
+    let core = formatCatalogReply(catalogMatches, L);
 
+    // Modifier-specific clearer fallback
     if (
-      candidates.length === 0 &&
-      (modifiers.onlyPromos || modifiers.googleTv || modifiers.androidTv || modifiers.cheapest || modifiers.largest)
+      catalogMatches.length === 0 &&
+      (modifiers.onlyPromos ||
+        modifiers.googleTv ||
+        modifiers.androidTv ||
+        modifiers.cheapest ||
+        modifiers.largest)
     ) {
       core = L.refinedNotFound;
     }
@@ -916,7 +1057,7 @@ app.post("/wanotifier", async (req, res) => {
         waNumber,
         lang,
         searchKey,
-        matches: candidates?.length ?? 0,
+        matches: catalogMatches?.length ?? 0,
         modifiers,
         enforcedBrand,
         latencyMs: ms,
@@ -942,5 +1083,4 @@ app.post("/wanotifier", async (req, res) => {
 
 app.listen(Number(PORT), () => {
   console.log("Server running on port", PORT);
-  console.log("Using FEED_URL:", FEED_URL);
 });
