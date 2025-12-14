@@ -6,8 +6,11 @@ import crypto from "crypto";
 /**
  * DigiTronics WhatsApp Bot (WANotifier)
  * - Catalog source of truth: WooCommerce REST API
- * - Replies: Moroccan Darija in LATIN only (no Arabic script)
- * - Audio/media: NOT supported (one-time notice)
+ * - Language policy:
+ *    - First ever reply to a WhatsApp number: ALWAYS starts with a short French intro
+ *    - Then continues in the client's detected language (AR/FR/EN/Darija-latin)
+ *    - Next replies: only in the client's language
+ * - Audio/media: NOT supported (client-language message; also covered by French intro on first contact)
  * - SAV directory by brand (authoritative)
  * - Product search: multi-pass (text -> SKU -> brand tag)
  * - Conversation context: remembers last brand (e.g., "visio" then "tv")
@@ -16,6 +19,7 @@ import crypto from "crypto";
  *    - largest
  *    - android / google tv
  *    - only promos
+ * - Brand enforcement: if a brand is detected (message or history), final results are restricted to that brand
  */
 
 const app = express();
@@ -40,8 +44,10 @@ const {
   CATALOG_CACHE_TTL_MS = String(10 * 60 * 1000), // 10 min
   TAG_ID_CACHE_TTL_MS = String(24 * 60 * 60 * 1000), // 24h
 
-  NOTICE_TTL_MS = String(30 * 24 * 60 * 60 * 1000), // 30 days
+  NOTICE_TTL_MS = String(30 * 24 * 60 * 60 * 1000), // 30 days (no-audio notice legacy)
   FORM_LINK_TTL_MS = String(6 * 60 * 60 * 1000), // 6h
+
+  FIRST_INTRO_TTL_MS = String(90 * 24 * 60 * 60 * 1000), // 90 days
 } = process.env;
 
 if (!WC_BASE_URL || !WC_CONSUMER_KEY || !WC_CONSUMER_SECRET) {
@@ -60,8 +66,9 @@ const DELIVERY_RULE = "livraison f ga3 lmdoun f lmaghrib, عادة 1 حتى 7 iy
 const PAYMENT_RULE = "paiement ghir cash 3nd l-istilam";
 const WARRANTY_RULE = "garantie 3am wa7d";
 
-const NO_AUDIO_NOTICE =
-  "mrahba! 3afak ma tsiftch vocal/audio, ktb msg b lktaba bark bach n9dr n3awnk.";
+// French intro (always first contact)
+const FIRST_CONTACT_FR_INTRO =
+  "Bonjour. Pour vous aider plus vite, merci d’écrire un message (pas d’audio).";
 
 // IMPORTANT: brand tag slugs (must match WooCommerce product tag slugs)
 const BRAND_KEYWORDS = [
@@ -157,6 +164,7 @@ const CFG = {
   tagIdCacheTtlMs: toInt(TAG_ID_CACHE_TTL_MS, 24 * 60 * 60 * 1000),
   noticeTtlMs: toInt(NOTICE_TTL_MS, 30 * 24 * 60 * 60 * 1000),
   formLinkTtlMs: toInt(FORM_LINK_TTL_MS, 6 * 60 * 60 * 1000),
+  firstIntroTtlMs: toInt(FIRST_INTRO_TTL_MS, 90 * 24 * 60 * 60 * 1000),
 };
 
 function stableReqId() {
@@ -176,11 +184,6 @@ function normalizeNumber(x) {
 
 function safeLower(s) {
   return String(s || "").toLowerCase();
-}
-
-// Keep replies Latin-only by construction. If user sends Arabic, we still respond Latin.
-function stripArabicScript(text) {
-  return String(text || "").replace(/[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF]+/g, "");
 }
 
 // WANotifier payload normalizer
@@ -319,20 +322,131 @@ function askedForLinkAgain(text) {
   return s.includes("3awd") || s.includes("link") || s.includes("lien") || s.includes("sift");
 }
 
+// =====================
+// Language detection + templates
+// =====================
+function detectUserLanguage(text) {
+  const s = String(text || "").trim();
+
+  // Arabic script
+  if (/[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF]/.test(s)) return "ar";
+
+  const t = s.toLowerCase();
+
+  const frHits = ["bonjour", "svp", "s'il", "merci", "prix", "livraison", "garantie", "réparation", "reparation", "panne"];
+  if (frHits.some((w) => t.includes(w))) return "fr";
+
+  const enHits = ["hello", "price", "delivery", "warranty", "repair", "support", "promo", "cheapest", "largest"];
+  if (enHits.some((w) => t.includes(w))) return "en";
+
+  return "dz"; // Darija latin default
+}
+
+const T = {
+  dz: {
+    greet: "salam! mrahba bik.\n3afak ktb msg b lktaba (bla vocal).\ngoul lina chno bghiti: produit/thaman ola SAV.",
+    noAudio: "mrahba! 3afak ma tsiftch vocal/audio, ktb msg b lktaba bark bach n9dr n3awnk.",
+    savAskBrand: "3afak gol lina smiya dyal l-marque bach n3tik numéro dyal SAV.",
+    orderForm: `mzyan! 3mr had formulaire bach nkmlo l-commande: ${FORM_LINK}`,
+    notFound: `ma l9it 7tta produit b had smiya daba. t9der tzour site dyalna w tqelleb: ${COMPANY_SITE}`,
+    rules: `${DELIVERY_RULE}. ${PAYMENT_RULE}. ${WARRANTY_RULE}.`,
+    refinedNotFound: `ma l9it 7tta produit kaytla9a m3a talab dyalk daba. t9der tzour site dyalna: ${COMPANY_SITE}`,
+    instock: "instock",
+    promo: "promo",
+  },
+  ar: {
+    greet: "سلام! مرحبا بك.\nمن فضلك كتب رسالة (بلا فويس).\nقل لينا شنو بغيتي: منتوج/ثمن ولا SAV.",
+    noAudio: "مرحبا! من فضلك ما تبعثش فويس/أوديو، كتب غير رسالة باش نقدر نعاونك.",
+    savAskBrand: "من فضلك عطينا اسم الماركة باش نعطيك رقم خدمة ما بعد البيع.",
+    orderForm: `مزيان! عمر هاد الفورم باش نكملو الطلب: ${FORM_LINK}`,
+    notFound: `ما لقيناش هاد المنتوج دابا. تقدر تزور الموقع ديالنا وتقلب: ${COMPANY_SITE}`,
+    rules: "التوصيل لجميع المدن فالمغرب (عادة 1 حتى 7 أيام). الأداء عند الاستلام كاش فقط. الضمان سنة.",
+    refinedNotFound: `ما لقيناش منتوج كيتوافق مع الطلب دابا. تقدر تزور الموقع: ${COMPANY_SITE}`,
+    instock: "متوفر",
+    promo: "برومو",
+  },
+  fr: {
+    greet: "Bonjour.\nMerci d’écrire (pas d’audio).\nDites-moi ce que vous cherchez : produit/prix ou SAV.",
+    noAudio: "Bonjour. Merci de ne pas envoyer d’audio/vocal. Écrivez un message pour que je puisse vous aider.",
+    savAskBrand: "Pouvez-vous me donner la marque pour vous envoyer le contact SAV ?",
+    orderForm: `Très bien. Remplissez ce formulaire pour finaliser la commande : ${FORM_LINK}`,
+    notFound: `Je n’ai pas trouvé ce produit pour le moment. Vous pouvez chercher sur notre site : ${COMPANY_SITE}`,
+    rules: "Livraison partout au Maroc (en général 1 à 7 jours). Paiement à la livraison (cash). Garantie 1 an.",
+    refinedNotFound: `Je n’ai rien trouvé qui correspond à votre demande. Vous pouvez chercher ici : ${COMPANY_SITE}`,
+    instock: "en stock",
+    promo: "promo",
+  },
+  en: {
+    greet: "Hello.\nPlease write (no audio).\nTell me what you need: product/price or after-sales support.",
+    noAudio: "Hello. Please do not send voice notes/audio. Send a text message so I can help.",
+    savAskBrand: "Please tell me the brand so I can share the after-sales contact.",
+    orderForm: `Great. Please fill this form to complete the order: ${FORM_LINK}`,
+    notFound: `I couldn’t find that product right now. You can browse our site: ${COMPANY_SITE}`,
+    rules: "Delivery across Morocco (usually 1–7 days). Cash on delivery only. 1-year warranty.",
+    refinedNotFound: `I couldn’t find a product matching your request. Please browse: ${COMPANY_SITE}`,
+    instock: "in stock",
+    promo: "promo",
+  },
+};
+
+// First French intro tracking
+const firstIntroStore = new Map(); // wa -> { lastSent:number }
+
+function shouldSendFirstFrenchIntro(waNumber) {
+  const key = normalizeNumber(waNumber);
+  const e = firstIntroStore.get(key);
+  if (!e?.lastSent) return true;
+  return Date.now() - e.lastSent > CFG.firstIntroTtlMs;
+}
+
+function markFirstFrenchIntroSent(waNumber) {
+  const key = normalizeNumber(waNumber);
+  firstIntroStore.set(key, { lastSent: Date.now() });
+  ensureCapacity(firstIntroStore, CFG.historyMaxKeys);
+}
+
+function withFrenchIntroIfNeeded(waNumber, coreReply, lang) {
+  const needsIntro = shouldSendFirstFrenchIntro(waNumber);
+  if (!needsIntro) return coreReply;
+
+  markFirstFrenchIntroSent(waNumber);
+
+  if (lang === "fr") {
+    // Avoid duplicate: still allow core content after intro
+    return `${FIRST_CONTACT_FR_INTRO}\n${coreReply}`;
+  }
+  return `${FIRST_CONTACT_FR_INTRO}\n\n${coreReply}`;
+}
+
+// =====================
 // Query modifiers
+// =====================
 function wantsOnlyPromos(text) {
   const s = safeLower(text);
-  return s.includes("only promo") || s.includes("only promos") || s.includes("promo") || s.includes("promotion") || s.includes("sold") || s.includes("solde");
+  return (
+    s.includes("only promo") ||
+    s.includes("only promos") ||
+    s.includes("promo") ||
+    s.includes("promotion") ||
+    s.includes("sold") ||
+    s.includes("solde")
+  );
 }
 
 function wantsCheapest(text) {
   const s = safeLower(text);
-  return s.includes("cheapest") || s.includes("rkhis") || s.includes("arakhass") || s.includes("moins cher") || s.includes("aqall taman");
+  return (
+    s.includes("cheapest") ||
+    s.includes("rkhis") ||
+    s.includes("arakhass") ||
+    s.includes("moins cher") ||
+    s.includes("aqall taman")
+  );
 }
 
 function wantsLargest(text) {
   const s = safeLower(text);
-  return s.includes("largest") || s.includes("kbir") || s.includes("akbar") || s.includes("كبر") || s.includes("plus grand");
+  return s.includes("largest") || s.includes("kbir") || s.includes("akbar") || s.includes("plus grand");
 }
 
 function wantsGoogleTv(text) {
@@ -354,13 +468,11 @@ function isTvIntent(text) {
 function extractSearchKeyWithContext(text, last6) {
   const s = safeLower(text);
 
-  // model-like token (SKU-ish)
   const modelMatch = s.match(/\b\d{2,3}[a-z0-9]{2,10}\b/i);
   if (modelMatch) return modelMatch[0];
 
   const brand = detectBrand(s) || getLastBrandFromHistory(last6);
 
-  // size (common TV sizes)
   const sizeMatch = s.match(/\b(24|32|40|43|50|55|65|75|85)\b/);
 
   if (brand && isTvIntent(s) && sizeMatch) return `${brand} ${sizeMatch[1]}`;
@@ -375,7 +487,7 @@ function extractSearchKeyWithContext(text, last6) {
 // In-memory stores
 // =====================
 const historyStore = new Map(); // wa -> { msgs: string[], lastSeen: number }
-const noticeStore = new Map(); // wa -> { lastSent: number }
+const noticeStore = new Map(); // wa -> { lastSent: number } (legacy/no-audio)
 const formLinkSentStore = new Map(); // wa -> { lastSent: number }
 const rateStore = new Map(); // wa -> { windowStart: number, count: number }
 
@@ -488,6 +600,9 @@ setInterval(() => {
   for (const [k, v] of tagIdCache.entries()) {
     if (!v?.expiresAt || now > v.expiresAt) tagIdCache.delete(k);
   }
+  for (const [k, v] of firstIntroStore.entries()) {
+    if (!v?.lastSent || now - v.lastSent > CFG.firstIntroTtlMs) firstIntroStore.delete(k);
+  }
 }, 1000 * 60 * 10);
 
 // =====================
@@ -599,7 +714,7 @@ async function wcSearchCatalog(userText) {
     }
   }
 
-  // 3) Brand/tag
+  // 3) Brand/tag (only when text search returns nothing)
   if (products.length === 0) {
     const brand = detectBrand(raw);
     if (brand) {
@@ -632,7 +747,7 @@ function isPromo(p) {
   const sp = String(p?.sale_price ?? "").trim();
   const rp = String(p?.regular_price ?? "").trim();
   if (!sp) return false;
-  if (!rp) return true; // sale_price exists and regular missing => treat as promo
+  if (!rp) return true;
   return sp !== rp;
 }
 
@@ -646,11 +761,9 @@ function extractTvInchesFromProduct(p) {
   const text = `${p?.name ?? ""} ${p?.short_description ?? ""}`;
   const s = safeLower(text);
 
-  // explicit inch tokens
   const m1 = s.match(/\b(\d{2,3})\s*(?:\"|inch|inches|pouce|pouces)\b/);
   if (m1) return Number(m1[1]);
 
-  // common TV sizes if "tv" is mentioned
   if (s.includes("tv") || s.includes("smart")) {
     const m2 = s.match(/\b(24|32|40|43|50|55|65|75|85)\b/);
     if (m2) return Number(m2[1]);
@@ -670,12 +783,8 @@ function applyModifiers(products, userText) {
 
   let out = Array.isArray(products) ? [...products] : [];
 
-  // 1) only promos
-  if (modifiers.onlyPromos) {
-    out = out.filter(isPromo);
-  }
+  if (modifiers.onlyPromos) out = out.filter(isPromo);
 
-  // 2) android/google tv (filter by keywords in API text)
   if (modifiers.googleTv || modifiers.androidTv) {
     out = out.filter((p) => {
       const t = productTextForFilter(p);
@@ -685,7 +794,6 @@ function applyModifiers(products, userText) {
     });
   }
 
-  // 3) largest (prefer TV sizes when present)
   if (modifiers.largest) {
     const withSize = out
       .map((p) => ({ p, size: extractTvInchesFromProduct(p) }))
@@ -695,13 +803,11 @@ function applyModifiers(products, userText) {
       withSize.sort((a, b) => b.size - a.size || parsePriceMAD(b.p) - parsePriceMAD(a.p));
       out = [withSize[0].p];
     } else {
-      // fallback: if no sizes, take highest price as "largest" proxy (better than random)
       out.sort((a, b) => parsePriceMAD(b) - parsePriceMAD(a));
       out = out.slice(0, 1);
     }
   }
 
-  // 4) cheapest
   if (modifiers.cheapest) {
     out.sort((a, b) => parsePriceMAD(a) - parsePriceMAD(b));
     out = out.slice(0, 1);
@@ -711,14 +817,27 @@ function applyModifiers(products, userText) {
 }
 
 // =====================
-// Reply formatting (Darija Latin, deterministic)
+// Brand enforcement (CRITICAL)
 // =====================
-function formatProductLine(p) {
-  const name = stripArabicScript(p?.name || "").trim() || "produit";
-  const price = Number.isFinite(parsePriceMAD(p)) ? `${parsePriceMAD(p)} MAD` : "thaman ma banach";
+function productMatchesBrand(p, brand) {
+  if (!brand) return true;
+  const text = safeLower(`${p?.name ?? ""} ${p?.short_description ?? ""} ${p?.description ?? ""}`);
+  return text.includes(brand);
+}
+
+// =====================
+// Reply formatting (language-aware, deterministic)
+// =====================
+function formatProductLine(p, L) {
+  const name = String(p?.name || "").trim() || "produit";
+  const price = Number.isFinite(parsePriceMAD(p)) ? `${parsePriceMAD(p)} MAD` : "";
   const instock =
-    p?.stock_status === "instock" || p?.in_stock === true ? "instock" : p?.stock_status ? p.stock_status : "";
-  const promoTag = isPromo(p) ? "promo" : "";
+    p?.stock_status === "instock" || p?.in_stock === true
+      ? L.instock
+      : p?.stock_status
+      ? p.stock_status
+      : "";
+  const promoTag = isPromo(p) ? L.promo : "";
 
   const parts = [
     name,
@@ -731,16 +850,11 @@ function formatProductLine(p) {
   return `${parts.join(" ")}${link}`;
 }
 
-function formatCatalogReply(products, userText) {
-  if (!products || products.length === 0) {
-    return `ma l9it 7tta produit b had smiya daba. t9der tzour site dyalna w tqelleb: ${COMPANY_SITE}`;
-  }
+function formatCatalogReply(products, L) {
+  if (!products || products.length === 0) return L.notFound;
 
-  // If user asked for TV features, keep short and show up to 3
-  const top = products.slice(0, 3).map(formatProductLine).join("\n");
-
-  // Minimal business rules (keep short)
-  return `${top}\n${DELIVERY_RULE}. ${PAYMENT_RULE}. ${WARRANTY_RULE}.`;
+  const top = products.slice(0, 3).map((p) => formatProductLine(p, L)).join("\n");
+  return `${top}\n${L.rules}`;
 }
 
 // =====================
@@ -762,6 +876,8 @@ app.post("/wanotifier", async (req, res) => {
     const payload = normalizeWanotifierPayload(body);
 
     const waNumber = normalizeNumber(payload.waNumber);
+    const lang = detectUserLanguage(payload.text || "");
+    const L = T[lang] || T.dz;
 
     if (!rateLimitOk(waNumber)) {
       return res.status(429).json({ ok: false, error: "Rate limit exceeded" });
@@ -769,16 +885,19 @@ app.post("/wanotifier", async (req, res) => {
 
     // Audio/media not supported
     if (looksLikeAudioMessage(body)) {
+      const core = L.noAudio;
+      const reply = withFrenchIntroIfNeeded(waNumber, core, lang);
+      // legacy notice tracking
       if (shouldSendNoAudioNotice(waNumber)) markNoAudioNoticeSent(waNumber);
-      return res.status(200).json({ ok: true, reply: shorten(NO_AUDIO_NOTICE, 420) });
+      return res.status(200).json({ ok: true, reply: shorten(reply, 420) });
     }
 
     let userText = String(payload.text || "").trim().slice(0, 2000);
-    userText = stripArabicScript(userText).trim();
-
     if (!userText) {
+      const core = L.noAudio;
+      const reply = withFrenchIntroIfNeeded(waNumber, core, lang);
       if (shouldSendNoAudioNotice(waNumber)) markNoAudioNoticeSent(waNumber);
-      return res.status(200).json({ ok: true, reply: shorten(NO_AUDIO_NOTICE, 420) });
+      return res.status(200).json({ ok: true, reply: shorten(reply, 420) });
     }
 
     const isNewConversation = !historyStore.has(waNumber);
@@ -786,10 +905,8 @@ app.post("/wanotifier", async (req, res) => {
 
     // Greeting (priority)
     if (isGreeting(userText)) {
-      let reply =
-        "salam! mrahba bik.\n" +
-        "3afak ma tsiftch vocal/audio, ktb msg b lktaba bark.\n" +
-        "goul lina ach bghiti: produit/thaman ola SAV.";
+      const core = L.greet;
+      const reply = withFrenchIntroIfNeeded(waNumber, core, lang);
       if (shouldSendNoAudioNotice(waNumber)) markNoAudioNoticeSent(waNumber);
       return res.status(200).json({ ok: true, reply: shorten(reply, 420) });
     }
@@ -797,22 +914,25 @@ app.post("/wanotifier", async (req, res) => {
     // PRIORITY: After-sale service (SAV)
     if (isAfterSaleIntent(userText)) {
       const brand = detectBrand(userText) || getLastBrandFromHistory(last6);
+
       if (brand && AFTER_SALE_SERVICE[brand]) {
         const lines = AFTER_SALE_SERVICE[brand].join("\n");
-        let reply = `hadchi dyal SAV ${brand.toUpperCase()}:\n${lines}`;
+        const core =
+          lang === "fr"
+            ? `SAV ${brand.toUpperCase()} :\n${lines}`
+            : lang === "en"
+            ? `After-sales ${brand.toUpperCase()}:\n${lines}`
+            : lang === "ar"
+            ? `خدمة ما بعد البيع ${brand.toUpperCase()}:\n${lines}`
+            : `hadchi dyal SAV ${brand.toUpperCase()}:\n${lines}`;
 
-        if (isNewConversation && shouldSendNoAudioNotice(waNumber)) {
-          markNoAudioNoticeSent(waNumber);
-          reply = `${NO_AUDIO_NOTICE}\n${reply}`;
-        }
-
+        const reply = withFrenchIntroIfNeeded(waNumber, core, lang);
         return res.status(200).json({ ok: true, reply: shorten(reply, 420) });
       }
 
-      return res.status(200).json({
-        ok: true,
-        reply: shorten("3afak gol lina smiya dyal l-marque bach n3tik numéro dyal SAV.", 420),
-      });
+      const core = L.savAskBrand;
+      const reply = withFrenchIntroIfNeeded(waNumber, core, lang);
+      return res.status(200).json({ ok: true, reply: shorten(reply, 420) });
     }
 
     // Purchase intent -> form link
@@ -822,41 +942,38 @@ app.post("/wanotifier", async (req, res) => {
 
       if (!already || allowResend) {
         markFormLinkSent(waNumber);
-        let reply = `mzyan! 3mr had formulaire bach nkmlo l-commande: ${FORM_LINK}`;
-
-        if (isNewConversation && shouldSendNoAudioNotice(waNumber)) {
-          markNoAudioNoticeSent(waNumber);
-          reply = `${NO_AUDIO_NOTICE}\n${reply}`;
-        }
-
+        const core = L.orderForm;
+        const reply = withFrenchIntroIfNeeded(waNumber, core, lang);
         return res.status(200).json({ ok: true, reply: shorten(reply, 420) });
       }
-      // If already sent, continue to catalog below
     }
 
     // Catalog search (context-aware)
     const searchKey = extractSearchKeyWithContext(userText, last6);
     let catalogMatches = await wcSearchCatalog(searchKey);
 
-    // Apply modifiers (cheapest, largest, android/google tv, only promos)
+    // Apply modifiers
     const { products: filtered, modifiers } = applyModifiers(catalogMatches, userText);
     catalogMatches = filtered;
 
-    let reply = formatCatalogReply(catalogMatches, userText);
+    // FINAL BRAND ENFORCEMENT (prevents Samsung leakage when user said "visio")
+    const enforcedBrand = detectBrand(userText) || getLastBrandFromHistory(last6);
+    if (enforcedBrand) {
+      catalogMatches = catalogMatches.filter((p) => productMatchesBrand(p, enforcedBrand));
+    }
 
-    // If user asked only promos / android/google tv and nothing matched, give a clearer fallback
+    let core = formatCatalogReply(catalogMatches, L);
+
+    // Modifier-specific clearer fallback
     if (
       catalogMatches.length === 0 &&
       (modifiers.onlyPromos || modifiers.googleTv || modifiers.androidTv || modifiers.cheapest || modifiers.largest)
     ) {
-      reply = `ma l9it 7tta produit kaytla9a m3a talab dyalk daba. t9der tzour site dyalna: ${COMPANY_SITE}`;
+      core = L.refinedNotFound;
     }
 
-    // Prepend notice at beginning of conversation only (TTL-based)
-    if (isNewConversation && shouldSendNoAudioNotice(waNumber)) {
-      markNoAudioNoticeSent(waNumber);
-      reply = `${NO_AUDIO_NOTICE}\n${reply}`;
-    }
+    // Apply French intro only when needed
+    const reply = withFrenchIntroIfNeeded(waNumber, core, lang);
 
     const ms = Date.now() - t0;
     console.log(
@@ -865,11 +982,14 @@ app.post("/wanotifier", async (req, res) => {
         msg: "wanotifier_ok",
         reqId,
         waNumber,
+        lang,
         searchKey,
         matches: catalogMatches?.length ?? 0,
         modifiers,
+        enforcedBrand,
         latencyMs: ms,
         replyChars: reply.length,
+        isNewConversation,
       })
     );
 
