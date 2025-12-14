@@ -7,6 +7,15 @@ import FormData from "form-data";
 const app = express();
 app.use(express.json());
 
+/**
+ * Health check / home route
+ * This fixes "Cannot GET /" on Render
+ */
+app.get("/", (req, res) => {
+  res.status(200).send("OK - DigiTronics WA Bot is running");
+});
+
+
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 const {
