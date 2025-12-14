@@ -1,8 +1,22 @@
 import "dotenv/config";
 import express from "express";
 import axios from "axios";
-import OpenAI from "openai";
 import crypto from "crypto";
+
+/**
+ * DigiTronics WhatsApp Bot (WANotifier)
+ * - Catalog source of truth: WooCommerce REST API
+ * - Replies: Moroccan Darija in LATIN only (no Arabic script)
+ * - Audio/media: NOT supported (one-time notice)
+ * - SAV directory by brand (authoritative)
+ * - Product search: multi-pass (text -> SKU -> brand tag)
+ * - Conversation context: remembers last brand (e.g., "visio" then "tv")
+ * - Query modifiers:
+ *    - cheapest
+ *    - largest
+ *    - android / google tv
+ *    - only promos
+ */
 
 const app = express();
 app.use(express.json({ limit: "25mb" }));
@@ -12,8 +26,6 @@ app.use(express.json({ limit: "25mb" }));
 // =====================
 const {
   PORT = 3000,
-  OPENAI_API_KEY,
-  OPENAI_MODEL = "gpt-5.2",
 
   WC_BASE_URL,
   WC_CONSUMER_KEY,
@@ -32,16 +44,10 @@ const {
   FORM_LINK_TTL_MS = String(6 * 60 * 60 * 1000), // 6h
 } = process.env;
 
-if (!OPENAI_API_KEY) {
-  console.error("Missing OPENAI_API_KEY env var");
-  process.exit(1);
-}
 if (!WC_BASE_URL || !WC_CONSUMER_KEY || !WC_CONSUMER_SECRET) {
   console.error("Missing WooCommerce env vars: WC_BASE_URL, WC_CONSUMER_KEY, WC_CONSUMER_SECRET");
   process.exit(1);
 }
-
-const openai = new OpenAI({ apiKey: OPENAI_API_KEY });
 
 // =====================
 // Constants
@@ -117,16 +123,20 @@ const AFTER_SALE_SERVICE = {
     "Casa 1: 05 20 36 22 21",
     "Casa 2: 05 22 99 10 56",
     "Rabat: 08 08 54 50 57",
-    "Fès: 05 35 96 38 85",
+    "Fes: 05 35 96 38 85",
     "Oujda: 06 46 50 80 08",
     "Tanger: 07 01 01 78 08",
     "Marrakech: 08 08 50 39 03",
   ],
-  tcl: ["TCL SAV: service.mo@tcl.com", "TCL SAV: +212 7 00 00 96 88", "Lun–Ven: 9h00–13h00, 14h00–17h00", "Sam: 8h30–12h00"],
+  tcl: [
+    "TCL SAV: service.mo@tcl.com",
+    "TCL SAV: +212 7 00 00 96 88",
+    "Lun–Ven: 9h00–13h00, 14h00–17h00",
+    "Sam: 8h30–12h00",
+  ],
   fitco: ["Fitco SAV: 05 22 35 14 45"],
   echolink: ["Echolink SAV: 06 61 51 03 09"],
   haier: ["Haier SAV: 07 02 04 09 93"],
-  // If you later add more brands, add here too
 };
 
 // =====================
@@ -153,10 +163,6 @@ function stableReqId() {
   return crypto.randomBytes(8).toString("hex");
 }
 
-function containsArabicScript(s) {
-  return /[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF]/.test(String(s || ""));
-}
-
 function shorten(text, max = 420) {
   const t = String(text || "").trim();
   return t.length > max ? t.slice(0, max).trim() : t;
@@ -166,6 +172,15 @@ function normalizeNumber(x) {
   const raw = String(x || "").trim();
   const cleaned = raw.replace(/[^\d+]/g, "").slice(0, 32);
   return cleaned || "unknown";
+}
+
+function safeLower(s) {
+  return String(s || "").toLowerCase();
+}
+
+// Keep replies Latin-only by construction. If user sends Arabic, we still respond Latin.
+function stripArabicScript(text) {
+  return String(text || "").replace(/[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF]+/g, "");
 }
 
 // WANotifier payload normalizer
@@ -211,27 +226,49 @@ function normalizeWanotifierPayload(body = {}) {
 function looksLikeAudioMessage(body) {
   const payload = normalizeWanotifierPayload(body);
   const hasMedia = Boolean(payload.media);
-  const txt = String(payload.text || "").trim().toLowerCase();
+  const txt = safeLower(payload.text).trim();
   if (hasMedia && !txt) return true;
   if (txt.includes("voice") || txt.includes("vocal") || txt.includes("audio")) return true;
   return false;
 }
 
 function normalizeBrandQuery(q) {
-  const s = String(q || "").trim().toLowerCase();
+  const s = safeLower(q).trim();
   return BRAND_SYNONYMS[s] || s;
 }
 
 function detectBrand(text) {
-  const s0 = String(text || "").toLowerCase();
-  const s = normalizeBrandQuery(s0);
+  const s = normalizeBrandQuery(safeLower(text));
   const found = BRAND_KEYWORDS.find((b) => s.includes(b));
   return found || null;
 }
 
+function getLastBrandFromHistory(last6) {
+  if (!Array.isArray(last6)) return null;
+  for (let i = last6.length - 1; i >= 0; i--) {
+    const b = detectBrand(last6[i]);
+    if (b) return b;
+  }
+  return null;
+}
+
+function isGreeting(text) {
+  const s = safeLower(text).trim();
+  return (
+    s === "salam" ||
+    s === "slm" ||
+    s === "salam alikoum" ||
+    s === "salam 3likom" ||
+    s === "salut" ||
+    s === "bonjour" ||
+    s === "hello" ||
+    s === "hi"
+  );
+}
+
 // SAV intent detection
 function isAfterSaleIntent(text) {
-  const s = String(text || "").toLowerCase();
+  const s = safeLower(text);
   return (
     s.includes("sav") ||
     s.includes("service") ||
@@ -246,8 +283,8 @@ function isAfterSaleIntent(text) {
 }
 
 // purchase intent detection
-function hasPurchaseIntent(msg) {
-  const s = String(msg || "").toLowerCase();
+function hasPurchaseIntent(text) {
+  const s = safeLower(text);
   return (
     s.includes("bghit nshri") ||
     s.includes("bghit ncommandi") ||
@@ -262,8 +299,8 @@ function hasPurchaseIntent(msg) {
   );
 }
 
-function looksLikeCannotOpenLink(msg) {
-  const s = String(msg || "").toLowerCase();
+function looksLikeCannotOpenLink(text) {
+  const s = safeLower(text);
   return (
     s.includes("ma9drtch") ||
     s.includes("ma9dertch") ||
@@ -277,21 +314,59 @@ function looksLikeCannotOpenLink(msg) {
   );
 }
 
-function askedForLinkAgain(msg) {
-  const s = String(msg || "").toLowerCase();
+function askedForLinkAgain(text) {
+  const s = safeLower(text);
   return s.includes("3awd") || s.includes("link") || s.includes("lien") || s.includes("sift");
 }
 
-// Better search key extraction
-function extractSearchKey(text) {
-  const s = String(text || "").toLowerCase();
+// Query modifiers
+function wantsOnlyPromos(text) {
+  const s = safeLower(text);
+  return s.includes("only promo") || s.includes("only promos") || s.includes("promo") || s.includes("promotion") || s.includes("sold") || s.includes("solde");
+}
 
+function wantsCheapest(text) {
+  const s = safeLower(text);
+  return s.includes("cheapest") || s.includes("rkhis") || s.includes("arakhass") || s.includes("moins cher") || s.includes("aqall taman");
+}
+
+function wantsLargest(text) {
+  const s = safeLower(text);
+  return s.includes("largest") || s.includes("kbir") || s.includes("akbar") || s.includes("كبر") || s.includes("plus grand");
+}
+
+function wantsGoogleTv(text) {
+  const s = safeLower(text);
+  return s.includes("google tv") || s.includes("googletv");
+}
+
+function wantsAndroidTv(text) {
+  const s = safeLower(text);
+  return s.includes("android tv") || s.includes("androidtv");
+}
+
+function isTvIntent(text) {
+  const s = safeLower(text);
+  return s.includes("tv") || s.includes("tele") || s.includes("télé") || s.includes("smart tv") || s.includes("smart");
+}
+
+// Extract context-aware search key
+function extractSearchKeyWithContext(text, last6) {
+  const s = safeLower(text);
+
+  // model-like token (SKU-ish)
   const modelMatch = s.match(/\b\d{2,3}[a-z0-9]{2,10}\b/i);
   if (modelMatch) return modelMatch[0];
 
-  const brand = detectBrand(s);
-  const sizeMatch = s.match(/\b(24|32|40|43|50|55|65|75)\b/);
+  const brand = detectBrand(s) || getLastBrandFromHistory(last6);
+
+  // size (common TV sizes)
+  const sizeMatch = s.match(/\b(24|32|40|43|50|55|65|75|85)\b/);
+
+  if (brand && isTvIntent(s) && sizeMatch) return `${brand} ${sizeMatch[1]}`;
+  if (brand && isTvIntent(s)) return `${brand} tv`;
   if (brand && sizeMatch) return `${brand} ${sizeMatch[1]}`;
+  if (brand) return brand;
 
   return text;
 }
@@ -304,6 +379,7 @@ const noticeStore = new Map(); // wa -> { lastSent: number }
 const formLinkSentStore = new Map(); // wa -> { lastSent: number }
 const rateStore = new Map(); // wa -> { windowStart: number, count: number }
 
+// caches
 const catalogCache = new Map(); // key -> { value, expiresAt }
 const tagIdCache = new Map(); // tagSlug -> { value: number|null, expiresAt }
 
@@ -445,6 +521,8 @@ function normalizeWcProduct(p) {
     stock_status: p.stock_status || null,
     in_stock: typeof p.in_stock === "boolean" ? p.in_stock : null,
     permalink: p.permalink || null,
+    short_description: p.short_description || "",
+    description: p.description || "",
   };
 }
 
@@ -464,7 +542,7 @@ async function wcGetVariations(productId, max = 6) {
 }
 
 async function wcGetTagIdBySlug(slug) {
-  const s = String(slug || "").trim().toLowerCase();
+  const s = safeLower(slug).trim();
   if (!s) return null;
 
   const cached = cacheGet(tagIdCache, s);
@@ -482,7 +560,7 @@ async function wcSearchByBrandTagSlug(brandSlug) {
   if (!tagId) return [];
   const products = await wcRequest("/wp-json/wc/v3/products", {
     tag: tagId,
-    per_page: 8,
+    per_page: 12,
     status: "publish",
   });
   return Array.isArray(products) ? products : [];
@@ -493,7 +571,7 @@ async function wcSearchCatalog(userText) {
   const raw = String(userText || "").trim();
   if (!raw) return [];
 
-  const q = raw.toLowerCase().trim();
+  const q = safeLower(raw).trim();
   const cacheKey = `wc:multi:${q}`;
   const cached = cacheGet(catalogCache, cacheKey);
   if (cached) return cached;
@@ -503,7 +581,7 @@ async function wcSearchCatalog(userText) {
   // 1) Text search
   const textResults = await wcRequest("/wp-json/wc/v3/products", {
     search: raw,
-    per_page: 8,
+    per_page: 12,
     status: "publish",
   });
   if (Array.isArray(textResults) && textResults.length) products = textResults;
@@ -514,7 +592,7 @@ async function wcSearchCatalog(userText) {
     if (skuMatch) {
       const skuResults = await wcRequest("/wp-json/wc/v3/products", {
         sku: skuMatch[0],
-        per_page: 8,
+        per_page: 12,
         status: "publish",
       });
       if (Array.isArray(skuResults) && skuResults.length) products = skuResults;
@@ -542,75 +620,127 @@ async function wcSearchCatalog(userText) {
 }
 
 // =====================
-// OpenAI reply generation (catalog-grounded)
+// Product filtering + ranking (modifiers)
 // =====================
-const SYSTEM_PROMPT_CATALOG = `
-You are DigiBot for Digitronics.ma.
+function parsePriceMAD(p) {
+  const s = String(p?.price ?? "").replace(/[^\d.]/g, "");
+  const n = Number(s);
+  return Number.isFinite(n) ? n : Infinity;
+}
 
-LANGUAGE (MANDATORY):
-- Reply ONLY in Moroccan Darija using LATIN characters.
-- NEVER use Arabic script characters.
-- NEVER reply in English or French.
-- Keep replies short and direct.
-- NEVER say you are an AI.
+function isPromo(p) {
+  const sp = String(p?.sale_price ?? "").trim();
+  const rp = String(p?.regular_price ?? "").trim();
+  if (!sp) return false;
+  if (!rp) return true; // sale_price exists and regular missing => treat as promo
+  return sp !== rp;
+}
 
-BUSINESS RULES:
-- Delivery: ${DELIVERY_RULE}.
-- Payment: ${PAYMENT_RULE}.
-- Warranty: ${WARRANTY_RULE}.
+function productTextForFilter(p) {
+  const t = `${p?.name ?? ""} ${p?.short_description ?? ""} ${p?.description ?? ""}`;
+  return safeLower(t);
+}
 
-STRICT CATALOG RULE:
-- You will receive CATALOG_MATCHES_JSON from the website (WooCommerce API).
-- Use ONLY products/prices/stock/links from CATALOG_MATCHES_JSON.
-- Do NOT invent any model, price, availability, specs, or promotions.
-- If you cannot find the requested product in CATALOG_MATCHES_JSON, say you didn’t find it and invite them to browse: ${COMPANY_SITE}
+// TV size extraction (inches)
+function extractTvInchesFromProduct(p) {
+  const text = `${p?.name ?? ""} ${p?.short_description ?? ""}`;
+  const s = safeLower(text);
 
-OUTPUT STYLE:
-- If there is a clear match: give product name + price (MAD) + stock status if available + link.
-- Keep it 1 to 3 short lines.
-- If multiple matches: give up to 3 options, each on a separate line with price + link.
-`;
+  // explicit inch tokens
+  const m1 = s.match(/\b(\d{2,3})\s*(?:\"|inch|inches|pouce|pouces)\b/);
+  if (m1) return Number(m1[1]);
 
-async function generateReplyFromCatalog(last6, lastMessage, catalogJson) {
-  const payload =
-    `LAST_6_CLIENT_MESSAGES:\n` +
-    (last6 || []).map((m, i) => `${i + 1}) ${m}`).join("\n") +
-    `\n\nLAST_MESSAGE:\n${lastMessage}\n\n` +
-    `CATALOG_MATCHES_JSON (SOURCE OF TRUTH):\n${catalogJson}\n`;
+  // common TV sizes if "tv" is mentioned
+  if (s.includes("tv") || s.includes("smart")) {
+    const m2 = s.match(/\b(24|32|40|43|50|55|65|75|85)\b/);
+    if (m2) return Number(m2[1]);
+  }
 
-  const r = await openai.responses.create({
-    model: OPENAI_MODEL,
-    input: [
-      { role: "system", content: SYSTEM_PROMPT_CATALOG },
-      { role: "user", content: payload },
-    ],
-    max_output_tokens: 220,
-  });
+  return null;
+}
 
-  let out = String(r.output_text || "").trim();
+function applyModifiers(products, userText) {
+  const modifiers = {
+    onlyPromos: wantsOnlyPromos(userText),
+    cheapest: wantsCheapest(userText),
+    largest: wantsLargest(userText),
+    googleTv: wantsGoogleTv(userText),
+    androidTv: wantsAndroidTv(userText),
+  };
 
-  if (!out || containsArabicScript(out)) {
-    const r2 = await openai.responses.create({
-      model: OPENAI_MODEL,
-      input: [
-        { role: "system", content: SYSTEM_PROMPT_CATALOG },
-        {
-          role: "user",
-          content:
-            payload +
-            "\n\nIMPORTANT: jawab ghir b darija latin (bla arabic script). ma tzidch ay ma3louma men 3ndk.",
-        },
-      ],
-      max_output_tokens: 220,
+  let out = Array.isArray(products) ? [...products] : [];
+
+  // 1) only promos
+  if (modifiers.onlyPromos) {
+    out = out.filter(isPromo);
+  }
+
+  // 2) android/google tv (filter by keywords in API text)
+  if (modifiers.googleTv || modifiers.androidTv) {
+    out = out.filter((p) => {
+      const t = productTextForFilter(p);
+      const okGoogle = !modifiers.googleTv || t.includes("google tv");
+      const okAndroid = !modifiers.androidTv || (t.includes("android") && t.includes("tv"));
+      return okGoogle && okAndroid;
     });
-    out = String(r2.output_text || "").trim();
   }
 
-  if (!out || containsArabicScript(out)) {
-    out = `ma l9it had l-produit daba. t9der tzour site dyalna: ${COMPANY_SITE}`;
+  // 3) largest (prefer TV sizes when present)
+  if (modifiers.largest) {
+    const withSize = out
+      .map((p) => ({ p, size: extractTvInchesFromProduct(p) }))
+      .filter((x) => typeof x.size === "number" && Number.isFinite(x.size));
+
+    if (withSize.length) {
+      withSize.sort((a, b) => b.size - a.size || parsePriceMAD(b.p) - parsePriceMAD(a.p));
+      out = [withSize[0].p];
+    } else {
+      // fallback: if no sizes, take highest price as "largest" proxy (better than random)
+      out.sort((a, b) => parsePriceMAD(b) - parsePriceMAD(a));
+      out = out.slice(0, 1);
+    }
   }
 
-  return shorten(out, 420);
+  // 4) cheapest
+  if (modifiers.cheapest) {
+    out.sort((a, b) => parsePriceMAD(a) - parsePriceMAD(b));
+    out = out.slice(0, 1);
+  }
+
+  return { products: out, modifiers };
+}
+
+// =====================
+// Reply formatting (Darija Latin, deterministic)
+// =====================
+function formatProductLine(p) {
+  const name = stripArabicScript(p?.name || "").trim() || "produit";
+  const price = Number.isFinite(parsePriceMAD(p)) ? `${parsePriceMAD(p)} MAD` : "thaman ma banach";
+  const instock =
+    p?.stock_status === "instock" || p?.in_stock === true ? "instock" : p?.stock_status ? p.stock_status : "";
+  const promoTag = isPromo(p) ? "promo" : "";
+
+  const parts = [
+    name,
+    price ? `— ${price}` : "",
+    instock ? `(${instock})` : "",
+    promoTag ? `(${promoTag})` : "",
+  ].filter(Boolean);
+
+  const link = p?.permalink ? `\n${p.permalink}` : "";
+  return `${parts.join(" ")}${link}`;
+}
+
+function formatCatalogReply(products, userText) {
+  if (!products || products.length === 0) {
+    return `ma l9it 7tta produit b had smiya daba. t9der tzour site dyalna w tqelleb: ${COMPANY_SITE}`;
+  }
+
+  // If user asked for TV features, keep short and show up to 3
+  const top = products.slice(0, 3).map(formatProductLine).join("\n");
+
+  // Minimal business rules (keep short)
+  return `${top}\n${DELIVERY_RULE}. ${PAYMENT_RULE}. ${WARRANTY_RULE}.`;
 }
 
 // =====================
@@ -644,6 +774,7 @@ app.post("/wanotifier", async (req, res) => {
     }
 
     let userText = String(payload.text || "").trim().slice(0, 2000);
+    userText = stripArabicScript(userText).trim();
 
     if (!userText) {
       if (shouldSendNoAudioNotice(waNumber)) markNoAudioNoticeSent(waNumber);
@@ -651,12 +782,21 @@ app.post("/wanotifier", async (req, res) => {
     }
 
     const isNewConversation = !historyStore.has(waNumber);
-
     const last6 = pushClientMessage(waNumber, userText);
+
+    // Greeting (priority)
+    if (isGreeting(userText)) {
+      let reply =
+        "salam! mrahba bik.\n" +
+        "3afak ma tsiftch vocal/audio, ktb msg b lktaba bark.\n" +
+        "goul lina ach bghiti: produit/thaman ola SAV.";
+      if (shouldSendNoAudioNotice(waNumber)) markNoAudioNoticeSent(waNumber);
+      return res.status(200).json({ ok: true, reply: shorten(reply, 420) });
+    }
 
     // PRIORITY: After-sale service (SAV)
     if (isAfterSaleIntent(userText)) {
-      const brand = detectBrand(userText);
+      const brand = detectBrand(userText) || getLastBrandFromHistory(last6);
       if (brand && AFTER_SALE_SERVICE[brand]) {
         const lines = AFTER_SALE_SERVICE[brand].join("\n");
         let reply = `hadchi dyal SAV ${brand.toUpperCase()}:\n${lines}`;
@@ -691,19 +831,25 @@ app.post("/wanotifier", async (req, res) => {
 
         return res.status(200).json({ ok: true, reply: shorten(reply, 420) });
       }
-      // continue to catalog below
+      // If already sent, continue to catalog below
     }
 
-    // Catalog search
-    const searchKey = extractSearchKey(userText);
-    const catalogMatches = await wcSearchCatalog(searchKey);
+    // Catalog search (context-aware)
+    const searchKey = extractSearchKeyWithContext(userText, last6);
+    let catalogMatches = await wcSearchCatalog(searchKey);
 
-    let reply;
-    if (!catalogMatches || catalogMatches.length === 0) {
-      reply = `ma l9it 7tta produit b had smiya daba. t9der tzour site dyalna w tqelleb: ${COMPANY_SITE}`;
-    } else {
-      const catalogContext = JSON.stringify(catalogMatches.slice(0, 6), null, 2);
-      reply = await generateReplyFromCatalog(last6, userText, catalogContext);
+    // Apply modifiers (cheapest, largest, android/google tv, only promos)
+    const { products: filtered, modifiers } = applyModifiers(catalogMatches, userText);
+    catalogMatches = filtered;
+
+    let reply = formatCatalogReply(catalogMatches, userText);
+
+    // If user asked only promos / android/google tv and nothing matched, give a clearer fallback
+    if (
+      catalogMatches.length === 0 &&
+      (modifiers.onlyPromos || modifiers.googleTv || modifiers.androidTv || modifiers.cheapest || modifiers.largest)
+    ) {
+      reply = `ma l9it 7tta produit kaytla9a m3a talab dyalk daba. t9der tzour site dyalna: ${COMPANY_SITE}`;
     }
 
     // Prepend notice at beginning of conversation only (TTL-based)
@@ -721,6 +867,7 @@ app.post("/wanotifier", async (req, res) => {
         waNumber,
         searchKey,
         matches: catalogMatches?.length ?? 0,
+        modifiers,
         latencyMs: ms,
         replyChars: reply.length,
       })
