@@ -172,6 +172,8 @@ app.get("/", (req, res) => {
 // =====================
 app.post("/wanotifier", async (req, res) => {
   try {
+    console.log("WANOTIFIER BODY:", JSON.stringify(req.body));
+
     const waNumber =
       req.body?.wa_number ??
       req.body?.whatsapp_number ??
