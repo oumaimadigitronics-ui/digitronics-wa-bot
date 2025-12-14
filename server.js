@@ -7,50 +7,67 @@ import FormData from "form-data";
 const app = express();
 app.use(express.json());
 
-/**
- * Health check / home route
- * This fixes "Cannot GET /" on Render
- */
+/* =========================
+   BASIC HEALTH CHECK
+   ========================= */
 app.get("/", (req, res) => {
-  res.status(200).send("OK - DigiTronics WA Bot is running");
+  res.status(200).send("OK - DigiTronics WhatsApp Bot is running");
 });
 
-
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-
+/* =========================
+   ENV VARIABLES
+   ========================= */
 const {
   PORT = 3000,
   WA_VERIFY_TOKEN,
   WA_PHONE_NUMBER_ID,
   WA_ACCESS_TOKEN,
+  OPENAI_API_KEY,
   OPENAI_MODEL = "gpt-5.2",
   OPENAI_TRANSCRIBE_MODEL = "gpt-4o-mini-transcribe"
 } = process.env;
 
-// TEMP system prompt (we will replace later)
+if (!WA_VERIFY_TOKEN || !WA_PHONE_NUMBER_ID || !WA_ACCESS_TOKEN || !OPENAI_API_KEY) {
+  console.error("❌ Missing required environment variables");
+}
+
+/* =========================
+   OPENAI CLIENT
+   ========================= */
+const openai = new OpenAI({
+  apiKey: OPENAI_API_KEY
+});
+
+/* =========================
+   SYSTEM PROMPT
+   ========================= */
 const SYSTEM_PROMPT = `
 You are DigiBot for Digitronics.ma.
-Always reply in Moroccan Darija (latin), short and direct.
-If message comes from voice note transcription, treat it like normal text.
+Always reply in Moroccan Darija (latin).
+Be short, clear, and helpful.
+If the message comes from a voice note transcription, treat it like normal text.
 `;
 
-// =====================
-// WEBHOOK VERIFICATION
-// =====================
+/* =========================
+   WEBHOOK VERIFICATION
+   ========================= */
 app.get("/webhook", (req, res) => {
   const mode = req.query["hub.mode"];
   const token = req.query["hub.verify_token"];
   const challenge = req.query["hub.challenge"];
 
   if (mode === "subscribe" && token === WA_VERIFY_TOKEN) {
+    console.log("✅ Webhook verified");
     return res.status(200).send(challenge);
   }
+
+  console.log("❌ Webhook verification failed");
   return res.sendStatus(403);
 });
 
-// =====================
-// RECEIVE MESSAGES
-// =====================
+/* =========================
+   RECEIVE MESSAGES
+   ========================= */
 app.post("/webhook", async (req, res) => {
   res.sendStatus(200);
 
@@ -64,11 +81,13 @@ app.post("/webhook", async (req, res) => {
 
     let userText = "";
 
+    /* ---- TEXT MESSAGE ---- */
     if (type === "text") {
       userText = message.text?.body || "";
     }
 
-    if (type === "audio") {
+    /* ---- VOICE NOTE ---- */
+    if (type === "audio" || type === "voice") {
       const mediaId = message.audio?.id;
       if (!mediaId) return;
 
@@ -83,17 +102,20 @@ app.post("/webhook", async (req, res) => {
     await sendWhatsAppMessage(from, reply);
 
   } catch (err) {
-    console.error("ERROR:", err.message);
+    console.error("❌ ERROR:", err?.message || err);
   }
 });
 
-// =====================
-// HELPERS
-// =====================
+/* =========================
+   HELPERS
+   ========================= */
+
 async function getMediaUrl(mediaId) {
   const url = `https://graph.facebook.com/v20.0/${mediaId}`;
   const { data } = await axios.get(url, {
-    headers: { Authorization: `Bearer ${WA_ACCESS_TOKEN}` }
+    headers: {
+      Authorization: `Bearer ${WA_ACCESS_TOKEN}`
+    }
   });
   return data.url;
 }
@@ -101,7 +123,9 @@ async function getMediaUrl(mediaId) {
 async function downloadMedia(mediaUrl) {
   const res = await axios.get(mediaUrl, {
     responseType: "arraybuffer",
-    headers: { Authorization: `Bearer ${WA_ACCESS_TOKEN}` }
+    headers: {
+      Authorization: `Bearer ${WA_ACCESS_TOKEN}`
+    }
   });
   return Buffer.from(res.data);
 }
@@ -109,24 +133,27 @@ async function downloadMedia(mediaUrl) {
 async function transcribeAudio(buffer) {
   const form = new FormData();
   form.append("model", OPENAI_TRANSCRIBE_MODEL);
-  form.append("file", buffer, { filename: "voice.ogg" });
+  form.append("file", buffer, {
+    filename: "voice.ogg",
+    contentType: "audio/ogg"
+  });
 
   const res = await axios.post(
     "https://api.openai.com/v1/audio/transcriptions",
     form,
     {
       headers: {
-        Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+        Authorization: `Bearer ${OPENAI_API_KEY}`,
         ...form.getHeaders()
       }
     }
   );
 
-  return res.data.text;
+  return res.data.text || "";
 }
 
 async function generateReply(text) {
-  const r = await openai.responses.create({
+  const response = await openai.responses.create({
     model: OPENAI_MODEL,
     input: [
       { role: "system", content: SYSTEM_PROMPT },
@@ -134,7 +161,7 @@ async function generateReply(text) {
     ]
   });
 
-  return r.output_text || "m3lich 3awd sowlni";
+  return response.output_text || "smah liya ma fhemtch، 3awd sowlni";
 }
 
 async function sendWhatsAppMessage(to, body) {
@@ -149,12 +176,16 @@ async function sendWhatsAppMessage(to, body) {
       text: { body }
     },
     {
-      headers: { Authorization: `Bearer ${WA_ACCESS_TOKEN}` }
+      headers: {
+        Authorization: `Bearer ${WA_ACCESS_TOKEN}`
+      }
     }
   );
 }
 
-// =====================
+/* =========================
+   START SERVER
+   ========================= */
 app.listen(PORT, () => {
-  console.log("Server running on port", PORT);
+  console.log(`🚀 Server running on port ${PORT}`);
 });
