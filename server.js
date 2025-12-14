@@ -10,16 +10,12 @@ import crypto from "crypto";
  *    - First ever reply to a WhatsApp number: ALWAYS starts with a short French intro
  *    - Then continues in the client's detected language (AR/FR/EN/Darija-latin)
  *    - Next replies: only in the client's language
- * - Audio/media: NOT supported (client-language message; also covered by French intro on first contact)
+ * - Audio/media: NOT supported
  * - SAV directory by brand (authoritative)
  * - Product search: multi-pass (text -> SKU -> brand tag)
  * - Conversation context: remembers last brand (e.g., "visio" then "tv")
- * - Query modifiers:
- *    - cheapest
- *    - largest
- *    - android / google tv
- *    - only promos
- * - Brand enforcement: if a brand is detected (message or history), final results are restricted to that brand
+ * - Query modifiers: cheapest, largest, android/google tv, only promos
+ * - Brand enforcement: if a brand is detected (message or history), final results restricted to that brand
  */
 
 const app = express();
@@ -44,7 +40,7 @@ const {
   CATALOG_CACHE_TTL_MS = String(10 * 60 * 1000), // 10 min
   TAG_ID_CACHE_TTL_MS = String(24 * 60 * 60 * 1000), // 24h
 
-  NOTICE_TTL_MS = String(30 * 24 * 60 * 60 * 1000), // 30 days (no-audio notice legacy)
+  NOTICE_TTL_MS = String(30 * 24 * 60 * 60 * 1000), // 30 days (legacy)
   FORM_LINK_TTL_MS = String(6 * 60 * 60 * 1000), // 6h
 
   FIRST_INTRO_TTL_MS = String(90 * 24 * 60 * 60 * 1000), // 90 days
@@ -58,8 +54,10 @@ if (!WC_BASE_URL || !WC_CONSUMER_KEY || !WC_CONSUMER_SECRET) {
 // =====================
 // Constants
 // =====================
+// ✅ Customer-facing viewform link (NOT /edit#responses)
 const FORM_LINK =
   "https://docs.google.com/forms/d/e/1FAIpQLScmDNagYSpUPfsIT2s2t35KH7U1OWSNkUCIWmcJJm1R_aITQQ/viewform?usp=header";
+
 const COMPANY_SITE = "https://digitronics.ma/";
 
 const DELIVERY_RULE = "livraison f ga3 lmdoun f lmaghrib, عادة 1 حتى 7 iyam";
@@ -298,7 +296,11 @@ function hasPurchaseIntent(text) {
     s.includes("kifach nshri") ||
     s.includes("kifach ncommandi") ||
     s.includes("nakhdo") ||
-    s.includes("bghit nakhdo")
+    s.includes("bghit nakhdo") ||
+    s.includes("acheter") ||
+    s.includes("je veux acheter") ||
+    s.includes("buy") ||
+    s.includes("i want to buy")
   );
 }
 
@@ -336,7 +338,7 @@ function detectUserLanguage(text) {
   const frHits = ["bonjour", "svp", "s'il", "merci", "prix", "livraison", "garantie", "réparation", "reparation", "panne"];
   if (frHits.some((w) => t.includes(w))) return "fr";
 
-  const enHits = ["hello", "price", "delivery", "warranty", "repair", "support", "promo", "cheapest", "largest"];
+  const enHits = ["hello", "price", "delivery", "warranty", "repair", "support", "promo", "cheapest", "largest", "buy"];
   if (enHits.some((w) => t.includes(w))) return "en";
 
   return "dz"; // Darija latin default
@@ -411,10 +413,7 @@ function withFrenchIntroIfNeeded(waNumber, coreReply, lang) {
 
   markFirstFrenchIntroSent(waNumber);
 
-  if (lang === "fr") {
-    // Avoid duplicate: still allow core content after intro
-    return `${FIRST_CONTACT_FR_INTRO}\n${coreReply}`;
-  }
+  if (lang === "fr") return `${FIRST_CONTACT_FR_INTRO}\n${coreReply}`;
   return `${FIRST_CONTACT_FR_INTRO}\n\n${coreReply}`;
 }
 
@@ -487,7 +486,7 @@ function extractSearchKeyWithContext(text, last6) {
 // In-memory stores
 // =====================
 const historyStore = new Map(); // wa -> { msgs: string[], lastSeen: number }
-const noticeStore = new Map(); // wa -> { lastSent: number } (legacy/no-audio)
+const noticeStore = new Map(); // wa -> { lastSent: number } (legacy)
 const formLinkSentStore = new Map(); // wa -> { lastSent: number }
 const rateStore = new Map(); // wa -> { windowStart: number, count: number }
 
@@ -638,6 +637,7 @@ function normalizeWcProduct(p) {
     permalink: p.permalink || null,
     short_description: p.short_description || "",
     description: p.description || "",
+    tags: Array.isArray(p.tags) ? p.tags.map((t) => ({ id: t.id, slug: t.slug, name: t.name })) : [],
   };
 }
 
@@ -714,7 +714,7 @@ async function wcSearchCatalog(userText) {
     }
   }
 
-  // 3) Brand/tag (only when text search returns nothing)
+  // 3) Brand/tag
   if (products.length === 0) {
     const brand = detectBrand(raw);
     if (brand) {
@@ -756,7 +756,6 @@ function productTextForFilter(p) {
   return safeLower(t);
 }
 
-// TV size extraction (inches)
 function extractTvInchesFromProduct(p) {
   const text = `${p?.name ?? ""} ${p?.short_description ?? ""}`;
   const s = safeLower(text);
@@ -817,12 +816,23 @@ function applyModifiers(products, userText) {
 }
 
 // =====================
-// Brand enforcement (CRITICAL)
+// Brand enforcement (tag-first)
 // =====================
-function productMatchesBrand(p, brand) {
-  if (!brand) return true;
-  const text = safeLower(`${p?.name ?? ""} ${p?.short_description ?? ""} ${p?.description ?? ""}`);
-  return text.includes(brand);
+function productMatchesBrand(p, brandSlug) {
+  if (!brandSlug) return true;
+
+  const target = String(brandSlug).toLowerCase();
+
+  // Prefer tag slug match
+  const tagSlugs = (p?.tags || [])
+    .map((t) => String(t?.slug || "").toLowerCase())
+    .filter(Boolean);
+
+  if (tagSlugs.includes(target)) return true;
+
+  // Fallback: text/link match
+  const text = safeLower(`${p?.name ?? ""} ${p?.short_description ?? ""} ${p?.description ?? ""} ${p?.permalink ?? ""}`);
+  return text.includes(target);
 }
 
 // =====================
@@ -852,7 +862,6 @@ function formatProductLine(p, L) {
 
 function formatCatalogReply(products, L) {
   if (!products || products.length === 0) return L.notFound;
-
   const top = products.slice(0, 3).map((p) => formatProductLine(p, L)).join("\n");
   return `${top}\n${L.rules}`;
 }
@@ -887,12 +896,11 @@ app.post("/wanotifier", async (req, res) => {
     if (looksLikeAudioMessage(body)) {
       const core = L.noAudio;
       const reply = withFrenchIntroIfNeeded(waNumber, core, lang);
-      // legacy notice tracking
       if (shouldSendNoAudioNotice(waNumber)) markNoAudioNoticeSent(waNumber);
       return res.status(200).json({ ok: true, reply: shorten(reply, 420) });
     }
 
-    let userText = String(payload.text || "").trim().slice(0, 2000);
+    const userText = String(payload.text || "").trim().slice(0, 2000);
     if (!userText) {
       const core = L.noAudio;
       const reply = withFrenchIntroIfNeeded(waNumber, core, lang);
@@ -956,11 +964,27 @@ app.post("/wanotifier", async (req, res) => {
     const { products: filtered, modifiers } = applyModifiers(catalogMatches, userText);
     catalogMatches = filtered;
 
-    // FINAL BRAND ENFORCEMENT (prevents Samsung leakage when user said "visio")
+    // FINAL BRAND ENFORCEMENT
     const enforcedBrand = detectBrand(userText) || getLastBrandFromHistory(last6);
+    const beforeBrand = catalogMatches.length;
+
     if (enforcedBrand) {
       catalogMatches = catalogMatches.filter((p) => productMatchesBrand(p, enforcedBrand));
     }
+
+    const afterBrand = catalogMatches.length;
+
+    console.log(
+      JSON.stringify({
+        level: "info",
+        msg: "brand_enforcement",
+        reqId,
+        waNumber,
+        enforcedBrand,
+        beforeBrand,
+        afterBrand,
+      })
+    );
 
     let core = formatCatalogReply(catalogMatches, L);
 
@@ -972,7 +996,6 @@ app.post("/wanotifier", async (req, res) => {
       core = L.refinedNotFound;
     }
 
-    // Apply French intro only when needed
     const reply = withFrenchIntroIfNeeded(waNumber, core, lang);
 
     const ms = Date.now() - t0;
