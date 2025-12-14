@@ -176,8 +176,9 @@ function safeLower(s) {
 }
 
 function normalizeNumber(x) {
+  // Digits-only normalization to avoid splitting users by "+212..." vs "212..."
   const raw = String(x || "").trim();
-  const cleaned = raw.replace(/[^\d+]/g, "").slice(0, 32);
+  const cleaned = raw.replace(/[^\d]/g, "").slice(0, 32);
   return cleaned || "unknown";
 }
 
@@ -221,6 +222,11 @@ function normalizeWanotifierPayload(body = {}) {
   };
 }
 
+function hasUnsupportedMedia(body) {
+  const payload = normalizeWanotifierPayload(body);
+  return Boolean(payload.media);
+}
+
 function looksLikeAudioMessage(body) {
   const payload = normalizeWanotifierPayload(body);
   const hasMedia = Boolean(payload.media);
@@ -230,15 +236,92 @@ function looksLikeAudioMessage(body) {
   return false;
 }
 
+// =====================
+// Brand detection (hardened)
+// =====================
+function escapeRegExp(str) {
+  return String(str || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+const BRAND_KEYWORDS_SORTED = [...BRAND_KEYWORDS].sort((a, b) => b.length - a.length);
+
+const BRAND_SYNONYM_ENTRIES = Object.entries(BRAND_SYNONYMS)
+  .map(([alias, canon]) => [safeLower(alias).trim(), safeLower(canon).trim()])
+  .filter(([alias, canon]) => alias && canon)
+  .sort((a, b) => b[0].length - a[0].length);
+
+// Allowed suffixes when brand is concatenated (e.g. "tcl55", "samsungtv", "lg55inch")
+const BRAND_TOKEN_SUFFIX_RE =
+  /^(?:\d{1,3}(?:inch|inches|pouce|pouces|tv|smart|smarttv|googletv|androidtv|android|google)?|tv|smart|smarttv|googletv|androidtv|android|google)$/i;
+
+function buildAliasRegex(alias) {
+  const a = safeLower(alias).trim();
+  if (!a) return null;
+
+  // If alias has '/', allow optional spaces around slash: "vision/hisense" matches "vision / hisense"
+  if (a.includes("/")) {
+    const parts = a
+      .split("/")
+      .map((x) => x.trim())
+      .filter(Boolean)
+      .map(escapeRegExp);
+
+    if (!parts.length) return null;
+
+    const pattern = parts.join("\\s*\\/\\s*");
+    return new RegExp(pattern, "gi");
+  }
+
+  // Otherwise, allow flexible whitespace between words
+  const parts = a
+    .split(/\s+/)
+    .map((x) => x.trim())
+    .filter(Boolean)
+    .map(escapeRegExp);
+
+  if (!parts.length) return null;
+
+  const pattern = parts.join("\\s+");
+  const isSingleToken = /^[a-z0-9]+$/.test(a);
+
+  return isSingleToken ? new RegExp(`\\b${pattern}\\b`, "gi") : new RegExp(pattern, "gi");
+}
+
 function normalizeBrandQuery(q) {
-  const s = safeLower(q).trim();
-  return BRAND_SYNONYMS[s] || s;
+  // normalize whitespace for better synonym matching
+  let s = safeLower(q).replace(/\s+/g, " ").trim();
+
+  for (const [alias, canon] of BRAND_SYNONYM_ENTRIES) {
+    const re = buildAliasRegex(alias);
+    if (!re) continue;
+    s = s.replace(re, canon);
+  }
+
+  return s;
 }
 
 function detectBrand(text) {
-  const s = normalizeBrandQuery(safeLower(text));
-  const found = BRAND_KEYWORDS.find((b) => s.includes(b));
-  return found || null;
+  const s = normalizeBrandQuery(text);
+  if (!s) return null;
+
+  // tokens like: ["prix","tcl55","tv","55"]
+  const tokens = s.match(/[a-z0-9]+/g) || [];
+  if (!tokens.length) return null;
+
+  for (const brand of BRAND_KEYWORDS_SORTED) {
+    // exact token match: "tcl"
+    if (tokens.includes(brand)) return brand;
+
+    // prefix match for common concatenations: "tcl55", "samsungtv", "lg55inch"
+    for (const tok of tokens) {
+      if (!tok.startsWith(brand)) continue;
+      const rest = tok.slice(brand.length);
+      if (!rest) return brand;
+      if (BRAND_TOKEN_SUFFIX_RE.test(rest)) return brand;
+    }
+  }
+
+  return null;
 }
 
 function getLastBrandFromHistory(last6) {
@@ -363,7 +446,10 @@ function hasDeliveryIssueIntent(text) {
   const mentionsOrder =
     s.includes("طلب") || s.includes("طلبية") || s.includes("commande") || s.includes("order");
 
-  return patterns.some((p) => s.includes(p)) || (mentionsOrder && (s.includes("لم") || s.includes("ما") || s.includes("not")));
+  return (
+    patterns.some((p) => s.includes(p)) ||
+    (mentionsOrder && (s.includes("لم") || s.includes("ما") || s.includes("not")))
+  );
 }
 
 function looksLikeCannotOpenLink(text) {
@@ -398,6 +484,10 @@ function askedForLinkAgain(text) {
   );
 }
 
+function wantsOrderFormLink(text) {
+  return hasPurchaseIntent(text) || askedForLinkAgain(text) || looksLikeCannotOpenLink(text);
+}
+
 // =====================
 // Language detection + templates
 // =====================
@@ -409,10 +499,34 @@ function detectUserLanguage(text) {
 
   const t = s.toLowerCase();
 
-  const frHits = ["bonjour", "svp", "s'il", "merci", "prix", "livraison", "garantie", "réparation", "reparation", "panne", "acheter"];
+  const frHits = [
+    "bonjour",
+    "svp",
+    "s'il",
+    "merci",
+    "prix",
+    "livraison",
+    "garantie",
+    "réparation",
+    "reparation",
+    "panne",
+    "acheter",
+  ];
   if (frHits.some((w) => t.includes(w))) return "fr";
 
-  const enHits = ["hello", "price", "delivery", "warranty", "repair", "support", "cheapest", "largest", "buy", "not received", "delayed"];
+  const enHits = [
+    "hello",
+    "price",
+    "delivery",
+    "warranty",
+    "repair",
+    "support",
+    "cheapest",
+    "largest",
+    "buy",
+    "not received",
+    "delayed",
+  ];
   if (enHits.some((w) => t.includes(w))) return "en";
 
   return "dz"; // Darija latin default
@@ -422,6 +536,7 @@ const T = {
   dz: {
     greet: "salam! mrahba bik.\n3afak ktb msg b lktaba (bla vocal).\nktb smiya dyal produit / marque / taille.",
     noAudio: "mrahba! 3afak ma tsiftch vocal/audio, ktb msg b lktaba bark bach n9dr n3awnk.",
+    noMedia: "mrahba! 3afak ma tsiftch tswira/video/audio. ktb msg b lktaba bark bach n9dr n3awnk.",
     savAskBrand: "3afak gol lina smiya dyal l-marque bach n3tik numéro dyal SAV.",
     orderForm: `mzyan! 3mr had formulaire bach nkmlo l-commande: ${FORM_LINK}`,
     deliveryHelp:
@@ -434,6 +549,7 @@ const T = {
   ar: {
     greet: "سلام! مرحبا بك.\nمن فضلك كتب رسالة (بلا فويس).\nكتب اسم المنتوج/الماركة/الحجم.",
     noAudio: "مرحبا! من فضلك ما تبعثش فويس/أوديو، كتب غير رسالة باش نقدر نعاونك.",
+    noMedia: "مرحبا! من فضلك ما تبعثش ميديا (صورة/فيديو/أوديو). كتب غير رسالة باش نقدر نعاونك.",
     savAskBrand: "من فضلك عطينا اسم الماركة باش نعطيك رقم خدمة ما بعد البيع.",
     orderForm: `مزيان! عمر هاد الفورم باش نكملو الطلب: ${FORM_LINK}`,
     deliveryHelp:
@@ -446,6 +562,7 @@ const T = {
   fr: {
     greet: "Bonjour.\nMerci d’écrire (pas d’audio).\nDonnez le nom du produit / la marque / la taille.",
     noAudio: "Bonjour. Merci de ne pas envoyer d’audio/vocal. Écrivez un message pour que je puisse vous aider.",
+    noMedia: "Bonjour. Merci de ne pas envoyer de photo/vidéo/audio. Écrivez un message texte pour que je puisse vous aider.",
     savAskBrand: "Pouvez-vous me donner la marque pour vous envoyer le contact SAV ?",
     orderForm: `Très bien. Remplissez ce formulaire pour finaliser la commande : ${FORM_LINK}`,
     deliveryHelp:
@@ -458,6 +575,7 @@ const T = {
   en: {
     greet: "Hello.\nPlease write (no audio).\nTell me the product name / brand / size.",
     noAudio: "Hello. Please do not send voice notes/audio. Send a text message so I can help.",
+    noMedia: "Hello. Please do not send media (photo/video/audio). Send a text message so I can help.",
     savAskBrand: "Please tell me the brand so I can share the after-sales contact.",
     orderForm: `Great. Please fill this form to complete the order: ${FORM_LINK}`,
     deliveryHelp:
@@ -509,7 +627,7 @@ function pushClientMessage(waNumber, msg) {
 
 function rateLimitOk(waNumber) {
   const key = normalizeNumber(waNumber);
-  const now =ianow = Date.now();
+  const now = Date.now(); // FIXED
   const entry = rateStore.get(key) || { windowStart: now, count: 0 };
 
   if (now - entry.windowStart > CFG.rateWindowMs) {
@@ -640,7 +758,10 @@ async function wcGetTagIdBySlug(slug) {
   if (!s) return null;
 
   const cached = cacheGet(tagIdCache, s);
-  if (cached !== null) return cached;
+
+  // IMPORTANT: cacheGet returns null for both "miss" and "cached null".
+  // Use tagIdCache.has(s) to distinguish cached-null from not-cached.
+  if (cached !== null || tagIdCache.has(s)) return cached;
 
   const tags = await wcRequest("/wp-json/wc/v3/products/tags", { slug: s, per_page: 1 });
   const id = Array.isArray(tags) && tags[0]?.id ? Number(tags[0].id) : null;
@@ -668,7 +789,9 @@ async function wcSearchCatalog(userText) {
   const q = safeLower(raw).trim();
   const cacheKey = `wc:multi:${q}`;
   const cached = cacheGet(catalogCache, cacheKey);
-  if (cached) return cached;
+
+  // FIX: allow cached empty arrays; only treat null as miss
+  if (cached !== null) return cached;
 
   let products = [];
 
@@ -747,12 +870,27 @@ function extractTvInchesFromProduct(p) {
 
 function wantsOnlyPromos(text) {
   const s = safeLower(text);
-  return s.includes("only promo") || s.includes("only promos") || s.includes("promo") || s.includes("promotion") || s.includes("sold") || s.includes("solde");
+  return (
+    s.includes("only promo") ||
+    s.includes("only promos") ||
+    s.includes("promo") ||
+    s.includes("promotion") ||
+    s.includes("sold") ||
+    s.includes("solde")
+  );
 }
 
 function wantsCheapest(text) {
   const s = safeLower(text);
-  return s.includes("cheapest") || s.includes("rkhis") || s.includes("arakhass") || s.includes("moins cher") || s.includes("aqall taman") || s.includes("رخيص") || s.includes("أرخص");
+  return (
+    s.includes("cheapest") ||
+    s.includes("rkhis") ||
+    s.includes("arakhass") ||
+    s.includes("moins cher") ||
+    s.includes("aqall taman") ||
+    s.includes("رخيص") ||
+    s.includes("أرخص")
+  );
 }
 
 function wantsLargest(text) {
@@ -842,6 +980,20 @@ function applyModifiers(products, userText) {
 }
 
 // Brand enforcement (tag-first)
+function textHasBrandToken(text, brand) {
+  const s = safeLower(text);
+  const tokens = s.match(/[a-z0-9]+/g) || [];
+  for (const tok of tokens) {
+    if (tok === brand) return true;
+    if (tok.startsWith(brand)) {
+      const rest = tok.slice(brand.length);
+      if (!rest) return true;
+      if (BRAND_TOKEN_SUFFIX_RE.test(rest)) return true;
+    }
+  }
+  return false;
+}
+
 function productMatchesBrand(p, brandSlug) {
   if (!brandSlug) return true;
   const target = String(brandSlug).toLowerCase();
@@ -850,7 +1002,7 @@ function productMatchesBrand(p, brandSlug) {
   if (tagSlugs.includes(target)) return true;
 
   const text = safeLower(`${p?.name ?? ""} ${p?.short_description ?? ""} ${p?.description ?? ""} ${p?.permalink ?? ""}`);
-  return text.includes(target);
+  return textHasBrandToken(text, target);
 }
 
 // Context-aware search key
@@ -921,7 +1073,14 @@ app.post("/wanotifier", async (req, res) => {
       return res.status(429).json({ ok: false, error: "Rate limit exceeded" });
     }
 
-    // Audio/media not supported
+    // Media not supported (photo/video/audio/etc.)
+    if (hasUnsupportedMedia(body)) {
+      const core = L.noMedia || L.noAudio;
+      const reply = withFrenchIntroIfNeeded(waNumber, core, lang);
+      return res.status(200).json({ ok: true, reply: shorten(reply, 420) });
+    }
+
+    // Audio not supported (extra safety if provider encodes it oddly)
     if (looksLikeAudioMessage(body)) {
       const reply = withFrenchIntroIfNeeded(waNumber, L.noAudio, lang);
       return res.status(200).json({ ok: true, reply: shorten(reply, 420) });
@@ -969,8 +1128,8 @@ app.post("/wanotifier", async (req, res) => {
       return res.status(200).json({ ok: true, reply: shorten(reply, 420) });
     }
 
-    // Purchase intent -> form link
-    if (hasPurchaseIntent(userTextRaw)) {
+    // Order form link (purchase intent OR explicit "send link again" OR "can't open link")
+    if (wantsOrderFormLink(userTextRaw)) {
       const already = wasFormLinkSentRecently(waNumber);
       const allowResend = askedForLinkAgain(userTextRaw) || looksLikeCannotOpenLink(userTextRaw);
 
