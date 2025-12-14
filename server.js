@@ -2,10 +2,11 @@ import "dotenv/config";
 import express from "express";
 import axios from "axios";
 import crypto from "crypto";
+import { XMLParser } from "fast-xml-parser";
 
 /**
- * DigiTronics WhatsApp Bot (WANotifier)
- * - Source of truth: WooCommerce REST API
+ * DigiTronics WhatsApp Bot (WANotifier) — FEED edition
+ * - Source of truth: Google Merchant XML feed (Woo Product Feed Pro)
  * - Language policy:
  *    - First reply per WhatsApp number: ALWAYS starts with a short French intro
  *    - Then continues in client's detected language (AR/FR/EN/Darija-latin)
@@ -13,8 +14,8 @@ import crypto from "crypto";
  * - Audio/media: NOT supported
  * - SAV directory by brand (authoritative) — only when user asks SAV/support/garantie/etc.
  * - Product search:
- *    - If brand detected (message or history): STRICT brand tag search (prevents brand leakage)
- *    - Else: text search -> SKU -> (brand tag fallback when detected)
+ *    - If brand detected (message or history): STRICT filter by brand (prevents brand leakage)
+ *    - Else: free text search (title/description/product_type)
  * - Context: remembers last brand (e.g., "visio" then "tv")
  * - Modifiers: cheapest, largest, android/google tv, only promos
  * - Output: NO "instock" and NO "promo" labels in message
@@ -30,27 +31,36 @@ app.use(express.json({ limit: "25mb" }));
 const {
   PORT = 3000,
 
-  WC_BASE_URL,
-  WC_CONSUMER_KEY,
-  WC_CONSUMER_SECRET,
+  // Your feed URL (set this in env; fallback to the one you provided)
+  FEED_URL = "https://digitronics.ma/wp-content/uploads/woo-product-feed-pro/xml/qabmtmj36y5zn83str17m1i4yp6nq4jo.xml",
 
-  AXIOS_TIMEOUT_MS = "15000",
-  HISTORY_TTL_MS = String(24 * 60 * 60 * 1000), // 24h
+  AXIOS_TIMEOUT_MS = "20000",
+  HISTORY_TTL_MS = String(24 * 60 * 60 * 1000),
   HISTORY_MAX_KEYS = "5000",
   RATE_LIMIT_WINDOW_MS = "60000",
   RATE_LIMIT_MAX = "25",
 
-  CATALOG_CACHE_TTL_MS = String(10 * 60 * 1000), // 10 min
-  TAG_ID_CACHE_TTL_MS = String(24 * 60 * 60 * 1000), // 24h
+  FEED_CACHE_TTL_MS = String(10 * 60 * 1000), // 10 min
 
-  FORM_LINK_TTL_MS = String(6 * 60 * 60 * 1000), // 6h
-  FIRST_INTRO_TTL_MS = String(90 * 24 * 60 * 60 * 1000), // 90 days
+  FORM_LINK_TTL_MS = String(6 * 60 * 60 * 1000),
+  FIRST_INTRO_TTL_MS = String(90 * 24 * 60 * 60 * 1000),
 } = process.env;
 
-if (!WC_BASE_URL || !WC_CONSUMER_KEY || !WC_CONSUMER_SECRET) {
-  console.error("Missing WooCommerce env vars: WC_BASE_URL, WC_CONSUMER_KEY, WC_CONSUMER_SECRET");
-  process.exit(1);
-}
+const toInt = (v, d) => {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : d;
+};
+
+const CFG = {
+  axiosTimeoutMs: toInt(AXIOS_TIMEOUT_MS, 20000),
+  historyTtlMs: toInt(HISTORY_TTL_MS, 24 * 60 * 60 * 1000),
+  historyMaxKeys: toInt(HISTORY_MAX_KEYS, 5000),
+  rateWindowMs: toInt(RATE_LIMIT_WINDOW_MS, 60000),
+  rateMax: toInt(RATE_LIMIT_MAX, 25),
+  feedCacheTtlMs: toInt(FEED_CACHE_TTL_MS, 10 * 60 * 1000),
+  formLinkTtlMs: toInt(FORM_LINK_TTL_MS, 6 * 60 * 60 * 1000),
+  firstIntroTtlMs: toInt(FIRST_INTRO_TTL_MS, 90 * 24 * 60 * 60 * 1000),
+};
 
 // =====================
 // Constants
@@ -66,7 +76,7 @@ const WARRANTY_RULE_DZ = "garantie 3am wa7d";
 
 const FIRST_CONTACT_FR_INTRO = "Bonjour. Pour vous aider plus vite, merci d’écrire un message (pas d’audio).";
 
-// IMPORTANT: brand tag slugs (must match WooCommerce product tag slugs)
+// IMPORTANT: brand slugs/keywords you want to recognize from user messages
 const BRAND_KEYWORDS = [
   "daiko",
   "tcl",
@@ -142,36 +152,19 @@ const AFTER_SALE_SERVICE = {
 };
 
 // =====================
-// Helpers / Config
+// Utilities
 // =====================
-const toInt = (v, d) => {
-  const n = Number(v);
-  return Number.isFinite(n) ? n : d;
-};
-
-const CFG = {
-  axiosTimeoutMs: toInt(AXIOS_TIMEOUT_MS, 15000),
-  historyTtlMs: toInt(HISTORY_TTL_MS, 24 * 60 * 60 * 1000),
-  historyMaxKeys: toInt(HISTORY_MAX_KEYS, 5000),
-  rateWindowMs: toInt(RATE_LIMIT_WINDOW_MS, 60000),
-  rateMax: toInt(RATE_LIMIT_MAX, 25),
-  catalogCacheTtlMs: toInt(CATALOG_CACHE_TTL_MS, 10 * 60 * 1000),
-  tagIdCacheTtlMs: toInt(TAG_ID_CACHE_TTL_MS, 24 * 60 * 60 * 1000),
-  formLinkTtlMs: toInt(FORM_LINK_TTL_MS, 6 * 60 * 60 * 1000),
-  firstIntroTtlMs: toInt(FIRST_INTRO_TTL_MS, 90 * 24 * 60 * 60 * 1000),
-};
-
 function stableReqId() {
   return crypto.randomBytes(8).toString("hex");
+}
+
+function safeLower(s) {
+  return String(s || "").toLowerCase();
 }
 
 function shorten(text, max = 420) {
   const t = String(text || "").trim();
   return t.length > max ? t.slice(0, max).trim() : t;
-}
-
-function safeLower(s) {
-  return String(s || "").toLowerCase();
 }
 
 function normalizeNumber(x) {
@@ -279,7 +272,7 @@ function isAfterSaleIntent(text) {
   );
 }
 
-// purchase intent detection
+// Purchase intent detection
 function hasPurchaseIntent(text) {
   const s = safeLower(text);
   return (
@@ -331,19 +324,7 @@ function detectUserLanguage(text) {
 
   const t = s.toLowerCase();
 
-  const frHits = [
-    "bonjour",
-    "svp",
-    "s'il",
-    "merci",
-    "prix",
-    "livraison",
-    "garantie",
-    "réparation",
-    "reparation",
-    "panne",
-    "acheter",
-  ];
+  const frHits = ["bonjour", "svp", "s'il", "merci", "prix", "livraison", "garantie", "réparation", "reparation", "panne", "acheter"];
   if (frHits.some((w) => t.includes(w))) return "fr";
 
   const enHits = ["hello", "price", "delivery", "warranty", "repair", "support", "cheapest", "largest", "buy"];
@@ -394,14 +375,13 @@ const T = {
 // =====================
 // Stores (memory)
 // =====================
-const historyStore = new Map(); // wa -> { msgs: string[], lastSeen: number }
+const historyStore = new Map();      // wa -> { msgs: string[], lastSeen: number }
 const formLinkSentStore = new Map(); // wa -> { lastSent: number }
-const rateStore = new Map(); // wa -> { windowStart: number, count: number }
-const firstIntroStore = new Map(); // wa -> { lastSent:number }
+const rateStore = new Map();         // wa -> { windowStart: number, count: number }
+const firstIntroStore = new Map();   // wa -> { lastSent:number }
 
-// caches
-const catalogCache = new Map(); // key -> { value, expiresAt }
-const tagIdCache = new Map(); // tagSlug -> { value: number|null, expiresAt }
+// feed cache
+const feedCache = new Map(); // key -> { value, expiresAt }
 
 function ensureCapacity(map, maxKeys) {
   if (map.size <= maxKeys) return;
@@ -509,174 +489,145 @@ setInterval(() => {
   for (const [k, v] of formLinkSentStore.entries()) {
     if (!v?.lastSent || now - v.lastSent > CFG.formLinkTtlMs) formLinkSentStore.delete(k);
   }
-  for (const [k, v] of catalogCache.entries()) {
-    if (!v?.expiresAt || now > v.expiresAt) catalogCache.delete(k);
-  }
-  for (const [k, v] of tagIdCache.entries()) {
-    if (!v?.expiresAt || now > v.expiresAt) tagIdCache.delete(k);
-  }
   for (const [k, v] of firstIntroStore.entries()) {
     if (!v?.lastSent || now - v.lastSent > CFG.firstIntroTtlMs) firstIntroStore.delete(k);
+  }
+  for (const [k, v] of feedCache.entries()) {
+    if (!v?.expiresAt || now > v.expiresAt) feedCache.delete(k);
   }
 }, 1000 * 60 * 10);
 
 // =====================
-// WooCommerce adapter
+// FEED adapter (Google Merchant XML)
 // =====================
-const WC = {
-  base: String(WC_BASE_URL || "").replace(/\/$/, ""),
-  ck: WC_CONSUMER_KEY,
-  cs: WC_CONSUMER_SECRET,
-};
+const xmlParser = new XMLParser({
+  ignoreAttributes: false,
+  attributeNamePrefix: "@_",
+  // Keep namespaces as part of keys (g:id, g:price, etc.)
+  removeNSPrefix: false,
+  parseTagValue: true,
+  trimValues: true,
+});
 
-async function wcRequest(path, params = {}) {
-  const r = await axios.get(`${WC.base}${path}`, {
-    params,
-    auth: { username: WC.ck, password: WC.cs },
-    timeout: CFG.axiosTimeoutMs,
-    validateStatus: (s) => s >= 200 && s < 300,
-  });
-  return r.data;
-}
-
-function normalizeWcProduct(p) {
-  return {
-    id: p.id,
-    type: p.type,
-    name: p.name,
-    sku: p.sku || null,
-    price: p.price || null,
-    regular_price: p.regular_price || null,
-    sale_price: p.sale_price || null,
-    stock_status: p.stock_status || null,
-    in_stock: typeof p.in_stock === "boolean" ? p.in_stock : null,
-    permalink: p.permalink || null,
-    short_description: p.short_description || "",
-    description: p.description || "",
-    tags: Array.isArray(p.tags) ? p.tags.map((t) => ({ id: t.id, slug: t.slug, name: t.name })) : [],
-  };
-}
-
-async function wcGetTagIdBySlug(slug) {
-  const s = safeLower(slug).trim();
-  if (!s) return null;
-
-  const cached = cacheGet(tagIdCache, s);
-  if (cached !== null) return cached;
-
-  const tags = await wcRequest("/wp-json/wc/v3/products/tags", { slug: s, per_page: 1 });
-  const id = Array.isArray(tags) && tags[0]?.id ? Number(tags[0].id) : null;
-
-  cacheSet(tagIdCache, s, id, CFG.tagIdCacheTtlMs);
-  return id;
-}
-
-async function wcSearchByBrandTagSlug(brandSlug) {
-  const tagId = await wcGetTagIdBySlug(brandSlug);
-  if (!tagId) return [];
-  const products = await wcRequest("/wp-json/wc/v3/products", {
-    tag: tagId,
-    per_page: 12,
-    status: "publish",
-  });
-  return Array.isArray(products) ? products.map(normalizeWcProduct) : [];
-}
-
-// Multi-pass text search: text -> sku -> brand tag fallback
-async function wcSearchCatalog(userText) {
-  const raw = String(userText || "").trim();
-  if (!raw) return [];
-
-  const q = safeLower(raw).trim();
-  const cacheKey = `wc:multi:${q}`;
-  const cached = cacheGet(catalogCache, cacheKey);
-  if (cached) return cached;
-
-  let products = [];
-
-  // 1) Text search
-  const textResults = await wcRequest("/wp-json/wc/v3/products", {
-    search: raw,
-    per_page: 12,
-    status: "publish",
-  });
-  if (Array.isArray(textResults) && textResults.length) products = textResults;
-
-  // 2) SKU exact
-  if (products.length === 0) {
-    const skuMatch = q.match(/\b[a-z0-9\-]{3,24}\b/i);
-    if (skuMatch) {
-      const skuResults = await wcRequest("/wp-json/wc/v3/products", {
-        sku: skuMatch[0],
-        per_page: 12,
-        status: "publish",
-      });
-      if (Array.isArray(skuResults) && skuResults.length) products = skuResults;
-    }
-  }
-
-  // 3) Brand/tag fallback (only if still empty and brand detected)
-  if (products.length === 0) {
-    const brand = detectBrand(raw);
-    if (brand) {
-      const byTag = await wcSearchByBrandTagSlug(brand);
-      cacheSet(catalogCache, cacheKey, byTag, CFG.catalogCacheTtlMs);
-      return byTag;
-    }
-  }
-
-  const normalized = Array.isArray(products) ? products.map(normalizeWcProduct) : [];
-  cacheSet(catalogCache, cacheKey, normalized, CFG.catalogCacheTtlMs);
-  return normalized;
-}
-
-// =====================
-// Modifiers + Ranking
-// =====================
-function parsePriceMAD(p) {
-  const s = String(p?.price ?? "").replace(/[^\d.]/g, "");
-  const n = Number(s);
-  return Number.isFinite(n) ? n : Infinity;
-}
-
-function isPromo(p) {
-  const sp = String(p?.sale_price ?? "").trim();
-  const rp = String(p?.regular_price ?? "").trim();
-  if (!sp) return false;
-  if (!rp) return true;
-  return sp !== rp;
-}
-
-function productTextForFilter(p) {
-  const t = `${p?.name ?? ""} ${p?.short_description ?? ""} ${p?.description ?? ""}`;
-  return safeLower(t);
-}
-
-// TV size extraction (inches)
-function extractTvInchesFromProduct(p) {
-  const text = `${p?.name ?? ""} ${p?.short_description ?? ""}`;
-  const s = safeLower(text);
-
-  const m1 = s.match(/\b(\d{2,3})\s*(?:\"|inch|inches|pouce|pouces)\b/);
-  if (m1) return Number(m1[1]);
-
-  if (s.includes("tv") || s.includes("smart")) {
-    const m2 = s.match(/\b(24|32|40|43|50|55|65|75|85)\b/);
-    if (m2) return Number(m2[1]);
+function pick(obj, keys) {
+  for (const k of keys) {
+    const v = obj?.[k];
+    if (v !== undefined && v !== null && String(v).trim() !== "") return v;
   }
   return null;
 }
 
+function parsePriceToMADNumber(priceStr) {
+  // Feed often looks like: "15199 MAD" or "15199.00 MAD"
+  const s = String(priceStr || "").replace(",", ".").replace(/[^\d.]/g, "");
+  const n = Number(s);
+  return Number.isFinite(n) ? n : Infinity;
+}
+
+function normalizeFeedItem(item) {
+  // RSS2 items typically contain:
+  // title, link, description, g:id, g:price, g:sale_price, g:brand, g:product_type, etc.
+  const title = pick(item, ["title", "g:title"]) || "produit";
+  const link = pick(item, ["link", "g:link"]);
+  const id = pick(item, ["g:id", "id", "guid"]);
+  const description = pick(item, ["description", "g:description"]) || "";
+  const brand = pick(item, ["g:brand", "brand"]);
+  const productType = pick(item, ["g:product_type", "product_type", "g:google_product_category", "g:product_category"]);
+  const priceRaw = pick(item, ["g:price", "price"]);
+  const salePriceRaw = pick(item, ["g:sale_price", "sale_price"]);
+
+  const price = priceRaw ? parsePriceToMADNumber(priceRaw) : Infinity;
+  const sale_price = salePriceRaw ? parsePriceToMADNumber(salePriceRaw) : null;
+
+  return {
+    id: id ? String(id) : null,
+    name: String(title).trim(),
+    permalink: link ? String(link).trim() : null,
+    description: String(description || ""),
+    brand: brand ? safeLower(String(brand)) : null,
+    product_type: productType ? safeLower(String(productType)) : null,
+    price_num: price,
+    price_raw: priceRaw ? String(priceRaw) : null,
+    sale_price_num: sale_price,
+    sale_price_raw: salePriceRaw ? String(salePriceRaw) : null,
+  };
+}
+
+async function fetchFeedProducts() {
+  const cacheKey = "feed:items";
+  const cached = cacheGet(feedCache, cacheKey);
+  if (cached) return cached;
+
+  // Many hosts return 403 unless you use a browser UA.
+  const resp = await axios.get(FEED_URL, {
+    timeout: CFG.axiosTimeoutMs,
+    headers: {
+      "User-Agent":
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+      Accept: "application/xml,text/xml,*/*",
+    },
+    responseType: "text",
+    validateStatus: (s) => s >= 200 && s < 300,
+  });
+
+  const xml = String(resp.data || "");
+  const parsed = xmlParser.parse(xml);
+
+  // Common shapes:
+  // rss.channel.item[]
+  // or feed.entry[]
+  const items =
+    parsed?.rss?.channel?.item ??
+    parsed?.rss?.channel?.items ??
+    parsed?.feed?.entry ??
+    [];
+
+  const arr = Array.isArray(items) ? items : items ? [items] : [];
+  const normalized = arr.map(normalizeFeedItem).filter((p) => p?.name);
+
+  cacheSet(feedCache, cacheKey, normalized, CFG.feedCacheTtlMs);
+  return normalized;
+}
+
+// =====================
+// Search + Filters
+// =====================
+function tokenizeQuery(q) {
+  return safeLower(q)
+    .replace(/[^\p{L}\p{N}\s]/gu, " ")
+    .split(/\s+/)
+    .map((t) => t.trim())
+    .filter(Boolean)
+    .slice(0, 8);
+}
+
+function productText(p) {
+  return safeLower(`${p?.name ?? ""} ${p?.description ?? ""} ${p?.product_type ?? ""} ${p?.permalink ?? ""}`);
+}
+
+// Strict brand match from feed brand field (fallback: also allow brand keyword in product text)
+function productMatchesBrand(p, brandSlug) {
+  if (!brandSlug) return true;
+  const target = safeLower(String(brandSlug));
+
+  if (p?.brand && safeLower(p.brand) === target) return true;
+
+  // fallback: if feed brand missing, use text match
+  return productText(p).includes(target);
+}
+
+function isPromo(p) {
+  // "promo" means it has a real sale price lower than price
+  const sp = p?.sale_price_num;
+  const pr = p?.price_num;
+  if (!Number.isFinite(pr) || pr === Infinity) return false;
+  if (!Number.isFinite(sp)) return false;
+  return sp > 0 && sp < pr;
+}
+
 function wantsOnlyPromos(text) {
   const s = safeLower(text);
-  return (
-    s.includes("only promo") ||
-    s.includes("only promos") ||
-    s.includes("promo") ||
-    s.includes("promotion") ||
-    s.includes("sold") ||
-    s.includes("solde")
-  );
+  return s.includes("only promo") || s.includes("only promos") || s.includes("promo") || s.includes("promotion") || s.includes("sold") || s.includes("solde");
 }
 
 function wantsCheapest(text) {
@@ -699,6 +650,37 @@ function wantsAndroidTv(text) {
   return s.includes("android tv") || s.includes("androidtv");
 }
 
+function isTvIntent(text) {
+  const s = safeLower(text);
+  return s.includes("tv") || s.includes("tele") || s.includes("télé") || s.includes("smart tv") || s.includes("smart");
+}
+
+function productIsTv(p) {
+  const t = productText(p);
+  return (
+    t.includes(" tv") ||
+    t.includes("smart tv") ||
+    t.includes("télé") ||
+    t.includes("television") ||
+    t.includes("google tv") ||
+    (t.includes("android") && t.includes("tv"))
+  );
+}
+
+function extractTvInchesFromText(text) {
+  const s = safeLower(text);
+  const m1 = s.match(/\b(\d{2,3})\s*(?:\"|inch|inches|pouce|pouces)\b/);
+  if (m1) return Number(m1[1]);
+  const m2 = s.match(/\b(24|32|40|43|50|55|65|75|85)\b/);
+  if (m2) return Number(m2[1]);
+  return null;
+}
+
+function extractTvInchesFromProduct(p) {
+  const s = `${p?.name ?? ""} ${p?.description ?? ""}`;
+  return extractTvInchesFromText(s);
+}
+
 function applyModifiers(products, userText) {
   const modifiers = {
     onlyPromos: wantsOnlyPromos(userText),
@@ -714,7 +696,7 @@ function applyModifiers(products, userText) {
 
   if (modifiers.googleTv || modifiers.androidTv) {
     out = out.filter((p) => {
-      const t = productTextForFilter(p);
+      const t = productText(p);
       const okGoogle = !modifiers.googleTv || t.includes("google tv");
       const okAndroid = !modifiers.androidTv || (t.includes("android") && t.includes("tv"));
       return okGoogle && okAndroid;
@@ -727,61 +709,66 @@ function applyModifiers(products, userText) {
       .filter((x) => typeof x.size === "number" && Number.isFinite(x.size));
 
     if (withSize.length) {
-      withSize.sort((a, b) => b.size - a.size || parsePriceMAD(b.p) - parsePriceMAD(a.p));
+      withSize.sort((a, b) => b.size - a.size || (a.p.price_num ?? Infinity) - (b.p.price_num ?? Infinity));
       out = [withSize[0].p];
     } else {
-      out.sort((a, b) => parsePriceMAD(b) - parsePriceMAD(a));
+      out.sort((a, b) => (b.price_num ?? Infinity) - (a.price_num ?? Infinity));
       out = out.slice(0, 1);
     }
   }
 
   if (modifiers.cheapest) {
-    out.sort((a, b) => parsePriceMAD(a) - parsePriceMAD(b));
+    out.sort((a, b) => (a.price_num ?? Infinity) - (b.price_num ?? Infinity));
     out = out.slice(0, 1);
   }
 
   return { products: out, modifiers };
 }
 
-// Brand enforcement (tag-first)
-function productMatchesBrand(p, brandSlug) {
-  if (!brandSlug) return true;
-  const target = String(brandSlug).toLowerCase();
+function searchFeed(products, userText) {
+  const q = String(userText || "").trim();
+  if (!q) return [];
 
-  const tagSlugs = (p?.tags || []).map((t) => String(t?.slug || "").toLowerCase()).filter(Boolean);
-  if (tagSlugs.includes(target)) return true;
+  // If user enters a model-like token (SKU/model), treat it as exact-ish match token
+  const tokens = tokenizeQuery(q);
+  if (!tokens.length) return [];
 
-  const text = safeLower(`${p?.name ?? ""} ${p?.short_description ?? ""} ${p?.description ?? ""} ${p?.permalink ?? ""}`);
-  return text.includes(target);
-}
+  // Simple scoring: count token hits in product text
+  const scored = products.map((p) => {
+    const t = productText(p);
+    let score = 0;
+    for (const tok of tokens) {
+      if (t.includes(tok)) score += 1;
+    }
+    // slight bonus if token appears in name
+    const nameT = safeLower(p?.name ?? "");
+    for (const tok of tokens) {
+      if (nameT.includes(tok)) score += 0.5;
+    }
+    return { p, score };
+  });
 
-// =====================
-// TV intent + TV product filter
-// =====================
-function isTvIntent(text) {
-  const s = safeLower(text);
-  return s.includes("tv") || s.includes("tele") || s.includes("télé") || s.includes("smart tv") || s.includes("smart");
-}
-
-function productIsTv(p) {
-  const text = safeLower(`${p?.name ?? ""} ${p?.short_description ?? ""} ${p?.description ?? ""} ${p?.permalink ?? ""}`);
-  return (
-    text.includes(" tv") ||
-    text.includes("smart tv") ||
-    text.includes("télé") ||
-    text.includes("television") ||
-    text.includes("google tv") ||
-    (text.includes("android") && text.includes("tv"))
-  );
+  scored.sort((a, b) => b.score - a.score || (a.p.price_num ?? Infinity) - (b.p.price_num ?? Infinity));
+  return scored.filter((x) => x.score > 0).map((x) => x.p).slice(0, 12);
 }
 
 // =====================
 // Formatting (NO instock/promo labels)
 // =====================
+function formatPriceLine(p) {
+  // If a sale price exists, we still only show ONE price line to keep it clean.
+  // You can choose either: show sale price (preferred) or show regular price.
+  const sp = p?.sale_price_num;
+  const pr = p?.price_num;
+
+  if (Number.isFinite(sp) && sp > 0) return `${sp} MAD`;
+  if (Number.isFinite(pr) && pr !== Infinity) return `${pr} MAD`;
+  return "";
+}
+
 function formatProductLine(p) {
   const name = String(p?.name || "").trim() || "produit";
-  const priceNum = parsePriceMAD(p);
-  const price = Number.isFinite(priceNum) && priceNum !== Infinity ? `${priceNum} MAD` : "";
+  const price = formatPriceLine(p);
   const parts = [name, price ? `— ${price}` : ""].filter(Boolean);
 
   const link = p?.permalink ? `\n${p.permalink}` : "";
@@ -803,7 +790,7 @@ function formatCatalogReply(products, L) {
 // Routes
 // =====================
 app.get("/", (req, res) => {
-  res.status(200).send("OK - DigiTronics WhatsApp Bot is running");
+  res.status(200).send("OK - DigiTronics WhatsApp Bot is running (FEED)");
 });
 
 app.post("/wanotifier", async (req, res) => {
@@ -877,42 +864,42 @@ app.post("/wanotifier", async (req, res) => {
     }
 
     // =====================
-    // Catalog search (STRICT brand-first)
+    // Catalog search (FEED)
     // =====================
     const enforcedBrand = detectBrand(userText) || getLastBrandFromHistory(last6);
+    const feedProducts = await fetchFeedProducts();
 
-    let catalogMatches = [];
-    let searchKey = "";
+    let candidates = feedProducts;
+    let searchKey = userText;
 
+    // STRICT brand-first (prevents leakage)
     if (enforcedBrand) {
-      // Brand-only search (prevents leakage)
-      catalogMatches = await wcSearchByBrandTagSlug(enforcedBrand);
+      candidates = candidates.filter((p) => productMatchesBrand(p, enforcedBrand));
       searchKey = enforcedBrand;
     } else {
       // Free text search
-      searchKey = userText;
-      catalogMatches = await wcSearchCatalog(userText);
+      candidates = searchFeed(candidates, userText);
     }
 
-    // TV intent enforcement (important for "visio" -> then "tv")
+    // TV intent enforcement (fixes your screenshot issue: "tv" returning chauffages)
     if (isTvIntent(userText)) {
-      catalogMatches = catalogMatches.filter(productIsTv);
+      candidates = candidates.filter(productIsTv);
     }
 
     // Apply modifiers
-    const { products: filtered, modifiers } = applyModifiers(catalogMatches, userText);
-    catalogMatches = filtered;
+    const { products: filtered, modifiers } = applyModifiers(candidates, userText);
+    candidates = filtered;
 
     // Defensive brand enforcement (extra safety)
     if (enforcedBrand) {
-      catalogMatches = catalogMatches.filter((p) => productMatchesBrand(p, enforcedBrand));
+      candidates = candidates.filter((p) => productMatchesBrand(p, enforcedBrand));
     }
 
     // Format reply
-    let core = formatCatalogReply(catalogMatches, L);
+    let core = formatCatalogReply(candidates, L);
 
     if (
-      catalogMatches.length === 0 &&
+      candidates.length === 0 &&
       (modifiers.onlyPromos || modifiers.googleTv || modifiers.androidTv || modifiers.cheapest || modifiers.largest)
     ) {
       core = L.refinedNotFound;
@@ -929,7 +916,7 @@ app.post("/wanotifier", async (req, res) => {
         waNumber,
         lang,
         searchKey,
-        matches: catalogMatches?.length ?? 0,
+        matches: candidates?.length ?? 0,
         modifiers,
         enforcedBrand,
         latencyMs: ms,
@@ -955,4 +942,5 @@ app.post("/wanotifier", async (req, res) => {
 
 app.listen(Number(PORT), () => {
   console.log("Server running on port", PORT);
+  console.log("Using FEED_URL:", FEED_URL);
 });
