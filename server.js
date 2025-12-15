@@ -8,6 +8,7 @@
 // - Location intent handled (won’t trigger order flow)
 // - Learning (Option 1): log fallback replies + suggestions endpoints
 // - Uses max_completion_tokens (fixes Render error)
+// - Enforces Latin Darija output (no Arabic script) via output guard + rewrite
 
 import "dotenv/config";
 import express from "express";
@@ -78,11 +79,9 @@ function ensureLearningFiles() {
 
   if (!fs.existsSync(LEARNING_DIR)) fs.mkdirSync(LEARNING_DIR, { recursive: true });
 
-  // If rules file is missing, create a safe default
   if (!fs.existsSync(rulesPath)) {
     fs.writeFileSync(rulesPath, JSON.stringify(LEARNING_RULES, null, 2), "utf8");
   }
-
   if (!fs.existsSync(eventsPath)) fs.writeFileSync(eventsPath, "", "utf8");
   if (!fs.existsSync(suggestionsPath)) fs.writeFileSync(suggestionsPath, "", "utf8");
 }
@@ -160,7 +159,7 @@ try {
   ensureLearningFiles();
   loadLearningRules();
 } catch (e) {
-  console.log("Learning init failed, disabling learning:", e?.message || String(e));
+  console.log("Learning init failed:", e?.message || String(e));
 }
 
 // =====================
@@ -182,11 +181,11 @@ let OFFERS = {
 };
 
 let OFFERS_INDEX = {
-  brands: [], // ["VISIO","TCL",...]
-  brandLookup: new Map(), // lower brand -> BRAND
-  classes: [], // ["Machine A Laver", ...]
-  classLookup: new Map(), // lower class -> actual
-  modelLookup: new Map(), // lower model -> {brand, offer}
+  brands: [],
+  brandLookup: new Map(),
+  classes: [],
+  classLookup: new Map(),
+  modelLookup: new Map(),
 };
 
 let lastOffersSync = { ok: false, at: null, error: null };
@@ -231,11 +230,9 @@ function normalizePriceCell(r) {
 }
 
 function normalizeClassCell(r) {
-  // Your new column "class"
   return String(r.class ?? r.Class ?? r.classe ?? r.Classe ?? "").trim();
 }
 
-// Build OFFERS from CSV rows (brand, model, size, type, price, class)
 function buildOffersJsonFromRows(rows) {
   const offers = {};
 
@@ -243,21 +240,14 @@ function buildOffersJsonFromRows(rows) {
     const brand = String(normalizeBrandCell(r) || "").trim().toUpperCase();
     const model = String(normalizeModelCell(r) || "").trim();
     const size = normalizeSizeCell(r);
-    const type = normalizeTypeCell(r) || ""; // type can be empty
+    const type = normalizeTypeCell(r) || "";
     const price = normalizePriceCell(r);
-    const cls = normalizeClassCell(r); // can be empty
+    const cls = normalizeClassCell(r);
 
-    // Minimum required to keep an offer:
     if (!brand || !model || !Number.isFinite(price)) continue;
 
     if (!offers[brand]) offers[brand] = [];
-    offers[brand].push({
-      model,
-      size,
-      type,
-      price,
-      class: cls,
-    });
+    offers[brand].push({ model, size, type, price, class: cls });
   }
 
   return { ...OFFERS, offers };
@@ -272,8 +262,7 @@ function rebuildOffersIndex() {
 
   for (const b of brands) {
     brandLookup.set(String(b).toLowerCase(), b);
-    const arr = OFFERS.offers[b] || [];
-    for (const o of arr) {
+    for (const o of OFFERS.offers[b] || []) {
       if (o?.class) {
         classSet.add(o.class);
         classLookup.set(String(o.class).toLowerCase(), o.class);
@@ -318,11 +307,7 @@ async function refreshOffersSafe() {
     lastOffersSync = { ok: true, at: new Date().toISOString(), error: null };
     console.log("Offers refreshed OK");
   } catch (e) {
-    lastOffersSync = {
-      ok: false,
-      at: new Date().toISOString(),
-      error: e?.message || String(e),
-    };
+    lastOffersSync = { ok: false, at: new Date().toISOString(), error: e?.message || String(e) };
     console.log("Offers refresh failed:", lastOffersSync.error);
   }
 }
@@ -349,7 +334,6 @@ function normalizeNumber(x) {
   return cleaned || "unknown";
 }
 
-// Stronger payload normalizer (try many WA id fields)
 function normalizeWanotifierPayload(body = {}) {
   const waNumber =
     body?.wa_number ??
@@ -401,12 +385,13 @@ function looksLikeAudioMessage(body) {
   if (txt.includes("voice") || txt.includes("vocal") || txt.includes("audio")) return true;
   return false;
 }
+
+// ===== Latin-only guard =====
 function hasArabicScript(s) {
   return /[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF]/.test(String(s || ""));
 }
 
 async function forceLatinDarija(replyText) {
-  // Ask the model to rewrite the SAME meaning using Latin letters only
   const r = await openai.chat.completions.create({
     model: OPENAI_MODEL,
     messages: [
@@ -427,11 +412,11 @@ async function forceLatinDarija(replyText) {
 // =====================
 // Rate limit (per WA number)
 // =====================
-const rateStore = new Map(); // wa -> { windowStart:number, count:number }
+const rateStore = new Map();
 
 function rateLimitOk(waNumber) {
   const key = normalizeNumber(waNumber);
-  if (key === "unknown") return true; // cannot rate-limit safely
+  if (key === "unknown") return true;
 
   const now = Date.now();
   const entry = rateStore.get(key) || { windowStart: now, count: 0 };
@@ -450,11 +435,11 @@ function rateLimitOk(waNumber) {
 // Memory (last 6 messages, 24h)
 // =====================
 const HISTORY_TTL_MS = 24 * 60 * 60 * 1000;
-const historyStore = new Map(); // wa -> { msgs:[], lastSeen:number }
+const historyStore = new Map();
 
 function pushClientMessage(waNumber, msg) {
   const key = normalizeNumber(waNumber);
-  if (key === "unknown") return []; // cannot store safely
+  if (key === "unknown") return [];
 
   const now = Date.now();
   const entry = historyStore.get(key) || { msgs: [], lastSeen: now };
@@ -475,9 +460,9 @@ setInterval(() => {
 }, 10 * 60 * 1000);
 
 // =====================
-// Pending order flow (ask order number then confirm)
+// Pending order flow
 // =====================
-const pendingOrderStore = new Map(); // wa -> { waiting:boolean, at:number }
+const pendingOrderStore = new Map();
 const PENDING_ORDER_TTL_MS = 30 * 60 * 1000;
 
 setInterval(() => {
@@ -492,28 +477,16 @@ function extractOrderNumber(text) {
   return m ? m[0] : null;
 }
 
-// Order status intent (avoid false positives)
 const HARD_ORDER_KEYWORDS = ["commande", "order", "tracking", "suivi", "talab", "tlb"];
-const DELIVERY_PROBLEM_PHRASES = [
-  "لم اتوصل",
-  "ما توصلتش",
-  "ما وصلتش",
-  "matwsl",
-  "t2khret",
-  "takhert",
-  "delayed",
-  "late",
-  "retard",
-];
+const DELIVERY_PROBLEM_PHRASES = ["لم اتوصل", "ما توصلتش", "ما وصلتش", "matwsl", "t2khret", "takhert", "delayed", "late", "retard"];
 
 function isOrderStatusIntent(text) {
   const s = String(text || "").toLowerCase();
   const hasHard = HARD_ORDER_KEYWORDS.some((k) => s.includes(k));
-  const hasProblem = DELIVERY_PROBLEM_PHRASES.some((p) => s.includes(p.toLowerCase()));
+  const hasProblem = DELIVERY_PROBLEM_PHRASES.some((p) => s.includes(String(p).toLowerCase()));
   return hasHard || hasProblem;
 }
 
-// Location intent (so "فين انتم" does NOT trigger order flow)
 function isLocationIntent(text) {
   const s = String(text || "").toLowerCase();
   return (
@@ -530,7 +503,6 @@ function isLocationIntent(text) {
   );
 }
 
-// Buy intent (ONLY then send order form)
 const BUY_KEYWORDS = [
   "bghit ncharri",
   "bghit nchri",
@@ -544,7 +516,6 @@ const BUY_KEYWORDS = [
   "nchri",
   "ncommandi",
 ];
-
 function isBuyIntent(text) {
   const s = String(text || "").toLowerCase();
   return BUY_KEYWORDS.some((k) => s.includes(k));
@@ -561,11 +532,10 @@ function extractSizeOnly(text) {
 
 function extractBrandFromText(text) {
   const s = String(text || "").toLowerCase();
-
-  // Dynamic: detect any brand from sheet
   for (const b of OFFERS_INDEX.brands) {
     const bl = String(b).toLowerCase();
-    // word-ish match to reduce false positives
+    if (!bl) continue;
+
     if (bl.length <= 3) {
       const re = new RegExp(`\\b${bl}\\b`, "i");
       if (re.test(s)) return b;
@@ -573,7 +543,6 @@ function extractBrandFromText(text) {
       if (s.includes(bl)) return b;
     }
   }
-
   return null;
 }
 
@@ -586,12 +555,10 @@ function getLastBrandFromHistory(last6) {
   return null;
 }
 
-// Class detection (uses sheet classes)
 function detectClassFromText(text) {
   const s = String(text || "").toLowerCase().trim();
   if (!s) return null;
 
-  // 1) learning rules aliases
   const aliases = LEARNING_RULES?.class_aliases || {};
   for (const [canonical, list] of Object.entries(aliases)) {
     const arr = Array.isArray(list) ? list : [];
@@ -600,7 +567,6 @@ function detectClassFromText(text) {
     }
   }
 
-  // 2) actual sheet classes
   for (const cls of OFFERS_INDEX.classes) {
     const cl = String(cls).toLowerCase();
     if (cl && (s === cl || s.includes(cl))) return cls;
@@ -610,9 +576,7 @@ function detectClassFromText(text) {
 }
 
 // =====================
-// Prompt builder (uses OFFERS live + class column)
-// We DO NOT include the order form link in the prompt.
-// Orders are handled in code via isBuyIntent().
+// Prompt builder (small subset only)
 // =====================
 function buildSystemPrompt(offersSubset) {
   const rulesJson = JSON.stringify(OFFERS.rules, null, 2);
@@ -639,16 +603,15 @@ Offers JSON:
 ${offersJson}
 
 How to use "class":
-- Each offer may include "class" (category) like: TV, Machine A Laver, Chauffe-eau, Refrigerateur, Chauffage, etc.
 - If the client asks by class/category, show a short list (max 5) of matching offers with model + price.
 
 Other rules:
-- Delivery: included in price, all cities Morocco, 1-7 days.
+- Delivery: included, all cities Morocco, 1-7 days.
 - Payment: cash on delivery only.
 - Warranty: 1 year.
 - Wall mount: all TVs include a free wall mount.
 
-If product not found in offers:
+If product not found:
 "daba 3ndna had l-offre dyal had l-produits, ila katqelleb 3la chi 7aja okhra t9der tzour website dyalna: https://digitronics.ma/"
 
 If you do not know:
@@ -660,17 +623,12 @@ If info not included:
 }
 
 function pickOffersSubset(userText, last6) {
-  // Keep prompt small. Choose relevant offers by model/brand/class.
   const combined = [String(userText || ""), ...(Array.isArray(last6) ? last6 : [])].join(" ").toLowerCase();
 
-  // Model exact match
+  // Model match
   for (const [modelLower, entry] of OFFERS_INDEX.modelLookup.entries()) {
     if (combined.includes(modelLower)) {
-      return {
-        offers: {
-          [entry.brand]: [entry.offer],
-        },
-      };
+      return { offers: { [entry.brand]: [entry.offer] } };
     }
   }
 
@@ -678,20 +636,21 @@ function pickOffersSubset(userText, last6) {
   const cls = detectClassFromText(combined);
 
   if (brand && cls) {
-    const arr = (OFFERS.offers[brand] || []).filter((o) => String(o.class || "").toLowerCase() === String(cls).toLowerCase());
+    const arr = (OFFERS.offers[brand] || []).filter(
+      (o) => String(o.class || "").toLowerCase() === String(cls).toLowerCase()
+    );
     return { offers: { [brand]: arr.slice(0, 60) } };
   }
 
-  if (brand) {
-    return { offers: { [brand]: (OFFERS.offers[brand] || []).slice(0, 60) } };
-  }
+  if (brand) return { offers: { [brand]: (OFFERS.offers[brand] || []).slice(0, 60) } };
 
   if (cls) {
-    // show small sample across brands for that class
     const out = {};
     let total = 0;
     for (const b of OFFERS_INDEX.brands) {
-      const arr = (OFFERS.offers[b] || []).filter((o) => String(o.class || "").toLowerCase() === String(cls).toLowerCase());
+      const arr = (OFFERS.offers[b] || []).filter(
+        (o) => String(o.class || "").toLowerCase() === String(cls).toLowerCase()
+      );
       if (arr.length) {
         out[b] = arr.slice(0, 5);
         total += out[b].length;
@@ -701,7 +660,7 @@ function pickOffersSubset(userText, last6) {
     return { offers: out };
   }
 
-  // Fallback: only show brands list (no full dump)
+  // No dump: only show available brands/classes
   return {
     offers: {
       AVAILABLE_BRANDS: OFFERS_INDEX.brands.slice(0, 80).map((b) => ({ brand: b })),
@@ -729,7 +688,6 @@ async function digibotReplyFromLast6(userText, last6 = []) {
     model: OPENAI_MODEL,
     messages,
     temperature: 0.2,
-    // IMPORTANT: fixes your Render error
     max_completion_tokens: 280,
   });
 
@@ -743,7 +701,6 @@ app.get("/", (_req, res) => res.status(200).send("OK - DigiBot running"));
 
 app.get("/offers-status", (_req, res) => {
   const totalRows = Object.values(OFFERS.offers || {}).reduce((acc, arr) => acc + (arr?.length || 0), 0);
-
   res.status(200).json({
     ok: true,
     lastOffersSync,
@@ -761,7 +718,6 @@ app.post("/refresh-offers", async (req, res) => {
       return res.status(401).json({ ok: false, error: "Unauthorized" });
     }
   }
-
   await refreshOffersSafe();
   return res.status(200).json({ ok: true, lastOffersSync });
 });
@@ -809,7 +765,7 @@ app.post("/wanotifier", async (req, res) => {
       return res.status(200).json({ ok: true, reply: "3afak ktb msg b lktaba, bla vocal/audio." });
     }
 
-    // 0) Location intent BEFORE order checks (so “فين انتم” won’t spam order flow)
+    // 0) Location intent first
     if (isLocationIntent(userText)) {
       return res.status(200).json({
         ok: true,
@@ -817,7 +773,7 @@ app.post("/wanotifier", async (req, res) => {
       });
     }
 
-    // 1) Pending order number flow
+    // 1) Order status flow (only if wa is known)
     if (waNumber !== "unknown") {
       const pending = pendingOrderStore.get(waNumber);
       const orderNo = extractOrderNumber(userText);
@@ -827,26 +783,19 @@ app.post("/wanotifier", async (req, res) => {
           pendingOrderStore.delete(waNumber);
           return res.status(200).json({
             ok: true,
-            reply: "choukran! wsltna ra9m dyal l-commande. ghadi ntslô bik qrib.",
+            reply: "choukran! wsltna ra9m dyal l-commande. ghadi ntslô bik qrib (we will call you soon).",
           });
         }
-        return res.status(200).json({
-          ok: true,
-          reply: "3tini ra9m dyal l-commande bach ncheckiwha.",
-        });
+        return res.status(200).json({ ok: true, reply: "3tini ra9m dyal l-commande bach ncheckiwha." });
       }
 
-      // 2) Start order status flow only when intent is strong
       if (isOrderStatusIntent(userText)) {
         pendingOrderStore.set(waNumber, { waiting: true, at: Date.now() });
-        return res.status(200).json({
-          ok: true,
-          reply: "3tini ra9m dyal l-commande bach ncheckiwha.",
-        });
+        return res.status(200).json({ ok: true, reply: "3tini ra9m dyal l-commande bach ncheckiwha." });
       }
     }
 
-    // 3) Buy intent handled in CODE (prevents wrong form spam)
+    // 2) Buy intent -> order form (ONLY here)
     if (isBuyIntent(userText)) {
       return res.status(200).json({
         ok: true,
@@ -854,25 +803,24 @@ app.post("/wanotifier", async (req, res) => {
       });
     }
 
-    // 4) Save message in history
+    // 3) Save message in history
     const last6 = pushClientMessage(waNumber, userText);
 
-    // 5) If size-only, merge with last brand
+    // 4) Size-only merge
     const size = extractSizeOnly(userText);
     const lastBrand = getLastBrandFromHistory(last6);
     const finalText = size && lastBrand ? `bghit ${lastBrand} ${size} inch` : userText;
-
-    // push merged message so history becomes explicit
     const finalLast6 = finalText !== userText ? pushClientMessage(waNumber, finalText) : last6;
 
-    // 6) Ask OpenAI
-let reply = await digibotReplyFromLast6(finalText, finalLast6);
+    // 5) Ask OpenAI
+    let reply = await digibotReplyFromLast6(finalText, finalLast6);
 
-// If Arabic script leaked, auto-rewrite to Latin Darija
-if (hasArabicScript(reply)) {
-  const rewritten = await forceLatinDarija(reply);
-  if (rewritten && !hasArabicScript(rewritten)) reply = rewritten;
-}
+    // 6) Enforce Latin-only output
+    if (hasArabicScript(reply)) {
+      const rewritten = await forceLatinDarija(reply);
+      if (rewritten && !hasArabicScript(rewritten)) reply = rewritten;
+      else reply = "sma7 lia, ktb lmsg b darija (latin) w 3awd swelni b tari9a wadi7a.";
+    }
 
     // 7) Learning log (fallback replies)
     if (learningEnabled && looksLikeFallback(reply)) {
