@@ -401,6 +401,28 @@ function looksLikeAudioMessage(body) {
   if (txt.includes("voice") || txt.includes("vocal") || txt.includes("audio")) return true;
   return false;
 }
+function hasArabicScript(s) {
+  return /[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF]/.test(String(s || ""));
+}
+
+async function forceLatinDarija(replyText) {
+  // Ask the model to rewrite the SAME meaning using Latin letters only
+  const r = await openai.chat.completions.create({
+    model: OPENAI_MODEL,
+    messages: [
+      {
+        role: "system",
+        content:
+          "Rewrite the text in Moroccan Darija using Latin letters ONLY. " +
+          "ABSOLUTELY NO Arabic script characters. Keep it short and direct.",
+      },
+      { role: "user", content: String(replyText || "") },
+    ],
+    temperature: 0.0,
+    max_completion_tokens: 200,
+  });
+  return r?.choices?.[0]?.message?.content?.trim() || "";
+}
 
 // =====================
 // Rate limit (per WA number)
@@ -844,7 +866,13 @@ app.post("/wanotifier", async (req, res) => {
     const finalLast6 = finalText !== userText ? pushClientMessage(waNumber, finalText) : last6;
 
     // 6) Ask OpenAI
-    const reply = await digibotReplyFromLast6(finalText, finalLast6);
+let reply = await digibotReplyFromLast6(finalText, finalLast6);
+
+// If Arabic script leaked, auto-rewrite to Latin Darija
+if (hasArabicScript(reply)) {
+  const rewritten = await forceLatinDarija(reply);
+  if (rewritten && !hasArabicScript(rewritten)) reply = rewritten;
+}
 
     // 7) Learning log (fallback replies)
     if (learningEnabled && looksLikeFallback(reply)) {
