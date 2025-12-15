@@ -1,8 +1,4 @@
-// server.js — DigiBot (Offers from Google Sheet CSV + live refresh + last-6 memory + size-only merge + order-status flow + class column)
-//
-// ✅ Fix included: uses max_completion_tokens (NOT max_tokens)
-// ✅ Uses Google Sheet CSV columns: brand, model, size, type, price, class
-// ✅ Bot can use class in reasoning because it's included in OFFERS JSON inside the system prompt
+// server.js — DigiBot (Offers from Google Sheet CSV + class column + live refresh + last-6 memory + size-only merge + order flow fix)
 
 import "dotenv/config";
 import express from "express";
@@ -19,10 +15,9 @@ app.use(express.json({ limit: "5mb" }));
 const {
   PORT = "3000",
   OPENAI_API_KEY,
-  OPENAI_MODEL = "gpt-4o-mini", // recommended stable model
   OFFERS_CSV_URL = "",
   OFFERS_REFRESH_MS = "300000", // 5 minutes
-  OFFERS_REFRESH_TOKEN = "", // optional header protection for /refresh-offers
+  OFFERS_REFRESH_TOKEN = "", // optional security for /refresh-offers
   RATE_LIMIT_WINDOW_MS = "60000",
   RATE_LIMIT_MAX = "25",
 } = process.env;
@@ -49,6 +44,7 @@ let OFFERS = {
     payment: "cash on delivery only",
     warranty: "1 year for all products",
     wall_mount: "all TVs include a free wall mount",
+    // You can keep TV tech rules here, but offers list itself comes from Google Sheet:
     brands: {
       VISIO: "Google TV except model 32VB23E which is LED TV",
       TCL: "QLED",
@@ -60,41 +56,22 @@ let OFFERS = {
 
 let lastOffersSync = { ok: false, at: null, error: null };
 
-function normalizeBrandKey(x) {
-  return String(x || "").trim().toUpperCase();
-}
-
-function normalizeText(x) {
-  return String(x || "").trim();
-}
-
-function normalizePrice(x) {
-  const v = String(x ?? "").replace(/[^\d.]/g, "").trim();
-  const n = Number(v);
-  return Number.isFinite(n) ? n : NaN;
-}
-
-function normalizeSize(x) {
-  // allow size=0 for non-TV products
-  const v = String(x ?? "").trim();
-  const n = Number(v);
-  return Number.isFinite(n) && n >= 0 ? n : NaN;
-}
-
+// Build OFFERS from CSV rows (supports: brand, model, size, type, price, class)
 function buildOffersJsonFromRows(rows) {
   const offers = {};
 
   for (const r of rows) {
-    // Expected columns:
-    // brand, model, size, type, price, class
-    const brand = normalizeBrandKey(r.brand);
-    const model = normalizeText(r.model);
-    const size = normalizeSize(r.size);
-    const type = normalizeText(r.type);
-    const price = normalizePrice(r.price);
-    const clazz = normalizeText(r.class); // "class" column from sheet
+    const brand = String(r.brand || "").trim().toUpperCase();
+    const model = String(r.model || "").trim();
+    const sizeRaw = String(r.size ?? "").trim();
+    const size = Number(sizeRaw === "" ? 0 : sizeRaw); // allow empty -> 0
+    const type = String(r.type || "").trim();
+    const price = Number(String(r.price || "").replace(/[^\d.]/g, "").trim());
+    const productClass = String(r.class || r.Class || r.category || "").trim(); // support "class" column
 
-    if (!brand || !model || !Number.isFinite(size) || !type || !Number.isFinite(price)) continue;
+    // allow size=0 for non-TV products
+    const sizeOk = Number.isFinite(size) && size >= 0;
+    if (!brand || !model || !sizeOk || !type || !Number.isFinite(price)) continue;
 
     if (!offers[brand]) offers[brand] = [];
     offers[brand].push({
@@ -102,7 +79,7 @@ function buildOffersJsonFromRows(rows) {
       size,
       type,
       price,
-      class: clazz || null, // keep it nullable if empty
+      class: productClass || "", // store it so AI can use it
     });
   }
 
@@ -138,7 +115,7 @@ async function refreshOffersSafe() {
   }
 }
 
-// Startup sync + refresh loop
+// Startup sync + live refresh loop
 refreshOffersSafe();
 setInterval(refreshOffersSafe, CFG.refreshMs);
 
@@ -158,10 +135,6 @@ function normalizeNumber(x) {
   const raw = String(x || "").trim();
   const cleaned = raw.replace(/[^\d+]/g, "").slice(0, 32);
   return cleaned || "unknown";
-}
-
-function looksLikeOrderNumber(text) {
-  return /^\d{4,12}$/.test(String(text || "").trim());
 }
 
 // WANotifier payload normalizer
@@ -234,45 +207,6 @@ function rateLimitOk(waNumber) {
 }
 
 // =====================
-// Pending order-status flow
-// =====================
-const pendingOrderStore = new Map();
-// waNumber -> { status: "waiting" | "completed", at: number }
-
-function isOrderStatusIntent(text) {
-  const s = String(text || "").toLowerCase();
-
-  // "I didn't receive my order / where is my order" intents
-  return (
-    s.includes("commande") ||
-    s.includes("order") ||
-    s.includes("tracking") ||
-    s.includes("suivi") ||
-    s.includes("فين") || // arabic keywords
-    s.includes("وصل") ||
-    s.includes("لم اتوصل") ||
-    s.includes("ما توصلتش") ||
-    s.includes("matwsl") ||
-    s.includes("mawslt") ||
-    s.includes("twasal") ||
-    s.includes("wsltch")
-  );
-}
-
-function extractOrderNumber(text) {
-  const m = String(text || "").match(/\b\d{4,12}\b/);
-  return m ? m[0] : null;
-}
-
-// Cleanup pending order store
-setInterval(() => {
-  const now = Date.now();
-  for (const [k, v] of pendingOrderStore.entries()) {
-    if (!v?.at || now - v.at > PENDING_ORDER_TTL_MS) pendingOrderStore.delete(k);
-  }
-}, 10 * 60 * 1000);
-
-// =====================
 // Memory (last 6 messages, 24h)
 // =====================
 const HISTORY_TTL_MS = 24 * 60 * 60 * 1000;
@@ -299,6 +233,61 @@ setInterval(() => {
 }, 10 * 60 * 1000);
 
 // =====================
+// Pending order flow (ask order number then confirm)
+// =====================
+const pendingOrderStore = new Map(); // wa -> { waiting:boolean, at:number }
+const PENDING_ORDER_TTL_MS = 30 * 60 * 1000;
+
+setInterval(() => {
+  const now = Date.now();
+  for (const [k, v] of pendingOrderStore.entries()) {
+    if (!v?.at || now - v.at > PENDING_ORDER_TTL_MS) pendingOrderStore.delete(k);
+  }
+}, 10 * 60 * 1000);
+
+function extractOrderNumber(text) {
+  const m = String(text || "").match(/\b\d{4,12}\b/);
+  return m ? m[0] : null;
+}
+
+// ✅ Better, less false positives (removed generic "وصل")
+const HARD_ORDER_KEYWORDS = ["commande", "order", "tracking", "suivi", "talab", "tlb"];
+const DELIVERY_PROBLEM_PHRASES = [
+  "لم اتوصل",
+  "ما توصلتش",
+  "ما وصلتش",
+  "matwsl",
+  "matsalat",
+  "t2khret",
+  "takhert",
+  "delayed",
+  "late",
+];
+
+function isOrderStatusIntent(text) {
+  const s = String(text || "").toLowerCase();
+  const hasHard = HARD_ORDER_KEYWORDS.some((k) => s.includes(k));
+  const hasProblem = DELIVERY_PROBLEM_PHRASES.some((p) => s.includes(p));
+  return hasHard || hasProblem;
+}
+
+// Location intent (so "فين انتم" doesn't trigger order flow)
+function isLocationIntent(text) {
+  const s = String(text || "").toLowerCase();
+  return (
+    s.includes("فين") ||
+    s.includes("where") ||
+    s.includes("adresse") ||
+    s.includes("address") ||
+    s.includes("العنوان") ||
+    s.includes("عنوان") ||
+    s.includes("المحل") ||
+    s.includes("فين كاين") ||
+    s.includes("فين انتوما")
+  );
+}
+
+// =====================
 // Size-only merge helpers
 // =====================
 function extractSizeOnly(text) {
@@ -315,7 +304,6 @@ function extractBrandFromText(text) {
   if (s.includes("samsung")) return "SAMSUNG";
   if (s.includes("candy")) return "CANDY";
   if (s.includes("krohler") || s.includes("trio")) return "TRIO_KROHLER";
-  // allow any other brand that might exist in sheet: capture first word if it matches an OFFERS brand
   return null;
 }
 
@@ -329,45 +317,32 @@ function getLastBrandFromHistory(last6) {
 }
 
 // =====================
-// Prompt builder (uses OFFERS live) — includes "class"
+// Prompt builder (uses OFFERS live + class column)
 // =====================
 function buildSystemPrompt() {
   return `
-You are DigiBot for Digitronics.ma.
-Always reply in Moroccan Darija using Latin letters (do NOT use Arabic script).
-Short and direct.
-Do NOT say you are an AI.
+You are DigiBot for Digitronics.ma. Always reply in Moroccan Darija (Latin letters), never in Arabic script, short and direct. Do not say you are an AI.
 
 Company info:
 Address: 30 RUE 9 ETG RC LTS SMARA, Haj Fateh, Oulfa, Casablanca 20230.
 Phone/WhatsApp: 06 60 111 438.
 Email: contact@digitronics.ma.
 
-Use ONLY the following offers and rules (JSON). Each offer can include: brand, model, size, type, price, class.
-When client asks about a product category (ex: "air fryer", "chauffage", "machine a laver"), use the "class" field to match.
-
-OFFERS_JSON:
+Use ONLY the following offers and rules (JSON). Each offer may have fields: brand, model, size, type, price, class.
+IMPORTANT: Use "class" to understand product category (ex: TV, Machine A Laver, Chauffage, etc.) and answer accordingly.
 ${JSON.stringify(OFFERS, null, 2)}
 
-Extra strict rules:
+Strict rules:
 - If client asks about wall mount: say all TVs include free wall mount.
 - If client asks if delivery included: say yes, delivery included.
-- Delivery: 1 to 7 days depending on city.
-- Payment: cash on delivery.
+- Payment: cash on delivery only.
 - Warranty: 1 year.
 
-Order issue detection (HIGH PRIORITY):
-- If the client says they did not receive the order, order is late, missing, delayed, or asks about order status,
-  DO NOT send the order form.
-- Ask ONLY for the order number:
-  "3tini ra9m dyal l-commande bach ncheckiwha"
-- If client gives the order number: reply that we will call soon to confirm the status.
-
-Buying flow:
+Order flows (HIGH PRIORITY):
 - If client wants to order (buy): reply only with:
-  "mzyan! 3mr had formulaire bach nkmlo l-commande: https://docs.google.com/forms/d/e/1FAIpQLScmDNagYSpUPfsIT2s2t35KH7U1OWSNkUCIWmcJJm1R_aITQQ/viewform?usp=header"
+"mzyan! 3mr had formulaire bach nkmlo l-commande: https://docs.google.com/forms/d/e/1FAIpQLScmDNagYSpUPfsIT2s2t35KH7U1OWSNkUCIWmcJJm1R_aITQQ/viewform?usp=header"
 - If product not in offers: reply:
-  "daba 3ndna had l-offre dyal had l-produits, ila katqelleb 3la chi 7aja okhra t9der tzour website dyalna: https://digitronics.ma/"
+"daba 3ndna had l-offre dyal had l-produits, ila katqelleb 3la chi 7aja okhra t9der tzour website dyalna: https://digitronics.ma/"
 - If you do not know: "ghadi njawb 3la had l-moudou3 mnn ba3d bach nkoon mttaakd"
 - If info not included: "ma kaynach had l-ma3louma 3ndna daba"
 `;
@@ -388,12 +363,12 @@ async function digibotReplyFromLast6(last6 = []) {
     ...contextTurns.map((m) => ({ role: "user", content: m })),
   ];
 
-  // ✅ FIX: use max_completion_tokens
   const r = await openai.chat.completions.create({
-    model: OPENAI_MODEL,
+    model: "gpt-5.2",
     messages,
     temperature: 0.2,
-    max_completion_tokens: 450,
+    // ✅ avoid the Render error you showed
+    max_completion_tokens: 280,
   });
 
   return r?.choices?.[0]?.message?.content?.trim() || "";
@@ -405,25 +380,12 @@ async function digibotReplyFromLast6(last6 = []) {
 app.get("/", (_req, res) => res.status(200).send("OK - DigiBot running"));
 
 app.get("/offers-status", (_req, res) => {
-  const brands = Object.keys(OFFERS.offers || {});
-  const totalRows = Object.values(OFFERS.offers || {}).reduce((acc, arr) => acc + (arr?.length || 0), 0);
-
-  // optional: distinct classes
-  const classes = new Set();
-  for (const arr of Object.values(OFFERS.offers || {})) {
-    for (const o of arr || []) {
-      if (o?.class) classes.add(o.class);
-    }
-  }
-
   res.status(200).json({
     ok: true,
     lastOffersSync,
     refreshEveryMs: CFG.refreshMs,
-    brands,
-    totalRows,
-    classes: Array.from(classes).slice(0, 200),
-    model: OPENAI_MODEL,
+    brands: Object.keys(OFFERS.offers || {}),
+    totalRows: Object.values(OFFERS.offers || {}).reduce((acc, arr) => acc + (arr?.length || 0), 0),
   });
 });
 
@@ -452,7 +414,6 @@ app.post("/wanotifier", async (req, res) => {
       return res.status(429).json({ ok: false, error: "Rate limit exceeded" });
     }
 
-    // Block audio/media
     if (looksLikeAudioMessage(req.body || {})) {
       return res.status(200).json({ ok: true, reply: "3afak ktb msg b lktaba, bla vocal/audio." });
     }
@@ -461,63 +422,45 @@ app.post("/wanotifier", async (req, res) => {
       return res.status(200).json({ ok: true, reply: "3afak ktb msg b lktaba, bla vocal/audio." });
     }
 
-    // =====================
-    // Order status flow (outside OpenAI)
-    // =====================
-const pending = pendingOrderStore.get(waNumber);
-const orderNo = extractOrderNumber(userText);
+    // 0) Location intent BEFORE order intent
+    if (isLocationIntent(userText)) {
+      return res.status(200).json({
+        ok: true,
+        reply: "l3onwan dyalna: 30 RUE 9 ETG RC LTS SMARA, Haj Fateh, Oulfa, Casablanca 20230.",
+      });
+    }
 
-// If waiting for order number
-if (pending?.status === "waiting") {
-  if (orderNo) {
-    pendingOrderStore.set(waNumber, {
-      status: "completed",
-      at: Date.now(),
-    });
+    // 1) Pending order number flow
+    const pending = pendingOrderStore.get(waNumber);
+    const orderNo = extractOrderNumber(userText);
 
-    return res.status(200).json({
-      ok: true,
-      reply: "choukran! wsltna ra9m dyal l-commande. ghadi ntslô bik qrib.",
-    });
-  }
+    if (pending?.waiting) {
+      if (orderNo) {
+        pendingOrderStore.delete(waNumber);
+        return res.status(200).json({
+          ok: true,
+          reply: "choukran! wsltna ra9m dyal l-commande. ghadi ntslô bik qrib.",
+        });
+      }
+      return res.status(200).json({
+        ok: true,
+        reply: "3tini ra9m dyal l-commande bach ncheckiwha.",
+      });
+    }
 
-  return res.status(200).json({
-    ok: true,
-    reply: "3tini ra9m dyal l-commande bach ncheckiwha.",
-  });
-}
+    // 2) Start order status flow only when intent is strong
+    if (isOrderStatusIntent(userText)) {
+      pendingOrderStore.set(waNumber, { waiting: true, at: Date.now() });
+      return res.status(200).json({
+        ok: true,
+        reply: "3tini ra9m dyal l-commande bach ncheckiwha.",
+      });
+    }
 
-
-    // If user asks about order status
-if (isOrderStatusIntent(userText)) {
-  const existing = pendingOrderStore.get(waNumber);
-
-  // If order already completed, do NOT restart
-  if (existing?.status === "completed") {
-    return res.status(200).json({
-      ok: true,
-      reply: "rah deja akhadina ra9m dyal l-commande, ghadi ntslô bik qrib.",
-    });
-  }
-
-  pendingOrderStore.set(waNumber, {
-    status: "waiting",
-    at: Date.now(),
-  });
-
-  return res.status(200).json({
-    ok: true,
-    reply: "3tini ra9m dyal l-commande bach ncheckiwha.",
-  });
-}
-
-
-    // =====================
-    // Normal chat flow (OpenAI)
-    // =====================
+    // 3) Save message in history
     const last6 = pushClientMessage(waNumber, userText);
 
-    // If size-only, merge with last brand
+    // 4) If size-only, merge with last brand
     const size = extractSizeOnly(userText);
     const lastBrand = getLastBrandFromHistory(last6);
     const finalText = size && lastBrand ? `bghit ${lastBrand} ${size} inch` : userText;
@@ -525,6 +468,7 @@ if (isOrderStatusIntent(userText)) {
     // push merged message so history becomes explicit
     const finalLast6 = finalText !== userText ? pushClientMessage(waNumber, finalText) : last6;
 
+    // 5) Ask OpenAI
     const reply = await digibotReplyFromLast6(finalLast6);
 
     const ms = Date.now() - t0;
