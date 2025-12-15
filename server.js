@@ -236,8 +236,8 @@ function rateLimitOk(waNumber) {
 // =====================
 // Pending order-status flow
 // =====================
-const pendingOrderStore = new Map(); // waNumber -> { waiting: boolean, at: number }
-const PENDING_ORDER_TTL_MS = 30 * 60 * 1000; // 30 min
+const pendingOrderStore = new Map();
+// waNumber -> { status: "waiting" | "completed", at: number }
 
 function isOrderStatusIntent(text) {
   const s = String(text || "").toLowerCase();
@@ -464,32 +464,53 @@ app.post("/wanotifier", async (req, res) => {
     // =====================
     // Order status flow (outside OpenAI)
     // =====================
-    const pending = pendingOrderStore.get(waNumber);
-    const orderNo = extractOrderNumber(userText);
+const pending = pendingOrderStore.get(waNumber);
+const orderNo = extractOrderNumber(userText);
 
-    // If we are waiting for an order number
-    if (pending?.waiting) {
-      if (orderNo) {
-        pendingOrderStore.delete(waNumber);
-        return res.status(200).json({
-          ok: true,
-          reply: "choukran! wsltna ra9m dyal l-commande. ghadi ntslô bik qrib.",
-        });
-      }
-      return res.status(200).json({
-        ok: true,
-        reply: "3tini ra9m dyal l-commande bach ncheckiwha.",
-      });
-    }
+// If waiting for order number
+if (pending?.status === "waiting") {
+  if (orderNo) {
+    pendingOrderStore.set(waNumber, {
+      status: "completed",
+      at: Date.now(),
+    });
+
+    return res.status(200).json({
+      ok: true,
+      reply: "choukran! wsltna ra9m dyal l-commande. ghadi ntslô bik qrib.",
+    });
+  }
+
+  return res.status(200).json({
+    ok: true,
+    reply: "3tini ra9m dyal l-commande bach ncheckiwha.",
+  });
+}
+
 
     // If user asks about order status
-    if (isOrderStatusIntent(userText)) {
-      pendingOrderStore.set(waNumber, { waiting: true, at: Date.now() });
-      return res.status(200).json({
-        ok: true,
-        reply: "3tini ra9m dyal l-commande bach ncheckiwha.",
-      });
-    }
+if (isOrderStatusIntent(userText)) {
+  const existing = pendingOrderStore.get(waNumber);
+
+  // If order already completed, do NOT restart
+  if (existing?.status === "completed") {
+    return res.status(200).json({
+      ok: true,
+      reply: "rah deja akhadina ra9m dyal l-commande, ghadi ntslô bik qrib.",
+    });
+  }
+
+  pendingOrderStore.set(waNumber, {
+    status: "waiting",
+    at: Date.now(),
+  });
+
+  return res.status(200).json({
+    ok: true,
+    reply: "3tini ra9m dyal l-commande bach ncheckiwha.",
+  });
+}
+
 
     // =====================
     // Normal chat flow (OpenAI)
