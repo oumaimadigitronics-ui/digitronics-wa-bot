@@ -271,6 +271,12 @@ ${JSON.stringify(OFFERS, null, 2)}
 Extra strict rules:
 - If client asks about wall mount: say all TVs include free wall mount.
 - If client asks if delivery included: say yes, delivery included.
+Order issue detection (HIGH PRIORITY):
+- If the client says they did not receive the order, order is late, missing, delayed, or asks about order status
+  (examples: "لم اتوصل بالطلب", "commande ma wsltch", "فين وصل الطلب", "order delayed"),
+  DO NOT send the order form.
+- Always ask ONLY for the order number:
+  "3tini ra9m dyal l-commande bach ncheckiwha"
 - If client wants to order (buy): reply only with:
 "mzyan! 3mr had formulaire bach nkmlo l-commande: https://docs.google.com/forms/d/e/1FAIpQLScmDNagYSpUPfsIT2s2t35KH7U1OWSNkUCIWmcJJm1R_aITQQ/viewform?usp=header"
 - If product not in offers: reply:
