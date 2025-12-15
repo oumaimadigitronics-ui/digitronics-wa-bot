@@ -129,6 +129,11 @@ function normalizeNumber(x) {
   return cleaned || "unknown";
 }
 
+function looksLikeOrderNumber(text) {
+  return /^\d{4,10}$/.test(String(text || "").trim());
+}
+
+
 // WANotifier payload normalizer
 function normalizeWanotifierPayload(body = {}) {
   const waNumber =
