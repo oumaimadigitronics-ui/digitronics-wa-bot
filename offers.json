@@ -1,0 +1,18 @@
+{
+  "rules": {
+    "delivery": "delivery available to all cities in Morocco. Delivery time between 1 and 7 days.",
+    "payment": "cash on delivery only",
+    "warranty": "1 year for all products",
+    "wall_mount": "all TVs include a free wall mount",
+    "brands": {
+      "VISIO": "Google TV except model 32VB23E which is LED TV",
+      "TCL": "QLED",
+      "MORSAT": "Android TV"
+    }
+  },
+  "offers": {
+    "VISIO": [
+      { "model": "32VB23E", "size": 32, "type": "LED TV", "price": 845 }
+    ]
+  }
+}
