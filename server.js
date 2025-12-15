@@ -1,10 +1,21 @@
-// server.js — DigiBot (Offers from Google Sheet CSV + class column + live refresh + last-6 memory + size-only merge + order flow fix)
+// server.js — DigiBot
+// Features:
+// - Offers from Google Sheet CSV (brand, model, size, type, price, class)
+// - Live refresh (timer + manual endpoint)
+// - Last-6 messages per WhatsApp number (memory)
+// - Size-only follow-up merge: "43" -> "bghit VISIO 43 inch" (based on last brand)
+// - Order status flow: ask order number, then confirm "we will call you soon"
+// - Location intent handled (won’t trigger order flow)
+// - Learning (Option 1): log fallback replies + suggestions endpoints
+// - Uses max_completion_tokens (fixes Render error)
 
 import "dotenv/config";
 import express from "express";
 import crypto from "crypto";
 import OpenAI from "openai";
 import { parse } from "csv-parse/sync";
+import fs from "fs";
+import path from "path";
 
 const app = express();
 app.use(express.json({ limit: "5mb" }));
@@ -15,11 +26,22 @@ app.use(express.json({ limit: "5mb" }));
 const {
   PORT = "3000",
   OPENAI_API_KEY,
+  OPENAI_MODEL = "gpt-5.2",
+
   OFFERS_CSV_URL = "",
-  OFFERS_REFRESH_MS = "300000", // 5 minutes
-  OFFERS_REFRESH_TOKEN = "", // optional security for /refresh-offers
+  OFFERS_REFRESH_MS = "300000", // 5 min
+  OFFERS_REFRESH_TOKEN = "",
+
   RATE_LIMIT_WINDOW_MS = "60000",
   RATE_LIMIT_MAX = "25",
+
+  // Order form
+  ORDER_FORM_URL = "https://docs.google.com/forms/d/e/1FAIpQLScmDNagYSpUPfsIT2s2t35KH7U1OWSNkUCIWmcJJm1R_aITQQ/viewform?usp=header",
+
+  // Learning (Option 1)
+  LEARNING_ENABLED = "0",
+  LEARNING_TOKEN = "",
+  LEARNING_DIR = "./learning",
 } = process.env;
 
 if (!OPENAI_API_KEY) {
@@ -36,6 +58,112 @@ const CFG = {
 const openai = new OpenAI({ apiKey: OPENAI_API_KEY });
 
 // =====================
+// LEARNING (Option 1)
+// =====================
+const learningEnabled = LEARNING_ENABLED === "1";
+const rulesPath = path.join(LEARNING_DIR, "learning_rules.json");
+const eventsPath = path.join(LEARNING_DIR, "learning_events.ndjson");
+const suggestionsPath = path.join(LEARNING_DIR, "learning_suggestions.ndjson");
+
+let LEARNING_RULES = {
+  version: 1,
+  synonyms: {},
+  class_aliases: {},
+  intent_keywords: {},
+  guardrails: { min_occurrences_to_suggest: 2 },
+};
+
+function ensureLearningFiles() {
+  if (!learningEnabled) return;
+
+  if (!fs.existsSync(LEARNING_DIR)) fs.mkdirSync(LEARNING_DIR, { recursive: true });
+
+  // If rules file is missing, create a safe default
+  if (!fs.existsSync(rulesPath)) {
+    fs.writeFileSync(rulesPath, JSON.stringify(LEARNING_RULES, null, 2), "utf8");
+  }
+
+  if (!fs.existsSync(eventsPath)) fs.writeFileSync(eventsPath, "", "utf8");
+  if (!fs.existsSync(suggestionsPath)) fs.writeFileSync(suggestionsPath, "", "utf8");
+}
+
+function readJsonSafe(p, fallback) {
+  try {
+    return JSON.parse(fs.readFileSync(p, "utf8"));
+  } catch {
+    return fallback;
+  }
+}
+
+function loadLearningRules() {
+  if (!learningEnabled) return LEARNING_RULES;
+  LEARNING_RULES = readJsonSafe(rulesPath, LEARNING_RULES);
+  return LEARNING_RULES;
+}
+
+function appendNdjson(p, obj) {
+  try {
+    fs.appendFileSync(p, JSON.stringify(obj) + "\n", "utf8");
+  } catch (e) {
+    console.log("appendNdjson failed:", e?.message || String(e));
+  }
+}
+
+function looksLikeFallback(reply) {
+  const r = String(reply || "").toLowerCase();
+  return (
+    !r ||
+    r.includes("ma kaynach") ||
+    r.includes("ghadi njawb") ||
+    r.includes("ma fhemtch") ||
+    r.includes("sma7 lia")
+  );
+}
+
+function suggestFromEventsSimple(maxLines = 800) {
+  if (!fs.existsSync(eventsPath)) return [];
+  const txt = fs.readFileSync(eventsPath, "utf8").trim();
+  if (!txt) return [];
+
+  const lines = txt.split("\n").slice(-maxLines).filter(Boolean);
+
+  const counts = new Map();
+  for (const line of lines) {
+    try {
+      const e = JSON.parse(line);
+      if (e.reason !== "fallback_reply") continue;
+      const key = String(e.text || "").toLowerCase().trim();
+      if (!key) continue;
+      counts.set(key, (counts.get(key) || 0) + 1);
+    } catch {}
+  }
+
+  const minN = Number(LEARNING_RULES?.guardrails?.min_occurrences_to_suggest || 2);
+
+  const out = [];
+  for (const [phrase, occurrences] of counts.entries()) {
+    if (occurrences >= minN) {
+      out.push({
+        at: new Date().toISOString(),
+        type: "review_phrase",
+        phrase,
+        occurrences,
+      });
+    }
+  }
+
+  return out.slice(0, 50);
+}
+
+// Init learning (safe)
+try {
+  ensureLearningFiles();
+  loadLearningRules();
+} catch (e) {
+  console.log("Learning init failed, disabling learning:", e?.message || String(e));
+}
+
+// =====================
 // OFFERS (in-memory)
 // =====================
 let OFFERS = {
@@ -44,34 +172,83 @@ let OFFERS = {
     payment: "cash on delivery only",
     warranty: "1 year for all products",
     wall_mount: "all TVs include a free wall mount",
-    // You can keep TV tech rules here, but offers list itself comes from Google Sheet:
     brands: {
       VISIO: "Google TV except model 32VB23E which is LED TV",
       TCL: "QLED",
       MORSAT: "Android TV",
     },
   },
-  offers: {}, // filled from Google Sheet
+  offers: {}, // { BRAND: [{model,size,type,price,class}] }
+};
+
+let OFFERS_INDEX = {
+  brands: [], // ["VISIO","TCL",...]
+  brandLookup: new Map(), // lower brand -> BRAND
+  classes: [], // ["Machine A Laver", ...]
+  classLookup: new Map(), // lower class -> actual
+  modelLookup: new Map(), // lower model -> {brand, offer}
 };
 
 let lastOffersSync = { ok: false, at: null, error: null };
 
-// Build OFFERS from CSV rows (supports: brand, model, size, type, price, class)
+function cacheBustUrl(url) {
+  if (!url) return url;
+  const sep = url.includes("?") ? "&" : "?";
+  return `${url}${sep}ts=${Date.now()}`;
+}
+
+function normalizeBrandCell(r) {
+  return (
+    r.brand ??
+    r.Brand ??
+    r.marque ??
+    r.Marque ??
+    r["Brand/Marque"] ??
+    r["brand/marque"] ??
+    ""
+  );
+}
+
+function normalizeModelCell(r) {
+  return r.model ?? r.Model ?? r.sku ?? r.SKU ?? r["product_sku"] ?? "";
+}
+
+function normalizeSizeCell(r) {
+  const raw = r.size ?? r.Size ?? r.inch ?? r.Inch ?? r["taille"] ?? r["Taille"] ?? "0";
+  const n = Number(String(raw || "0").trim());
+  return Number.isFinite(n) ? n : 0;
+}
+
+function normalizeTypeCell(r) {
+  return String(r.type ?? r.Type ?? "").trim();
+}
+
+function normalizePriceCell(r) {
+  const raw = String(r.price ?? r.Price ?? "").trim();
+  const digits = raw.replace(/[^\d.]/g, "");
+  const n = Number(digits);
+  return Number.isFinite(n) ? n : NaN;
+}
+
+function normalizeClassCell(r) {
+  // Your new column "class"
+  return String(r.class ?? r.Class ?? r.classe ?? r.Classe ?? "").trim();
+}
+
+// Build OFFERS from CSV rows (brand, model, size, type, price, class)
 function buildOffersJsonFromRows(rows) {
   const offers = {};
 
   for (const r of rows) {
-    const brand = String(r.brand || "").trim().toUpperCase();
-    const model = String(r.model || "").trim();
-    const sizeRaw = String(r.size ?? "").trim();
-    const size = Number(sizeRaw === "" ? 0 : sizeRaw); // allow empty -> 0
-    const type = String(r.type || "").trim();
-    const price = Number(String(r.price || "").replace(/[^\d.]/g, "").trim());
-    const productClass = String(r.class || r.Class || r.category || "").trim(); // support "class" column
+    const brand = String(normalizeBrandCell(r) || "").trim().toUpperCase();
+    const model = String(normalizeModelCell(r) || "").trim();
+    const size = normalizeSizeCell(r);
+    const type = normalizeTypeCell(r) || ""; // type can be empty
+    const price = normalizePriceCell(r);
+    const cls = normalizeClassCell(r); // can be empty
 
-    // allow size=0 for non-TV products
-    const sizeOk = Number.isFinite(size) && size >= 0;
-    if (!brand || !model || !sizeOk || !type || !Number.isFinite(price)) continue;
+    // Minimum required to keep an offer:
+    if (!brand || !model || !Number.isFinite(price)) continue;
 
     if (!offers[brand]) offers[brand] = [];
     offers[brand].push({
@@ -79,17 +256,47 @@ function buildOffersJsonFromRows(rows) {
       size,
       type,
       price,
-      class: productClass || "", // store it so AI can use it
+      class: cls,
     });
   }
 
   return { ...OFFERS, offers };
 }
 
+function rebuildOffersIndex() {
+  const brands = Object.keys(OFFERS.offers || {}).sort();
+  const brandLookup = new Map();
+  const classSet = new Set();
+  const classLookup = new Map();
+  const modelLookup = new Map();
+
+  for (const b of brands) {
+    brandLookup.set(String(b).toLowerCase(), b);
+    const arr = OFFERS.offers[b] || [];
+    for (const o of arr) {
+      if (o?.class) {
+        classSet.add(o.class);
+        classLookup.set(String(o.class).toLowerCase(), o.class);
+      }
+      if (o?.model) {
+        modelLookup.set(String(o.model).toLowerCase(), { brand: b, offer: o });
+      }
+    }
+  }
+
+  OFFERS_INDEX = {
+    brands,
+    brandLookup,
+    classes: Array.from(classSet).sort(),
+    classLookup,
+    modelLookup,
+  };
+}
+
 async function syncOffersFromGoogleSheet() {
   if (!OFFERS_CSV_URL) throw new Error("Missing OFFERS_CSV_URL in env");
 
-  const res = await fetch(OFFERS_CSV_URL);
+  const res = await fetch(cacheBustUrl(OFFERS_CSV_URL));
   if (!res.ok) throw new Error(`Sheet fetch failed: ${res.status}`);
 
   const csvText = await res.text();
@@ -101,6 +308,7 @@ async function syncOffersFromGoogleSheet() {
   });
 
   OFFERS = buildOffersJsonFromRows(rows);
+  rebuildOffersIndex();
   return OFFERS;
 }
 
@@ -110,7 +318,11 @@ async function refreshOffersSafe() {
     lastOffersSync = { ok: true, at: new Date().toISOString(), error: null };
     console.log("Offers refreshed OK");
   } catch (e) {
-    lastOffersSync = { ok: false, at: new Date().toISOString(), error: e?.message || String(e) };
+    lastOffersSync = {
+      ok: false,
+      at: new Date().toISOString(),
+      error: e?.message || String(e),
+    };
     console.log("Offers refresh failed:", lastOffersSync.error);
   }
 }
@@ -137,10 +349,11 @@ function normalizeNumber(x) {
   return cleaned || "unknown";
 }
 
-// WANotifier payload normalizer
+// Stronger payload normalizer (try many WA id fields)
 function normalizeWanotifierPayload(body = {}) {
   const waNumber =
     body?.wa_number ??
+    body?.waNumber ??
     body?.whatsapp_number ??
     body?.whatsapp ??
     body?.from ??
@@ -149,6 +362,9 @@ function normalizeWanotifierPayload(body = {}) {
     body?.phone ??
     body?.msisdn ??
     body?.number ??
+    body?.data?.wa_number ??
+    body?.data?.from ??
+    body?.data?.sender ??
     "unknown";
 
   const text =
@@ -193,6 +409,8 @@ const rateStore = new Map(); // wa -> { windowStart:number, count:number }
 
 function rateLimitOk(waNumber) {
   const key = normalizeNumber(waNumber);
+  if (key === "unknown") return true; // cannot rate-limit safely
+
   const now = Date.now();
   const entry = rateStore.get(key) || { windowStart: now, count: 0 };
 
@@ -214,6 +432,8 @@ const historyStore = new Map(); // wa -> { msgs:[], lastSeen:number }
 
 function pushClientMessage(waNumber, msg) {
   const key = normalizeNumber(waNumber);
+  if (key === "unknown") return []; // cannot store safely
+
   const now = Date.now();
   const entry = historyStore.get(key) || { msgs: [], lastSeen: now };
 
@@ -250,28 +470,28 @@ function extractOrderNumber(text) {
   return m ? m[0] : null;
 }
 
-// ✅ Better, less false positives (removed generic "وصل")
+// Order status intent (avoid false positives)
 const HARD_ORDER_KEYWORDS = ["commande", "order", "tracking", "suivi", "talab", "tlb"];
 const DELIVERY_PROBLEM_PHRASES = [
   "لم اتوصل",
   "ما توصلتش",
   "ما وصلتش",
   "matwsl",
-  "matsalat",
   "t2khret",
   "takhert",
   "delayed",
   "late",
+  "retard",
 ];
 
 function isOrderStatusIntent(text) {
   const s = String(text || "").toLowerCase();
   const hasHard = HARD_ORDER_KEYWORDS.some((k) => s.includes(k));
-  const hasProblem = DELIVERY_PROBLEM_PHRASES.some((p) => s.includes(p));
+  const hasProblem = DELIVERY_PROBLEM_PHRASES.some((p) => s.includes(p.toLowerCase()));
   return hasHard || hasProblem;
 }
 
-// Location intent (so "فين انتم" doesn't trigger order flow)
+// Location intent (so "فين انتم" does NOT trigger order flow)
 function isLocationIntent(text) {
   const s = String(text || "").toLowerCase();
   return (
@@ -283,8 +503,29 @@ function isLocationIntent(text) {
     s.includes("عنوان") ||
     s.includes("المحل") ||
     s.includes("فين كاين") ||
-    s.includes("فين انتوما")
+    s.includes("فين انتوما") ||
+    s.includes("فين انتم")
   );
+}
+
+// Buy intent (ONLY then send order form)
+const BUY_KEYWORDS = [
+  "bghit ncharri",
+  "bghit nchri",
+  "bghit ncommandi",
+  "bghit ncommander",
+  "commander",
+  "acheter",
+  "buy",
+  "purchase",
+  "ncharri",
+  "nchri",
+  "ncommandi",
+];
+
+function isBuyIntent(text) {
+  const s = String(text || "").toLowerCase();
+  return BUY_KEYWORDS.some((k) => s.includes(k));
 }
 
 // =====================
@@ -298,12 +539,19 @@ function extractSizeOnly(text) {
 
 function extractBrandFromText(text) {
   const s = String(text || "").toLowerCase();
-  if (s.includes("visio")) return "VISIO";
-  if (s.includes("tcl")) return "TCL";
-  if (s.includes("morsat")) return "MORSAT";
-  if (s.includes("samsung")) return "SAMSUNG";
-  if (s.includes("candy")) return "CANDY";
-  if (s.includes("krohler") || s.includes("trio")) return "TRIO_KROHLER";
+
+  // Dynamic: detect any brand from sheet
+  for (const b of OFFERS_INDEX.brands) {
+    const bl = String(b).toLowerCase();
+    // word-ish match to reduce false positives
+    if (bl.length <= 3) {
+      const re = new RegExp(`\\b${bl}\\b`, "i");
+      if (re.test(s)) return b;
+    } else {
+      if (s.includes(bl)) return b;
+    }
+  }
+
   return null;
 }
 
@@ -316,58 +564,150 @@ function getLastBrandFromHistory(last6) {
   return null;
 }
 
-// =====================
-// Prompt builder (uses OFFERS live + class column)
-// =====================
-function buildSystemPrompt() {
-  return `
-You are DigiBot for Digitronics.ma. Always reply in Moroccan Darija (Latin letters), never in Arabic script, short and direct. Do not say you are an AI.
+// Class detection (uses sheet classes)
+function detectClassFromText(text) {
+  const s = String(text || "").toLowerCase().trim();
+  if (!s) return null;
 
-Company info:
-Address: 30 RUE 9 ETG RC LTS SMARA, Haj Fateh, Oulfa, Casablanca 20230.
-Phone/WhatsApp: 06 60 111 438.
-Email: contact@digitronics.ma.
+  // 1) learning rules aliases
+  const aliases = LEARNING_RULES?.class_aliases || {};
+  for (const [canonical, list] of Object.entries(aliases)) {
+    const arr = Array.isArray(list) ? list : [];
+    for (const a of arr) {
+      if (a && s.includes(String(a).toLowerCase())) return canonical;
+    }
+  }
 
-Use ONLY the following offers and rules (JSON). Each offer may have fields: brand, model, size, type, price, class.
-IMPORTANT: Use "class" to understand product category (ex: TV, Machine A Laver, Chauffage, etc.) and answer accordingly.
-${JSON.stringify(OFFERS, null, 2)}
+  // 2) actual sheet classes
+  for (const cls of OFFERS_INDEX.classes) {
+    const cl = String(cls).toLowerCase();
+    if (cl && (s === cl || s.includes(cl))) return cls;
+  }
 
-Strict rules:
-- If client asks about wall mount: say all TVs include free wall mount.
-- If client asks if delivery included: say yes, delivery included.
-- Payment: cash on delivery only.
-- Warranty: 1 year.
-
-Order flows (HIGH PRIORITY):
-- If client wants to order (buy): reply only with:
-"mzyan! 3mr had formulaire bach nkmlo l-commande: https://docs.google.com/forms/d/e/1FAIpQLScmDNagYSpUPfsIT2s2t35KH7U1OWSNkUCIWmcJJm1R_aITQQ/viewform?usp=header"
-- If product not in offers: reply:
-"daba 3ndna had l-offre dyal had l-produits, ila katqelleb 3la chi 7aja okhra t9der tzour website dyalna: https://digitronics.ma/"
-- If you do not know: "ghadi njawb 3la had l-moudou3 mnn ba3d bach nkoon mttaakd"
-- If info not included: "ma kaynach had l-ma3louma 3ndna daba"
-`;
+  return null;
 }
 
-async function digibotReplyFromLast6(last6 = []) {
-  const contextTurns = Array.isArray(last6) ? last6 : [];
+// =====================
+// Prompt builder (uses OFFERS live + class column)
+// We DO NOT include the order form link in the prompt.
+// Orders are handled in code via isBuyIntent().
+// =====================
+function buildSystemPrompt(offersSubset) {
+  const rulesJson = JSON.stringify(OFFERS.rules, null, 2);
+  const offersJson = JSON.stringify(offersSubset, null, 2);
+
+  return `
+You are DigiBot for Digitronics.ma.
+
+CRITICAL OUTPUT RULES:
+- Always reply in Moroccan Darija using Latin letters only (NO Arabic script characters).
+- Keep it short and direct.
+- Do not say you are an AI.
+- Use ONLY the offers data provided below. Do NOT invent prices, models, or products.
+
+Company info:
+- Address: 30 RUE 9 ETG RC LTS SMARA, Haj Fateh, Oulfa, Casablanca 20230.
+- Phone/WhatsApp: 06 60 111 438.
+- Email: contact@digitronics.ma.
+
+Rules JSON:
+${rulesJson}
+
+Offers JSON:
+${offersJson}
+
+How to use "class":
+- Each offer may include "class" (category) like: TV, Machine A Laver, Chauffe-eau, Refrigerateur, Chauffage, etc.
+- If the client asks by class/category, show a short list (max 5) of matching offers with model + price.
+
+Other rules:
+- Delivery: included in price, all cities Morocco, 1-7 days.
+- Payment: cash on delivery only.
+- Warranty: 1 year.
+- Wall mount: all TVs include a free wall mount.
+
+If product not found in offers:
+"daba 3ndna had l-offre dyal had l-produits, ila katqelleb 3la chi 7aja okhra t9der tzour website dyalna: https://digitronics.ma/"
+
+If you do not know:
+"ghadi njawb 3la had l-moudou3 mnn ba3d bach nkoon mttaakd"
+
+If info not included:
+"ma kaynach had l-ma3louma 3ndna daba"
+`.trim();
+}
+
+function pickOffersSubset(userText, last6) {
+  // Keep prompt small. Choose relevant offers by model/brand/class.
+  const combined = [String(userText || ""), ...(Array.isArray(last6) ? last6 : [])].join(" ").toLowerCase();
+
+  // Model exact match
+  for (const [modelLower, entry] of OFFERS_INDEX.modelLookup.entries()) {
+    if (combined.includes(modelLower)) {
+      return {
+        offers: {
+          [entry.brand]: [entry.offer],
+        },
+      };
+    }
+  }
+
+  const brand = extractBrandFromText(combined);
+  const cls = detectClassFromText(combined);
+
+  if (brand && cls) {
+    const arr = (OFFERS.offers[brand] || []).filter((o) => String(o.class || "").toLowerCase() === String(cls).toLowerCase());
+    return { offers: { [brand]: arr.slice(0, 60) } };
+  }
+
+  if (brand) {
+    return { offers: { [brand]: (OFFERS.offers[brand] || []).slice(0, 60) } };
+  }
+
+  if (cls) {
+    // show small sample across brands for that class
+    const out = {};
+    let total = 0;
+    for (const b of OFFERS_INDEX.brands) {
+      const arr = (OFFERS.offers[b] || []).filter((o) => String(o.class || "").toLowerCase() === String(cls).toLowerCase());
+      if (arr.length) {
+        out[b] = arr.slice(0, 5);
+        total += out[b].length;
+      }
+      if (total >= 60) break;
+    }
+    return { offers: out };
+  }
+
+  // Fallback: only show brands list (no full dump)
+  return {
+    offers: {
+      AVAILABLE_BRANDS: OFFERS_INDEX.brands.slice(0, 80).map((b) => ({ brand: b })),
+      AVAILABLE_CLASSES: OFFERS_INDEX.classes.slice(0, 80).map((c) => ({ class: c })),
+    },
+  };
+}
+
+async function digibotReplyFromLast6(userText, last6 = []) {
+  const offersSubset = pickOffersSubset(userText, last6);
 
   const messages = [
     {
       role: "system",
       content:
-        buildSystemPrompt() +
+        buildSystemPrompt(offersSubset) +
         "\n\nIMPORTANT:\n" +
         "- Ila l-client gal ghir taille (b7al '43 inch'), rbtha m3a a5er marque tdkert.\n" +
         "- Ma tbdlch l-marque ila ma tdkertch marque jdida.",
     },
-    ...contextTurns.map((m) => ({ role: "user", content: m })),
+    ...((Array.isArray(last6) ? last6 : []).map((m) => ({ role: "user", content: String(m) }))),
   ];
 
   const r = await openai.chat.completions.create({
-    model: "gpt-5.2",
+    model: OPENAI_MODEL,
     messages,
     temperature: 0.2,
-    // ✅ avoid the Render error you showed
+    // IMPORTANT: fixes your Render error
     max_completion_tokens: 280,
   });
 
@@ -380,12 +720,15 @@ async function digibotReplyFromLast6(last6 = []) {
 app.get("/", (_req, res) => res.status(200).send("OK - DigiBot running"));
 
 app.get("/offers-status", (_req, res) => {
+  const totalRows = Object.values(OFFERS.offers || {}).reduce((acc, arr) => acc + (arr?.length || 0), 0);
+
   res.status(200).json({
     ok: true,
     lastOffersSync,
     refreshEveryMs: CFG.refreshMs,
-    brands: Object.keys(OFFERS.offers || {}),
-    totalRows: Object.values(OFFERS.offers || {}).reduce((acc, arr) => acc + (arr?.length || 0), 0),
+    brands: OFFERS_INDEX.brands,
+    classes: OFFERS_INDEX.classes,
+    totalRows,
   });
 });
 
@@ -399,6 +742,28 @@ app.post("/refresh-offers", async (req, res) => {
 
   await refreshOffersSafe();
   return res.status(200).json({ ok: true, lastOffersSync });
+});
+
+// Learning endpoints
+app.get("/learning-status", (_req, res) => {
+  if (!learningEnabled) return res.status(200).json({ ok: true, enabled: false });
+  const rules = readJsonSafe(rulesPath, {});
+  return res.json({ ok: true, enabled: true, rulesVersion: rules.version || 0 });
+});
+
+app.post("/learning-suggest", (req, res) => {
+  if (!learningEnabled) return res.status(400).json({ ok: false, error: "Learning disabled" });
+
+  if (LEARNING_TOKEN) {
+    const token = req.headers["x-learning-token"];
+    if (token !== LEARNING_TOKEN) return res.status(401).json({ ok: false, error: "Unauthorized" });
+  }
+
+  loadLearningRules();
+  const suggestions = suggestFromEventsSimple();
+  for (const s of suggestions) appendNdjson(suggestionsPath, s);
+
+  return res.json({ ok: true, wrote: suggestions.length });
 });
 
 app.post("/wanotifier", async (req, res) => {
@@ -422,7 +787,7 @@ app.post("/wanotifier", async (req, res) => {
       return res.status(200).json({ ok: true, reply: "3afak ktb msg b lktaba, bla vocal/audio." });
     }
 
-    // 0) Location intent BEFORE order intent
+    // 0) Location intent BEFORE order checks (so “فين انتم” won’t spam order flow)
     if (isLocationIntent(userText)) {
       return res.status(200).json({
         ok: true,
@@ -431,36 +796,46 @@ app.post("/wanotifier", async (req, res) => {
     }
 
     // 1) Pending order number flow
-    const pending = pendingOrderStore.get(waNumber);
-    const orderNo = extractOrderNumber(userText);
+    if (waNumber !== "unknown") {
+      const pending = pendingOrderStore.get(waNumber);
+      const orderNo = extractOrderNumber(userText);
 
-    if (pending?.waiting) {
-      if (orderNo) {
-        pendingOrderStore.delete(waNumber);
+      if (pending?.waiting) {
+        if (orderNo) {
+          pendingOrderStore.delete(waNumber);
+          return res.status(200).json({
+            ok: true,
+            reply: "choukran! wsltna ra9m dyal l-commande. ghadi ntslô bik qrib.",
+          });
+        }
         return res.status(200).json({
           ok: true,
-          reply: "choukran! wsltna ra9m dyal l-commande. ghadi ntslô bik qrib.",
+          reply: "3tini ra9m dyal l-commande bach ncheckiwha.",
         });
       }
+
+      // 2) Start order status flow only when intent is strong
+      if (isOrderStatusIntent(userText)) {
+        pendingOrderStore.set(waNumber, { waiting: true, at: Date.now() });
+        return res.status(200).json({
+          ok: true,
+          reply: "3tini ra9m dyal l-commande bach ncheckiwha.",
+        });
+      }
+    }
+
+    // 3) Buy intent handled in CODE (prevents wrong form spam)
+    if (isBuyIntent(userText)) {
       return res.status(200).json({
         ok: true,
-        reply: "3tini ra9m dyal l-commande bach ncheckiwha.",
+        reply: `mzyan! 3mr had formulaire bach nkmlo l-commande: ${ORDER_FORM_URL}`,
       });
     }
 
-    // 2) Start order status flow only when intent is strong
-    if (isOrderStatusIntent(userText)) {
-      pendingOrderStore.set(waNumber, { waiting: true, at: Date.now() });
-      return res.status(200).json({
-        ok: true,
-        reply: "3tini ra9m dyal l-commande bach ncheckiwha.",
-      });
-    }
-
-    // 3) Save message in history
+    // 4) Save message in history
     const last6 = pushClientMessage(waNumber, userText);
 
-    // 4) If size-only, merge with last brand
+    // 5) If size-only, merge with last brand
     const size = extractSizeOnly(userText);
     const lastBrand = getLastBrandFromHistory(last6);
     const finalText = size && lastBrand ? `bghit ${lastBrand} ${size} inch` : userText;
@@ -468,8 +843,19 @@ app.post("/wanotifier", async (req, res) => {
     // push merged message so history becomes explicit
     const finalLast6 = finalText !== userText ? pushClientMessage(waNumber, finalText) : last6;
 
-    // 5) Ask OpenAI
-    const reply = await digibotReplyFromLast6(finalLast6);
+    // 6) Ask OpenAI
+    const reply = await digibotReplyFromLast6(finalText, finalLast6);
+
+    // 7) Learning log (fallback replies)
+    if (learningEnabled && looksLikeFallback(reply)) {
+      appendNdjson(eventsPath, {
+        at: new Date().toISOString(),
+        wa: waNumber,
+        text: userText,
+        reason: "fallback_reply",
+        replyPreview: shorten(reply, 180),
+      });
+    }
 
     const ms = Date.now() - t0;
     console.log(
