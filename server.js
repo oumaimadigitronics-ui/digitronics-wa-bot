@@ -32,6 +32,7 @@ const {
 
   OPENAI_API_KEY,
   OPENAI_MODEL = "gpt-5.2",
+  OPENAI_VISION_MODEL = "gpt-4.1-mini",
 
   OFFERS_CSV_URL = "",
   OFFERS_REFRESH_MS = "300000", // 5 min
@@ -501,35 +502,206 @@ function looksLikeFallback(reply) {
   );
 }
 
-function suggestFromEventsSimple(maxLines = 800) {
+function levenshtein(a, b) {
+  // Small, dependency-free Levenshtein distance (case-insensitive)
+  const s = String(a || "").toLowerCase();
+  const t = String(b || "").toLowerCase();
+  const n = s.length;
+  const m = t.length;
+  if (!n) return m;
+  if (!m) return n;
+
+  const dp = new Array(m + 1);
+  for (let j = 0; j <= m; j++) dp[j] = j;
+
+  for (let i = 1; i <= n; i++) {
+    let prev = dp[0];
+    dp[0] = i;
+    for (let j = 1; j <= m; j++) {
+      const tmp = dp[j];
+      const cost = s[i - 1] === t[j - 1] ? 0 : 1;
+      dp[j] = Math.min(dp[j] + 1, dp[j - 1] + 1, prev + cost);
+      prev = tmp;
+    }
+  }
+  return dp[m];
+}
+
+function tokenizeLoose(text) {
+  // Tokenize across Arabic/French/English/Darija: keep letters+digits, drop punctuation
+  const s = arabicIndicToAsciiDigits(String(text || "")).toLowerCase();
+  return s
+    .replace(/[\u0000-\u001f]/g, " ")
+    .replace(/[^\p{L}\p{N}]+/gu, " ")
+    .split(/\s+/)
+    .map((x) => x.trim())
+    .filter(Boolean)
+    .slice(0, 60);
+}
+
+function suggestFromEventsSimple(maxLines = 1200) {
+  // Upgraded suggestions:
+  // 1) Frequent fallback phrases (same as before)
+  // 2) Brand/class alias candidates based on near-miss tokens (fuzzy)
+  //    - DOES NOT auto-apply, only suggests for your review.
   if (!learningEnabled) return [];
   if (!fs.existsSync(eventsPath)) return [];
   const txt = fs.readFileSync(eventsPath, "utf8").trim();
   if (!txt) return [];
 
+  // Make sure we have the latest offers index before suggesting
+  const knownBrands = Array.isArray(OFFERS_INDEX?.brands) ? OFFERS_INDEX.brands : [];
+  const knownClasses = Array.isArray(OFFERS_INDEX?.classes) ? OFFERS_INDEX.classes : [];
+
   const lines = txt.split("\n").slice(-maxLines).filter(Boolean);
-  const counts = new Map();
+
+  // (A) fallback phrase counts (legacy)
+  const phraseCounts = new Map();
+
+  // (B) alias candidate counts
+  // key: `${type}|${canonical}|${alias}` -> occurrences
+  const aliasCounts = new Map();
 
   for (const line of lines) {
     try {
       const e = JSON.parse(line);
       if (e.reason !== "fallback_reply") continue;
-      const key = normMatch(e.text || "").trim();
-      if (!key) continue;
-      counts.set(key, (counts.get(key) || 0) + 1);
+
+      const phraseKey = normMatch(e.text || "").trim();
+      if (phraseKey) phraseCounts.set(phraseKey, (phraseCounts.get(phraseKey) || 0) + 1);
+
+      const tokens = tokenizeLoose(e.text || "");
+      if (!tokens.length) continue;
+
+      // If detectBrand/detectClass already succeeds, no need to propose alias from this message.
+      const alreadyBrand = !!detectBrand(e.text || "");
+      const alreadyClass = !!detectClass(e.text || "");
+
+      // Brand alias candidates: short tokens (2-12) compared to known brand names
+      // We skip very common stop-tokens.
+      const stop = new Set([
+        "tv","tele","télé","télévision","television","inch","inches","pouce","pouces","cm",
+        "prix","price","dh","mad","dhs","dirham","dirhams",
+        "bghit","bghina","nchri","acheter","buy","commande","order","frigo","machine","laver","clim","chauffe",
+        "salam","slm","bonjour","salut","hello","hi","svp","stp"
+      ]);
+
+      if (!alreadyBrand && knownBrands.length) {
+        for (const tok of tokens) {
+          if (stop.has(tok)) continue;
+          if (tok.length < 2 || tok.length > 14) continue;
+          // if token is all digits, skip
+          if (/^\d+$/.test(tok)) continue;
+
+          let best = null;
+          let bestDist = 999;
+
+          for (const b of knownBrands) {
+            const nb = normMatch(b);
+            if (!nb) continue;
+
+            // Compare against compacted brand (remove spaces/punct) too
+            const bCompact = nb.replace(/[^a-z0-9]+/g, "");
+            const tCompact = normMatch(tok).replace(/[^a-z0-9]+/g, "");
+
+            const d1 = levenshtein(tCompact, bCompact);
+            if (d1 < bestDist) {
+              bestDist = d1;
+              best = b;
+            }
+          }
+
+          // Heuristic threshold: allow small typos only
+          // e.g., "samsng" -> "SAMSUNG", "tcll" -> "TCL"
+          if (best && bestDist > 0 && bestDist <= 2) {
+            const k = `brand|${best}|${tok}`;
+            aliasCounts.set(k, (aliasCounts.get(k) || 0) + 1);
+          }
+        }
+      }
+
+      // Class alias candidates: detect "category words" not matching sheet class but close to one
+      // We only try if not alreadyClass.
+      if (!alreadyClass && knownClasses.length) {
+        const joined = tokens.join(" ");
+        // If message contains any long-ish word, compare to known classes
+        for (const tok of tokens) {
+          if (stop.has(tok)) continue;
+          if (tok.length < 4 || tok.length > 24) continue;
+          if (/^\d+$/.test(tok)) continue;
+
+          let best = null;
+          let bestDist = 999;
+
+          for (const c of knownClasses) {
+            const nc = normMatch(c).replace(/[^a-z0-9]+/g, " ");
+            const t = normMatch(tok).replace(/[^a-z0-9]+/g, " ");
+            // Compare token to each word in class, take best
+            const parts = nc.split(/\s+/).filter(Boolean);
+            for (const p of parts) {
+              const d = levenshtein(t, p);
+              if (d < bestDist) {
+                bestDist = d;
+                best = c;
+              }
+            }
+          }
+
+          if (best && bestDist > 0 && bestDist <= 2) {
+            const k = `class|${best}|${tok}`;
+            aliasCounts.set(k, (aliasCounts.get(k) || 0) + 1);
+          }
+        }
+
+        // Also: if the whole message is close to some class keyword
+        // (useful for "machin alaver" etc.)
+        if (joined.length <= 40) {
+          let best = null;
+          let bestDist = 999;
+          const j = normMatch(joined).replace(/[^a-z0-9]+/g, " ").trim();
+          for (const c of knownClasses) {
+            const nc = normMatch(c).replace(/[^a-z0-9]+/g, " ").trim();
+            const d = levenshtein(j, nc);
+            if (d < bestDist) {
+              bestDist = d;
+              best = c;
+            }
+          }
+          if (best && bestDist > 0 && bestDist <= 4) {
+            const k = `class|${best}|${joined}`;
+            aliasCounts.set(k, (aliasCounts.get(k) || 0) + 1);
+          }
+        }
+      }
     } catch {}
   }
 
   const minN = Number(LEARNING_RULES?.guardrails?.min_occurrences_to_suggest || 2);
   const out = [];
 
-  for (const [phrase, occurrences] of counts.entries()) {
-    if (occurrences >= minN) {
-      out.push({ at: nowIso(), type: "review_phrase", phrase, occurrences });
-    }
+  // A) Phrase review suggestions
+  for (const [phrase, occurrences] of phraseCounts.entries()) {
+    if (occurrences >= minN) out.push({ at: nowIso(), type: "review_phrase", phrase, occurrences });
   }
 
-  return out.slice(0, 50);
+  // B) Alias suggestions
+  for (const [k, occurrences] of aliasCounts.entries()) {
+    if (occurrences < minN) continue;
+    const [kind, canonical, alias] = k.split("|");
+    out.push({
+      at: nowIso(),
+      type: kind === "brand" ? "suggest_brand_alias" : "suggest_class_alias",
+      canonical,
+      alias,
+      occurrences,
+      note: "Review before adding to learning_rules.json (no auto-apply).",
+    });
+  }
+
+  // Sort: highest occurrences first, then stable type
+  out.sort((a, b) => (b.occurrences || 0) - (a.occurrences || 0) || String(a.type).localeCompare(String(b.type)));
+
+  return out.slice(0, 80);
 }
 
 try {
@@ -1102,10 +1274,21 @@ function tryDirectOfferAnswer(userText, historyMsgs) {
   // Brand only (short query)
   const justBrand = brand && s.replace(/\s+/g, "") === normMatch(brand).replace(/\s+/g, "");
   if (brand && (justBrand || s.length <= 8)) {
-    // If brand has multiple classes, show classes list
+    // If brand has multiple classes, we usually ask which category.
+    // Upgrade: for VISIO and TCL, default to TVs (most common user intent) and show TV offers directly.
     const classes = Array.from(
       new Set((OFFERS.offers[brand] || []).map((o) => String(o.class || "").trim()).filter(Boolean))
     ).sort();
+
+    const tvCanon = OFFERS_INDEX.classCanon.tv;
+
+    if ((brand === "VISIO" || brand === "TCL") && tvCanon) {
+      const tvLines = listOffersForBrand(brand, { cls: tvCanon, limit: 6 });
+      if (tvLines.length) {
+        return `${brand} TV options:\n${tvLines.join("\n")}\n${footerForContext({ isTv: true })}`;
+      }
+      // If no TV rows, fall back to normal behavior below.
+    }
 
     if (classes.length > 1) {
       return `${brand}: which category do you want?\n- ${classes.slice(0, 8).join("\n- ")}`;
@@ -1218,6 +1401,127 @@ async function callOpenAIChat(messages, maxOut = 280) {
   }
 }
 
+function isLikelyAudioMedia(body = {}) {
+  const media = extractMediaFromBody(body);
+  if (!media) return false;
+  const url = String(media).toLowerCase();
+  const txt = String(extractTextFromBody(body) || "").toLowerCase();
+
+  // Heuristics: file extensions or hints
+  if (url.includes(".ogg") || url.includes(".opus") || url.includes(".mp3") || url.includes(".m4a") || url.includes("audio")) return true;
+  if (txt.includes("voice") || txt.includes("vocal") || txt.includes("audio") || txt.includes("ptt")) return true;
+  return false;
+}
+
+async function callOpenAIVision(imageUrl, userHint = "") {
+  // Uses the OpenAI Responses API (multimodal) to read an image via URL.
+  // NOTE: imageUrl must be publicly accessible by OpenAI.
+  const model = process.env.OPENAI_VISION_MODEL || "gpt-4.1-mini";
+
+  try {
+    const r = await openai.responses.create({
+      model,
+      input: [
+        {
+          role: "user",
+          content: [
+            {
+              type: "input_text",
+              text:
+                "You are DigiBot assistant. Analyze the image and extract product info.\n" +
+                "Return ONLY a compact JSON object with keys:\n" +
+                "{brand, model, size_inch, class, text_found}\n" +
+                "Rules:\n" +
+                "- brand/model/class may be null if unknown\n" +
+                "- size_inch should be a number if visible, else null\n" +
+                "- text_found: short string of any visible labels/model codes.\n" +
+                (userHint ? ("User hint: " + userHint) : "")
+            },
+            { type: "input_image", image_url: imageUrl },
+          ],
+        },
+      ],
+    });
+
+    // Try to read as text
+    const out = (r && (r.output_text || r.output?.[0]?.content?.[0]?.text)) ? (r.output_text || r.output?.[0]?.content?.[0]?.text) : "";
+    return String(out || "").trim();
+  } catch (e) {
+    const msg = e?.message || String(e);
+    console.log("Vision error:", msg);
+    return "";
+  }
+}
+
+function safeJsonParse(s) {
+  try {
+    return JSON.parse(String(s || "").trim());
+  } catch {
+    // try to extract JSON substring
+    const txt = String(s || "");
+    const m = txt.match(/\{[\s\S]*\}/);
+    if (m) {
+      try { return JSON.parse(m[0]); } catch {}
+    }
+    return null;
+  }
+}
+
+async function detectProductFromImage(imageUrl, userHint = "") {
+  const raw = await callOpenAIVision(imageUrl, userHint);
+  const parsed = safeJsonParse(raw) || {};
+
+  const brand = parsed.brand ? String(parsed.brand).trim().toUpperCase() : null;
+  const model = parsed.model ? String(parsed.model).trim() : null;
+  const cls = parsed.class ? String(parsed.class).trim() : null;
+
+  const size = parsed.size_inch;
+  const size_inch = Number.isFinite(Number(size)) ? Number(size) : null;
+
+  const text_found = parsed.text_found ? String(parsed.text_found).trim() : "";
+
+  // Build a combined "pseudo user text" so we can reuse existing matching logic
+  const combined = [brand, model, cls, size_inch ? `${size_inch} inch` : "", text_found, userHint].filter(Boolean).join(" ");
+  return { brand, model, class: cls, size_inch, text_found, combined };
+}
+
+function autoMatchOffersFromDetected(detected, historyMsgs = []) {
+  if (!detected) return null;
+  const combined = detected.combined || "";
+
+  // 1) model direct hit
+  const modelHit = detectModel(combined);
+  if (modelHit) {
+    const { brand, offer } = modelHit;
+    const line = formatOfferLine(brand, offer);
+    const isTv = normMatch(offer.class || "").includes("tv") || offer.size > 0;
+    return `${line}\n${footerForContext({ isTv })}`;
+  }
+
+  // 2) brand + size (assume TV if size present)
+  const b = detectBrand(combined) || detected.brand || lastMentionedBrand(historyMsgs);
+  const size = detected.size_inch ? Number(detected.size_inch) : extractSizeOnly(combined);
+  const tvCanon = OFFERS_INDEX.classCanon.tv;
+
+  if (b && size) {
+    const lines = listOffersForBrand(b, { cls: tvCanon || null, size, limit: 6 });
+    if (lines.length) {
+      return `${b} ${size}" options:\n${lines.join("\n")}\n${footerForContext({ isTv: true })}`;
+    }
+  }
+
+  // 3) brand only
+  if (b) {
+    const lines = listOffersForBrand(b, { limit: 6 });
+    if (lines.length) {
+      return `${b} options:\n${lines.join("\n")}\n${footerForContext({ isTv: true })}`;
+    }
+  }
+
+  return null;
+}
+
+
 async function digibotLLMReply(userText, historyMsgs) {
   const offersSubset = buildOffersSubsetForPrompt(userText, historyMsgs);
 
@@ -1230,7 +1534,7 @@ async function digibotLLMReply(userText, historyMsgs) {
   const r = await callOpenAIChat(messages, 360);
   let reply = r?.choices?.[0]?.message?.content?.trim() || "";
 
-  if (!reply) reply = "Sorry, I didn't understand. Can you rephrase and include brand/model/size?";
+  if (!reply) reply = "Thank you for your message. I may be missing some details. You can rephrase with brand/model/size, or call us directly at 0605123934 for quick help.";
 
   return reply;
 }
@@ -1302,6 +1606,21 @@ app.post("/learning-suggest", (req, res) => {
   return res.json({ ok: true, wrote: suggestions.length });
 });
 
+
+// Returns suggestions without writing them (safe preview)
+app.get("/learning-suggestions", (req, res) => {
+  if (!learningEnabled) return res.status(400).json({ ok: false, error: "Learning disabled" });
+
+  if (LEARNING_TOKEN) {
+    const token = req.headers["x-learning-token"];
+    if (token !== LEARNING_TOKEN) return res.status(401).json({ ok: false, error: "Unauthorized" });
+  }
+
+  loadLearningRules();
+  const suggestions = suggestFromEventsSimple();
+  return res.json({ ok: true, count: suggestions.length, suggestions });
+});
+
 // Main webhook
 app.post("/wanotifier", async (req, res) => {
   const reqId = stableReqId();
@@ -1315,7 +1634,10 @@ app.post("/wanotifier", async (req, res) => {
 
     if (!rateLimitOk(key)) return res.status(429).json({ ok: false, error: "Rate limit exceeded" });
 
-    if (looksLikeAudioOrEmptyMedia(req.body || {})) {
+    const incomingMedia = extractMediaFromBody(req.body || {});
+
+    // Voice notes / audio: ask for text
+    if (isLikelyAudioMedia(req.body || {})) {
       const reply = "Please send a written message (no voice note/audio).";
       pushMemory(key, "assistant", reply);
       return res.json({ ok: true, reply });
@@ -1327,6 +1649,32 @@ app.post("/wanotifier", async (req, res) => {
       pushMemory(key, "assistant", reply);
       return res.json({ ok: true, reply });
     }
+
+    // Image flow: if media exists, try vision -> product detection -> offers matching
+    if (incomingMedia) {
+      const hint = userTextRaw || "";
+      const detected = await detectProductFromImage(incomingMedia, hint);
+
+      // Save a compact trace to memory for follow-ups (no huge content)
+      if (detected?.combined) pushMemory(key, "user", `image_info: ${shorten(detected.combined, 240)}`);
+
+      const historyImg = getMemory(key);
+
+      const matched = autoMatchOffersFromDetected(detected, historyImg);
+      if (matched) {
+        const reply = shorten(matched, 520);
+        pushMemory(key, "assistant", reply);
+        return res.json({ ok: true, reply });
+      }
+
+      // If no match, still respond helpfully + call option
+      const reply =
+        "Thank you. I checked the photo but I couldn't match it to a current offer. " +
+        "Please send the brand/model (or a clearer label photo), or call us at 0605123934 for quick help.";
+      pushMemory(key, "assistant", reply);
+      return res.json({ ok: true, reply: shorten(reply, 420) });
+    }
+
 
     // Save user message to memory FIRST (so follow-ups work even if we return early)
     pushMemory(key, "user", userTextRaw);
@@ -1426,7 +1774,9 @@ app.post("/wanotifier", async (req, res) => {
     let reply = await digibotLLMReply(userTextRaw, history2);
 
     // Learning log
-    if (learningEnabled && looksLikeFallback(reply)) {
+    if (looksLikeFallback(reply)) {
+      reply = reply + "\n\nFor faster assistance, please call us at 0605123934."; 
+      if (learningEnabled) {
       appendNdjson(eventsPath, {
         at: nowIso(),
         key,
