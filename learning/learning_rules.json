@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "synonyms": {
+    "tv": ["tele", "television", "télé", "tlv"],
+    "refrigerateur": ["frigo", "réfrigérateur", "refrigerator"],
+    "machine_a_laver": ["machine a laver", "machine à laver", "lave linge", "washing machine"],
+    "chauffe_eau": ["chauffe-eau", "chauffe eau", "boiler"]
+  },
+  "class_aliases": {
+    "tv": ["tv", "television"],
+    "refrigerateur": ["refrigerateur", "frigo"],
+    "machine a laver": ["machine a laver", "machine_a_laver", "lave linge"],
+    "chauffe-eau": ["chauffe-eau", "chauffe_eau", "boiler"]
+  },
+  "intent_keywords": {
+    "order_status": ["commande", "order", "tracking", "suivi", "فين وصل", "لم اتوصل", "ما توصلتش"],
+    "buy_intent": ["bghit ncharri", "bghit ncommandi", "commander", "acheter"]
+  },
+  "guardrails": {
+    "never_learn_fields": ["price", "warranty", "payment", "delivery"],
+    "min_occurrences_to_suggest": 2
+  }
+}
