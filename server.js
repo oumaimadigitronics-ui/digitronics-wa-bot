@@ -1437,6 +1437,33 @@ setInterval(() => {
 // =====================
 // Routes
 // =====================
+// Small wrapper to safely use async route handlers without try/catch blocks
+// Small wrapper to safely use async route handlers without try/catch blocks
+function safeAsync(handler) {
+  return (req, res) => {
+    Promise.resolve(handler(req, res)).catch((err) => {
+      const t0 = res?.locals?.t0;
+      const reqId = res?.locals?.reqId || "unknown";
+      const latencyMs = typeof t0 === "number" ? Date.now() - t0 : undefined;
+
+      try {
+        console.error(
+          JSON.stringify({
+            level: "error",
+            msg: "wanotifier_error",
+            reqId,
+            latencyMs,
+            error: err?.message || String(err),
+          })
+        );
+      } catch {}
+
+      if (res.headersSent) return;
+      return res.status(500).json({ ok: false, error: "Server error" });
+    });
+  };
+}
+
 app.get("/", (_req, res) => res.status(200).send("OK - DigiBot running"));
 
 app.get("/offers-status", (_req, res) => {
@@ -1491,174 +1518,162 @@ app.get("/learning-suggestions", (req, res) => {
 
   if (LEARNING_TOKEN) {
     const token = req.headers["x-learning-token"];
-    if (token !== LEARNING_TOKEN) return res.status(401).json({ ok: false, error: "Unauthorized" });
-  }
-
-  loadLearningRules();
-  const suggestions = suggestFromEventsSimple();
-  return res.json({ ok: true, count: suggestions.length, suggestions });
-});
-
-// Main webhook
-app.post("/wanotifier", (req, res) => {
+    if (token !== LEARNING_TOKEN) return res.status(401app.post("/wanotifier", safeAsync(async (req, res) => {
   const reqId = stableReqId();
   const t0 = Date.now();
+  res.locals.reqId = reqId;
+  res.locals.t0 = t0;
 
-  (async () => {
-    const incoming = normalizeIncoming(req.body || {}, req);
-    const key = incoming.key;
-    const phone = incoming.phone;
-    const userTextRaw = incoming.text.slice(0, 2000);
+  const incoming = normalizeIncoming(req.body || {}, req);
+  const key = incoming.key;
+  const phone = incoming.phone;
+  const userTextRaw = incoming.text.slice(0, 2000);
 
-    if (!rateLimitOk(key)) return res.status(429).json({ ok: false, error: "Rate limit exceeded" });
+  if (!rateLimitOk(key)) return res.status(429).json({ ok: false, error: "Rate limit exceeded" });
 
-    if (looksLikeAudioOrEmptyMedia(req.body || {})) {
-      const reply = "Please send a written message (no voice note/audio).";
-      pushMemory(key, "assistant", reply);
-      return res.json({ ok: true, reply });
-    }
-
-    // If empty message
-    if (!userTextRaw) {
-      const reply = "Please type your message.";
-      pushMemory(key, "assistant", reply);
-      return res.json({ ok: true, reply });
-    }
-
-    // Save user message to memory FIRST (so follow-ups work even if we return early)
-    pushMemory(key, "user", userTextRaw);
-    const history = getMemory(key);
-
-    // 0) Greeting
-    if (isGreeting(userTextRaw) && userTextRaw.length <= 25) {
-      const reply = "Hello! Welcome to Digitronics. What are you looking for? (TV / washing machine / fridge / water heater...)";
-      pushMemory(key, "assistant", reply);
-      return res.json({ ok: true, reply: shorten(reply, 420) });
-    }
-
-    // 1) Location (must be before order status)
-    if (isLocationIntent(userTextRaw)) {
-      const reply = "Our address: 30 RUE 9 ETG RC LTS SMARA, Haj Fateh, Oulfa, Casablanca 20230.";
-      pushMemory(key, "assistant", reply);
-      return res.json({ ok: true, reply: shorten(reply, 420) });
-    }
-
-    // 2) Buy intent -> send order form (ONLY here)
-    if (isBuyIntent(userTextRaw)) {
-      const reply = `Great. Please fill this form to place the order: ${ORDER_FORM_URL}`;
-      pushMemory(key, "assistant", reply);
-      return res.json({ ok: true, reply: shorten(reply, 420) });
-    }
-
-    // 3) Pending order flow (status)
-    const pending = pendingOrderStore.get(key);
-    const orderNo = extractOrderNumber(userTextRaw);
-
-    if (pending?.waiting) {
-      if (orderNo) {
-        pendingOrderStore.delete(key);
-        lastOrderAckStore.set(key, { at: Date.now(), orderNo });
-        const reply = "Thanks. We received your order number. We will call you soon.";
-        pushMemory(key, "assistant", reply);
-        return res.json({ ok: true, reply });
-      }
-      const reply = "Please send your order number so we can check it.";
-      pushMemory(key, "assistant", reply);
-      return res.json({ ok: true, reply });
-    }
-
-    // If user asks “call me” soon after providing order number
-    if (isCallMeIntent(userTextRaw)) {
-      const recent = lastOrderAckStore.get(key);
-      if (recent?.at && Date.now() - recent.at < PENDING_TTL_MS) {
-        const reply = "Okay. We will call you soon.";
-        pushMemory(key, "assistant", reply);
-        return res.json({ ok: true, reply });
-      }
-      // Not in order context -> still answer politely
-      const reply = "Okay. We will call you soon. If you have an order number, please send it.";
-      pushMemory(key, "assistant", reply);
-      return res.json({ ok: true, reply: shorten(reply, 420) });
-    }
-
-    // Start order status flow only with strong intent
-    if (isOrderStatusIntent(userTextRaw)) {
-      // If the client already included the order number in the same message, acknowledge immediately.
-      if (orderNo) {
-        pendingOrderStore.delete(key);
-        lastOrderAckStore.set(key, { at: Date.now(), orderNo });
-        const reply = "Thanks. We received your order number. We will call you soon.";
-        pushMemory(key, "assistant", reply);
-        return res.json({ ok: true, reply });
-      }
-
-      pendingOrderStore.set(key, { waiting: true, at: Date.now() });
-      const reply = "Please send your order number so we can check it.";
-      pushMemory(key, "assistant", reply);
-      return res.json({ ok: true, reply });
-    }
-
-    // 4) Size-only merge (fixes: "tcl" then "32")
-    const size = extractSizeOnly(userTextRaw);
-    if (size) {
-      const lastB = lastMentionedBrand(history);
-      if (lastB) {
-        const merged = `bghit ${lastB} ${size} inch`;
-        pushMemory(key, "user", merged);
-      }
-    }
-
-    // Refresh history after possible merge
-    const history2 = getMemory(key);
-
-    // 5) Try deterministic offer answer first
-    const direct = tryDirectOfferAnswer(userTextRaw, history2);
-    if (direct) {
-      const reply = shorten(direct, 520);
-      pushMemory(key, "assistant", reply);
-      return res.json({ ok: true, reply });
-    }
-
-    // 6) LLM fallback
-    let reply = await digibotLLMReply(userTextRaw, history2);
-
-    // Learning log
-    if (looksLikeFallback(reply)) {
-      reply = reply + "\n\nFor faster assistance, please call us at 0605123934."; 
-      if (learningEnabled) {
-      appendNdjson(eventsPath, {
-        at: nowIso(),
-        key,
-        phone,
-        text: userTextRaw,
-        reason: "fallback_reply",
-        replyPreview: shorten(reply, 180),
-      });
-    }
-
-    reply = shorten(reply, 520);
+  if (looksLikeAudioOrEmptyMedia(req.body || {})) {
+    const reply = "Please send a written message (no voice note/audio).";
     pushMemory(key, "assistant", reply);
-
-    const ms = Date.now() - t0;
-    console.log(
-      JSON.stringify({
-        level: "info",
-        msg: "wanotifier_ok",
-        reqId,
-        key: CFG.logDebug ? key : undefined,
-        phone: CFG.logDebug ? phone : undefined,
-        latencyMs: ms,
-        replyChars: reply.length,
-      })
-    );
-
     return res.json({ ok: true, reply });
-  })().catch((err) => {
-const ms = Date.now() - t0;
-    console.error(
-      JSON.stringify({
-        level: "error",
-        msg: "wanotifier_error",
+  }
+
+  // If empty message
+  if (!userTextRaw) {
+    const reply = "Please type your message.";
+    pushMemory(key, "assistant", reply);
+    return res.json({ ok: true, reply });
+  }
+
+  // Save user message to memory FIRST (so follow-ups work even if we return early)
+  pushMemory(key, "user", userTextRaw);
+  const history = getMemory(key);
+
+  // 0) Greeting
+  if (isGreeting(userTextRaw) && userTextRaw.length <= 25) {
+    const reply = "Hello! Welcome to Digitronics. What are you looking for? (TV / washing machine / fridge / water heater...)";
+    pushMemory(key, "assistant", reply);
+    return res.json({ ok: true, reply: shorten(reply, 420) });
+  }
+
+  // 1) Location (must be before order status)
+  if (isLocationIntent(userTextRaw)) {
+    const reply = "Our address: 30 RUE 9 ETG RC LTS SMARA, Haj Fateh, Oulfa, Casablanca 20230.";
+    pushMemory(key, "assistant", reply);
+    return res.json({ ok: true, reply: shorten(reply, 420) });
+  }
+
+  // 2) Buy intent -> send order form (ONLY here)
+  if (isBuyIntent(userTextRaw)) {
+    const reply = `Great. Please fill this form to place the order: ${ORDER_FORM_URL}`;
+    pushMemory(key, "assistant", reply);
+    return res.json({ ok: true, reply: shorten(reply, 420) });
+  }
+
+  // 3) Pending order flow (status)
+  const pending = pendingOrderStore.get(key);
+  const orderNo = extractOrderNumber(userTextRaw);
+
+  if (pending?.waiting) {
+    if (orderNo) {
+      pendingOrderStore.delete(key);
+      lastOrderAckStore.set(key, { at: Date.now(), orderNo });
+      const reply = "Thanks. We received your order number. We will call you soon.";
+      pushMemory(key, "assistant", reply);
+      return res.json({ ok: true, reply });
+    }
+    const reply = "Please send your order number so we can check it.";
+    pushMemory(key, "assistant", reply);
+    return res.json({ ok: true, reply });
+  }
+
+  // If user asks “call me” soon after providing order number
+  if (isCallMeIntent(userTextRaw)) {
+    const recent = lastOrderAckStore.get(key);
+    if (recent?.at && Date.now() - recent.at < PENDING_TTL_MS) {
+      const reply = "Okay. We will call you soon.";
+      pushMemory(key, "assistant", reply);
+      return res.json({ ok: true, reply });
+    }
+    // Not in order context -> still answer politely
+    const reply = "Okay. We will call you soon. If you have an order number, please send it.";
+    pushMemory(key, "assistant", reply);
+    return res.json({ ok: true, reply: shorten(reply, 420) });
+  }
+
+  // Start order status flow only with strong intent
+  if (isOrderStatusIntent(userTextRaw)) {
+    // If the client already included the order number in the same message, acknowledge immediately.
+    if (orderNo) {
+      pendingOrderStore.delete(key);
+      lastOrderAckStore.set(key, { at: Date.now(), orderNo });
+      const reply = "Thanks. We received your order number. We will call you soon.";
+      pushMemory(key, "assistant", reply);
+      return res.json({ ok: true, reply });
+    }
+
+    pendingOrderStore.set(key, { waiting: true, at: Date.now() });
+    const reply = "Please send your order number so we can check it.";
+    pushMemory(key, "assistant", reply);
+    return res.json({ ok: true, reply });
+  }
+
+  // 4) Size-only merge (fixes: "tcl" then "32")
+  const size = extractSizeOnly(userTextRaw);
+  if (size) {
+    const lastB = lastMentionedBrand(history);
+    if (lastB) {
+      const merged = `bghit ${lastB} ${size} inch`;
+      pushMemory(key, "user", merged);
+    }
+  }
+
+  // Refresh history after possible merge
+  const history2 = getMemory(key);
+
+  // 5) Try deterministic offer answer first
+  const direct = tryDirectOfferAnswer(userTextRaw, history2);
+  if (direct) {
+    const reply = shorten(direct, 520);
+    pushMemory(key, "assistant", reply);
+    return res.json({ ok: true, reply });
+  }
+
+  // 6) LLM fallback
+  let reply = await digibotLLMReply(userTextRaw, history2);
+
+  // Learning log
+  if (looksLikeFallback(reply)) {
+    reply = reply + "\n\nFor faster assistance, please call us at 0605123934."; 
+    if (learningEnabled) {
+    appendNdjson(eventsPath, {
+      at: nowIso(),
+      key,
+      phone,
+      text: userTextRaw,
+      reason: "fallback_reply",
+      replyPreview: shorten(reply, 180),
+    });
+  }
+
+  reply = shorten(reply, 520);
+  pushMemory(key, "assistant", reply);
+
+  const ms = Date.now() - t0;
+  console.log(
+    JSON.stringify({
+      level: "info",
+      msg: "wanotifier_ok",
+      reqId,
+      key: CFG.logDebug ? key : undefined,
+      phone: CFG.logDebug ? phone : undefined,
+      latencyMs: ms,
+      replyChars: reply.length,
+    })
+  );
+
+  return res.json({ ok: true, reply });
+}));
+or",
         reqId,
         latencyMs: ms,
         error: err?.message || String(err),
