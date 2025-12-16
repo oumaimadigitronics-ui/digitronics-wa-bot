@@ -1,4 +1,4 @@
-// server.js — DigiBot (from scratch)
+// server.js — DigiBot (from scratch, language-unrestricted)
 // ------------------------------------------------------------
 // Core features
 // - Loads offers from Google Sheet CSV (brand, model, size, type, price, class)
@@ -8,14 +8,9 @@
 // - Order status flow: ask order number, then confirm "we will call you soon"
 // - Buy intent: ONLY then send order form link
 // - Location intent: handled early (won’t trigger order flow)
-// - Output enforcement: always Moroccan Darija in Latin letters (no Arabic script)
 // - Optional learning (Option 1): log fallback interactions + suggestions endpoint
 //
-// Notes from your screenshots:
-// 1) The bot was telling users “ktb b darija latin” — removed. Users can write Arabic/French/English.
-// 2) Memory failed because sender id was often “unknown” and only user msgs were stored.
-//    This version extracts a stable conversation key + stores assistant msgs too.
-// 3) “tcl” then “32” should now work (size-only merge + stable memory).
+// Note: Removed language/script enforcement. The bot can reply in any language/script.
 // ------------------------------------------------------------
 
 import "dotenv/config";
@@ -94,10 +89,6 @@ function stableReqId() {
 function shorten(text, max = 520) {
   const t = String(text || "").trim();
   return t.length > max ? t.slice(0, max).trim() : t;
-}
-
-function hasArabicScript(s) {
-  return /[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF]/.test(String(s || ""));
 }
 
 function stripDiacritics(s) {
@@ -503,7 +494,10 @@ function looksLikeFallback(reply) {
     r.includes("ma kaynach") ||
     r.includes("ma fhemtch") ||
     r.includes("ghadi njawb") ||
-    r.includes("sma7 lia")
+    r.includes("sma7 lia") ||
+    r.includes("sorry") ||
+    r.includes("i didn") ||
+    r.includes("i don't")
   );
 }
 
@@ -758,8 +752,10 @@ function isGreeting(text) {
 function isLocationIntent(text) {
   const s = normMatch(text);
 
-  const finRe = /fin/; // darija latin "fin"
-  const whereRe = /where/;
+  // NOTE: JS word-boundary \b (or ASCII control \b) can be tricky across environments.
+  // Keep it simple and robust:
+  const finRe = /(^|\s)fin(\s|$)/i;   // darija latin "fin"
+  const whereRe = /(^|\s)where(\s|$)/i;
 
   return (
     whereRe.test(s) ||
@@ -774,7 +770,6 @@ function isLocationIntent(text) {
     s.includes("المحل")
   );
 }
-
 
 function isCallMeIntent(text) {
   const s = normMatch(text);
@@ -852,7 +847,7 @@ function extractOrderNumber(text) {
 }
 
 function extractSizeOnly(text) {
-  // Accept: "32", "32 inch", "32 pouces", "32\"", "32 بوصة"
+  // Accept: "32", "32 inch", "32 pouces", '32"', "32 بوصة"
   const s0 = arabicIndicToAsciiDigits(String(text || "")).trim();
   const s = normMatch(s0);
 
@@ -996,13 +991,12 @@ function formatOfferLine(brand, o) {
   const sizePart = o.size ? ` ${o.size}"` : "";
   const typePart = o.type ? ` (${o.type})` : "";
   const clsPart = o.class ? ` [${o.class}]` : "";
-  // Keep short: model + size + price; type/class only if not too noisy
   return `- ${brand} ${o.model}${sizePart}: ${o.price} dh${typePart || clsPart ? "" : ""}`;
 }
 
 function footerForContext({ isTv } = {}) {
-  const base = "delivery f jami3 lmdon f Maroc (1-7 iyam), paiement cash 3nd tslim, garantie 1 an.";
-  return isTv ? `${base} w support mural free m3a ay TV.` : base;
+  const base = "Delivery 1-7 days (all Morocco). Payment: cash on delivery. Warranty: 1 year.";
+  return isTv ? `${base} TVs: free wall mount.` : base;
 }
 
 function listOffersForBrand(brand, { cls = null, size = null, limit = 5 } = {}) {
@@ -1076,14 +1070,14 @@ function tryDirectOfferAnswer(userText, historyMsgs) {
   if (brand2 && sizeOnly) {
     const lines = listOffersForBrand(brand2, { cls: cls2, size: sizeOnly, limit: 6 });
     if (lines.length) {
-      return `${brand2} ${sizeOnly}" kaynin:\n${lines.join("\n")}\n${footerForContext({ isTv: true })}`;
+      return `${brand2} ${sizeOnly}" options:\n${lines.join("\n")}\n${footerForContext({ isTv: true })}`;
     }
     // If no exact size, show closest available sizes
     const sizes = Array.from(new Set((OFFERS.offers[brand2] || []).map((o) => o.size).filter((n) => n > 0))).sort(
       (a, b) => a - b
     );
     if (sizes.length) {
-      return `ma l9itach ${brand2} ${sizeOnly}" f l-offres daba. kaynin tailles: ${sizes.join(", ")}.`;
+      return `No ${brand2} ${sizeOnly}" found in current offers. Available sizes: ${sizes.join(", ")}.`;
     }
   }
 
@@ -1092,7 +1086,7 @@ function tryDirectOfferAnswer(userText, historyMsgs) {
     const lines = listOffersForBrand(brand, { cls, limit: 6 });
     if (lines.length) {
       const isTv = normMatch(cls).includes("tv") || OFFERS_INDEX.classCanon.tv === cls;
-      return `${brand} (${cls}) kaynin:\n${lines.join("\n")}\n${footerForContext({ isTv })}`;
+      return `${brand} (${cls}) options:\n${lines.join("\n")}\n${footerForContext({ isTv })}`;
     }
   }
 
@@ -1101,12 +1095,11 @@ function tryDirectOfferAnswer(userText, historyMsgs) {
     const lines = listOffersForClass(cls, { limit: 6 });
     if (lines.length) {
       const isTv = normMatch(cls).includes("tv") || OFFERS_INDEX.classCanon.tv === cls;
-      return `${cls} kayn:\n${lines.join("\n")}\n${footerForContext({ isTv })}`;
+      return `${cls} options:\n${lines.join("\n")}\n${footerForContext({ isTv })}`;
     }
   }
 
   // Brand only (short query)
-  // If user writes just "tcl" or "visio", answer with a short list instead of asking again.
   const justBrand = brand && s.replace(/\s+/g, "") === normMatch(brand).replace(/\s+/g, "");
   if (brand && (justBrand || s.length <= 8)) {
     // If brand has multiple classes, show classes list
@@ -1115,13 +1108,13 @@ function tryDirectOfferAnswer(userText, historyMsgs) {
     ).sort();
 
     if (classes.length > 1) {
-      return `${brand}: chno bghiti men had l-classes?\n- ${classes.slice(0, 8).join("\n- ")}`;
+      return `${brand}: which category do you want?\n- ${classes.slice(0, 8).join("\n- ")}`;
     }
 
     const lines = listOffersForBrand(brand, { limit: 6 });
     if (lines.length) {
       const isTv = classes.length === 1 && normMatch(classes[0]).includes("tv");
-      return `${brand} kaynin:\n${lines.join("\n")}\n${footerForContext({ isTv })}`;
+      return `${brand} options:\n${lines.join("\n")}\n${footerForContext({ isTv })}`;
     }
   }
 
@@ -1183,39 +1176,23 @@ function buildSystemPrompt(offersSubset) {
   return `
 You are DigiBot for Digitronics.ma.
 
-OUTPUT RULES (VERY IMPORTANT):
-- You MUST reply in Moroccan Darija using Latin letters ONLY.
-- Absolutely NO Arabic script characters in the output.
-- Keep it short and direct. No Markdown.
-- The customer may write Arabic/French/English; you must understand and reply in Latin Darija.
-- NEVER ask the customer to change language/script (do not say 'ktb b latin', etc.).
-- Use ONLY the offers data provided. Do NOT invent prices, models, or products.
+General guidance:
+- Be helpful, concise, and practical.
+- If the user asks about products/prices, prefer using the provided offers data.
+- If something isn't in the offers/rules, say you don't have that info right now and ask for model/size/brand.
+- The user may write Arabic/French/English/Darija; respond naturally.
 
 Company:
 - Address: 30 RUE 9 ETG RC LTS SMARA, Haj Fateh, Oulfa, Casablanca 20230.
 - WhatsApp: 06 60 111 438.
 - Email: contact@digitronics.ma.
 
-Business rules:
-- Delivery included, all cities Morocco, 1-7 days.
-- Payment: cash on delivery only.
-- Warranty: 1 year.
-- TVs: support mural free with every TV.
-
-If the user asks by category/class, use the "class" field and show max 5 offers: brand + model + price.
-If user asks by brand + size, show models that match.
-
-If info is not in offers/rules: say "ma kaynach had l-ma3louma 3ndna daba" and ask for model.
-
 Rules JSON:
 ${JSON.stringify(OFFERS.rules, null, 2)}
 
 Offers JSON (subset):
 ${JSON.stringify(offersSubset, null, 2)}
-
-Remember:
-- Do NOT send any order form link. Ordering is handled by the server.
-`.trim();
+  `.trim();
 }
 
 async function callOpenAIChat(messages, maxOut = 280) {
@@ -1225,7 +1202,7 @@ async function callOpenAIChat(messages, maxOut = 280) {
     return await openai.chat.completions.create({
       model: OPENAI_MODEL,
       messages,
-      temperature: 0.2,
+      temperature: 0.4,
       max_completion_tokens: maxOut,
     });
   } catch (e) {
@@ -1235,26 +1212,10 @@ async function callOpenAIChat(messages, maxOut = 280) {
     return await openai.chat.completions.create({
       model: OPENAI_MODEL,
       messages,
-      temperature: 0.2,
+      temperature: 0.4,
       max_tokens: maxOut,
     });
   }
-}
-
-async function rewriteToLatinDarija(text) {
-  const r = await callOpenAIChat(
-    [
-      {
-        role: "system",
-        content:
-          "Rewrite the text in Moroccan Darija using Latin letters ONLY. " +
-          "No Arabic script. Keep the same meaning. Keep it short.",
-      },
-      { role: "user", content: String(text || "") },
-    ],
-    220
-  );
-  return r?.choices?.[0]?.message?.content?.trim() || "";
 }
 
 async function digibotLLMReply(userText, historyMsgs) {
@@ -1266,26 +1227,10 @@ async function digibotLLMReply(userText, historyMsgs) {
     { role: "user", content: String(userText || "") },
   ];
 
-  const r = await callOpenAIChat(messages, 320);
+  const r = await callOpenAIChat(messages, 360);
   let reply = r?.choices?.[0]?.message?.content?.trim() || "";
 
-  // Guard: if it outputs Arabic script, rewrite.
-  if (hasArabicScript(reply)) {
-    const rewritten = await rewriteToLatinDarija(reply);
-    if (rewritten && !hasArabicScript(rewritten)) reply = rewritten;
-  }
-
-  // Extra guard: never mention the order form
-  if (reply.includes("docs.google.com/forms")) {
-    reply = reply.replace(/https?:\/\/docs\.google\.com\/forms\/\S+/g, "").trim();
-  }
-
-  if (!reply) reply = "sma7 lia, ma fhemtch mzyan. t9der t3awd tkteb su2al dyalk b tari9a wadi7a?";
-
-  // Final enforce: if still Arabic script, fall back safely.
-  if (hasArabicScript(reply)) {
-    reply = "sma7 lia, ma fhemtch mzyan. t9der t3awd tkteb su2al dyalk b tari9a wadi7a?";
-  }
+  if (!reply) reply = "Sorry, I didn't understand. Can you rephrase and include brand/model/size?";
 
   return reply;
 }
@@ -1371,14 +1316,14 @@ app.post("/wanotifier", async (req, res) => {
     if (!rateLimitOk(key)) return res.status(429).json({ ok: false, error: "Rate limit exceeded" });
 
     if (looksLikeAudioOrEmptyMedia(req.body || {})) {
-      const reply = "3afak ktb msg b lktaba, bla vocal/audio.";
+      const reply = "Please send a written message (no voice note/audio).";
       pushMemory(key, "assistant", reply);
       return res.json({ ok: true, reply });
     }
 
     // If empty message
     if (!userTextRaw) {
-      const reply = "3afak ktb msg b lktaba.";
+      const reply = "Please type your message.";
       pushMemory(key, "assistant", reply);
       return res.json({ ok: true, reply });
     }
@@ -1389,21 +1334,21 @@ app.post("/wanotifier", async (req, res) => {
 
     // 0) Greeting
     if (isGreeting(userTextRaw) && userTextRaw.length <= 25) {
-      const reply = "wa 3alaykom salam! mar7ba. chno bghiti t3ref/tchri? (TV / machine a laver / frigo / chauffe-eau...)";
+      const reply = "Hello! Welcome to Digitronics. What are you looking for? (TV / washing machine / fridge / water heater...)";
       pushMemory(key, "assistant", reply);
       return res.json({ ok: true, reply: shorten(reply, 420) });
     }
 
     // 1) Location (must be before order status)
     if (isLocationIntent(userTextRaw)) {
-      const reply = "l3onwan dyalna: 30 RUE 9 ETG RC LTS SMARA, Haj Fateh, Oulfa, Casablanca 20230.";
+      const reply = "Our address: 30 RUE 9 ETG RC LTS SMARA, Haj Fateh, Oulfa, Casablanca 20230.";
       pushMemory(key, "assistant", reply);
       return res.json({ ok: true, reply: shorten(reply, 420) });
     }
 
     // 2) Buy intent -> send order form (ONLY here)
     if (isBuyIntent(userTextRaw)) {
-      const reply = `mzyan! 3mr had formulaire bach nkmlo l-commande: ${ORDER_FORM_URL}`;
+      const reply = `Great. Please fill this form to place the order: ${ORDER_FORM_URL}`;
       pushMemory(key, "assistant", reply);
       return res.json({ ok: true, reply: shorten(reply, 420) });
     }
@@ -1416,11 +1361,11 @@ app.post("/wanotifier", async (req, res) => {
       if (orderNo) {
         pendingOrderStore.delete(key);
         lastOrderAckStore.set(key, { at: Date.now(), orderNo });
-        const reply = "choukran! wsltna ra9m dyal l-commande. ghadi ntslô bik qrib.";
+        const reply = "Thanks. We received your order number. We will call you soon.";
         pushMemory(key, "assistant", reply);
         return res.json({ ok: true, reply });
       }
-      const reply = "3tini ra9m dyal l-commande bach ncheckiwha.";
+      const reply = "Please send your order number so we can check it.";
       pushMemory(key, "assistant", reply);
       return res.json({ ok: true, reply });
     }
@@ -1429,12 +1374,12 @@ app.post("/wanotifier", async (req, res) => {
     if (isCallMeIntent(userTextRaw)) {
       const recent = lastOrderAckStore.get(key);
       if (recent?.at && Date.now() - recent.at < PENDING_TTL_MS) {
-        const reply = "mzyan, ghadi ntslô bik qrib.";
+        const reply = "Okay. We will call you soon.";
         pushMemory(key, "assistant", reply);
         return res.json({ ok: true, reply });
       }
       // Not in order context -> still answer politely
-      const reply = "mzyan, ghadi ntslô bik qrib. ila 3ndk ra9m commande siftih lina.";
+      const reply = "Okay. We will call you soon. If you have an order number, please send it.";
       pushMemory(key, "assistant", reply);
       return res.json({ ok: true, reply: shorten(reply, 420) });
     }
@@ -1445,17 +1390,16 @@ app.post("/wanotifier", async (req, res) => {
       if (orderNo) {
         pendingOrderStore.delete(key);
         lastOrderAckStore.set(key, { at: Date.now(), orderNo });
-        const reply = "choukran! wsltna ra9m dyal l-commande. ghadi ntslô bik qrib.";
+        const reply = "Thanks. We received your order number. We will call you soon.";
         pushMemory(key, "assistant", reply);
         return res.json({ ok: true, reply });
       }
 
       pendingOrderStore.set(key, { waiting: true, at: Date.now() });
-      const reply = "3tini ra9m dyal l-commande bach ncheckiwha.";
+      const reply = "Please send your order number so we can check it.";
       pushMemory(key, "assistant", reply);
       return res.json({ ok: true, reply });
     }
-
 
     // 4) Size-only merge (fixes: "tcl" then "32")
     const size = extractSizeOnly(userTextRaw);
