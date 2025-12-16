@@ -4,7 +4,7 @@
 // - Loads offers from Google Sheet CSV (brand, model, size, type, price, class)
 // - Live refresh (timer + manual /refresh-offers endpoint)
 // - Reliable conversation memory (stores BOTH user+bot messages, last N msgs, TTL)
-// - Size-only follow-up merge: "32" -> "bghit TCL 32 inch" (uses last brand in memory)
+// - Size-only follow-up merge: "32" -> "TCL 32 inch" (uses last brand in memory)
 // - Order status flow: ask order number, then confirm "we will call you soon"
 // - Buy intent: ONLY then send order form link
 // - Location intent: handled early (won’t trigger order flow)
@@ -89,6 +89,24 @@ function stableReqId() {
 function shorten(text, max = 520) {
   const t = String(text || "").trim();
   return t.length > max ? t.slice(0, max).trim() : t;
+}
+
+const HELP_CALL_NUMBER = "0605123934";
+
+// Standardize endings and optional call-to-action.
+function finalizeReply(reply, { addCall = false, addThanks = true } = {}) {
+  let out = String(reply || "").trim();
+  if (!out) out = "Please type your message with brand/model/size so I can help.";
+
+  if (addThanks && !/(thank you|thanks|merci|شكرا)/i.test(out)) {
+    out += "\n\nThank you.";
+  }
+
+  if (addCall && !out.includes(HELP_CALL_NUMBER)) {
+    out += `\nFor faster assistance, please call ${HELP_CALL_NUMBER}.`;
+  }
+
+  return shorten(out, 520);
 }
 
 function stripDiacritics(s) {
@@ -311,8 +329,13 @@ function normalizeIncoming(body = {}, req = null) {
 function looksLikeAudioOrEmptyMedia(body = {}) {
   const media = extractMediaFromBody(body);
   const txt = String(extractTextFromBody(body) || "").trim().toLowerCase();
-  if (media && !txt) return true;
+
+  // Block clear voice/audio messages; do NOT block image-only messages.
   if (txt.includes("voice") || txt.includes("vocal") || txt.includes("audio")) return true;
+
+  // If media exists but no text, allow (could be image). We will prompt user to type details.
+  if (media && !txt) return false;
+
   return false;
 }
 
@@ -340,7 +363,7 @@ function rateLimitOk(key) {
 // =====================
 const memoryStore = new Map(); // key -> { msgs:[{role,content}], lastSeen:number }
 
-// Optional persistence (helps with Render spin-down / restarts if disk persists)
+// Optional persistence
 const memoryDirAbs = path.resolve(MEMORY_DIR);
 const memoryFile = path.join(memoryDirAbs, "memory_store.json");
 let memoryFlushTimer = null;
@@ -424,7 +447,6 @@ setInterval(() => {
   for (const [k, v] of memoryStore.entries()) {
     if (!v?.lastSeen || now - v.lastSeen > CFG.memoryTtlMs) memoryStore.delete(k);
   }
-  // also clean rate store a bit
   for (const [k, v] of rateStore.entries()) {
     if (!v?.windowStart || now - v.windowStart > CFG.rateWindowMs * 2) rateStore.delete(k);
   }
@@ -441,9 +463,7 @@ process.on("SIGINT", () => {
 });
 
 // =====================
-// Learning (Option 1) — conservative “self-learning”
-// It does NOT change behavior automatically.
-// It logs fallback conversations so YOU can review and add rules/synonyms safely.
+// Learning (Option 1)
 // =====================
 const learningEnabled = LEARNING_ENABLED === "1";
 const learningDirAbs = path.resolve(LEARNING_DIR);
@@ -453,8 +473,8 @@ const suggestionsPath = path.join(learningDirAbs, "learning_suggestions.ndjson")
 
 let LEARNING_RULES = {
   version: 1,
-  brand_aliases: {}, // {"samsung":["smassung","sam sung"]}
-  class_aliases: {}, // {"Machine A Laver":["washing machine","غسالة",...]}
+  brand_aliases: {},
+  class_aliases: {},
   guardrails: { min_occurrences_to_suggest: 2 },
 };
 
@@ -501,8 +521,9 @@ function looksLikeFallback(reply) {
   );
 }
 
+// (learning helpers: levenshtein/tokenize/suggest...) — unchanged from your version,
+// except they rely on detectBrand/detectClass/ OFFERS_INDEX, so keep them below as-is.
 function levenshtein(a, b) {
-  // Small, dependency-free Levenshtein distance (case-insensitive)
   const s = String(a || "").toLowerCase();
   const t = String(b || "").toLowerCase();
   const n = s.length;
@@ -527,7 +548,6 @@ function levenshtein(a, b) {
 }
 
 function tokenizeLoose(text) {
-  // Tokenize across Arabic/French/English/Darija: keep letters+digits, drop punctuation
   const s = arabicIndicToAsciiDigits(String(text || "")).toLowerCase();
   return s
     .replace(/[\u0000-\u001f]/g, " ")
@@ -539,26 +559,16 @@ function tokenizeLoose(text) {
 }
 
 function suggestFromEventsSimple(maxLines = 1200) {
-  // Upgraded suggestions:
-  // 1) Frequent fallback phrases (same as before)
-  // 2) Brand/class alias candidates based on near-miss tokens (fuzzy)
-  //    - DOES NOT auto-apply, only suggests for your review.
   if (!learningEnabled) return [];
   if (!fs.existsSync(eventsPath)) return [];
   const txt = fs.readFileSync(eventsPath, "utf8").trim();
   if (!txt) return [];
 
-  // Make sure we have the latest offers index before suggesting
   const knownBrands = Array.isArray(OFFERS_INDEX?.brands) ? OFFERS_INDEX.brands : [];
   const knownClasses = Array.isArray(OFFERS_INDEX?.classes) ? OFFERS_INDEX.classes : [];
 
   const lines = txt.split("\n").slice(-maxLines).filter(Boolean);
-
-  // (A) fallback phrase counts (legacy)
   const phraseCounts = new Map();
-
-  // (B) alias candidate counts
-  // key: `${type}|${canonical}|${alias}` -> occurrences
   const aliasCounts = new Map();
 
   for (const line of lines) {
@@ -572,12 +582,9 @@ function suggestFromEventsSimple(maxLines = 1200) {
       const tokens = tokenizeLoose(e.text || "");
       if (!tokens.length) continue;
 
-      // If detectBrand/detectClass already succeeds, no need to propose alias from this message.
       const alreadyBrand = !!detectBrand(e.text || "");
       const alreadyClass = !!detectClass(e.text || "");
 
-      // Brand alias candidates: short tokens (2-12) compared to known brand names
-      // We skip very common stop-tokens.
       const stop = new Set([
         "tv","tele","télé","télévision","television","inch","inches","pouce","pouces","cm",
         "prix","price","dh","mad","dhs","dirham","dirhams",
@@ -589,7 +596,6 @@ function suggestFromEventsSimple(maxLines = 1200) {
         for (const tok of tokens) {
           if (stop.has(tok)) continue;
           if (tok.length < 2 || tok.length > 14) continue;
-          // if token is all digits, skip
           if (/^\d+$/.test(tok)) continue;
 
           let best = null;
@@ -599,7 +605,6 @@ function suggestFromEventsSimple(maxLines = 1200) {
             const nb = normMatch(b);
             if (!nb) continue;
 
-            // Compare against compacted brand (remove spaces/punct) too
             const bCompact = nb.replace(/[^a-z0-9]+/g, "");
             const tCompact = normMatch(tok).replace(/[^a-z0-9]+/g, "");
 
@@ -610,8 +615,6 @@ function suggestFromEventsSimple(maxLines = 1200) {
             }
           }
 
-          // Heuristic threshold: allow small typos only
-          // e.g., "samsng" -> "SAMSUNG", "tcll" -> "TCL"
           if (best && bestDist > 0 && bestDist <= 2) {
             const k = `brand|${best}|${tok}`;
             aliasCounts.set(k, (aliasCounts.get(k) || 0) + 1);
@@ -619,11 +622,9 @@ function suggestFromEventsSimple(maxLines = 1200) {
         }
       }
 
-      // Class alias candidates: detect "category words" not matching sheet class but close to one
-      // We only try if not alreadyClass.
       if (!alreadyClass && knownClasses.length) {
         const joined = tokens.join(" ");
-        // If message contains any long-ish word, compare to known classes
+
         for (const tok of tokens) {
           if (stop.has(tok)) continue;
           if (tok.length < 4 || tok.length > 24) continue;
@@ -635,7 +636,6 @@ function suggestFromEventsSimple(maxLines = 1200) {
           for (const c of knownClasses) {
             const nc = normMatch(c).replace(/[^a-z0-9]+/g, " ");
             const t = normMatch(tok).replace(/[^a-z0-9]+/g, " ");
-            // Compare token to each word in class, take best
             const parts = nc.split(/\s+/).filter(Boolean);
             for (const p of parts) {
               const d = levenshtein(t, p);
@@ -652,8 +652,6 @@ function suggestFromEventsSimple(maxLines = 1200) {
           }
         }
 
-        // Also: if the whole message is close to some class keyword
-        // (useful for "machin alaver" etc.)
         if (joined.length <= 40) {
           let best = null;
           let bestDist = 999;
@@ -678,12 +676,10 @@ function suggestFromEventsSimple(maxLines = 1200) {
   const minN = Number(LEARNING_RULES?.guardrails?.min_occurrences_to_suggest || 2);
   const out = [];
 
-  // A) Phrase review suggestions
   for (const [phrase, occurrences] of phraseCounts.entries()) {
     if (occurrences >= minN) out.push({ at: nowIso(), type: "review_phrase", phrase, occurrences });
   }
 
-  // B) Alias suggestions
   for (const [k, occurrences] of aliasCounts.entries()) {
     if (occurrences < minN) continue;
     const [kind, canonical, alias] = k.split("|");
@@ -697,9 +693,7 @@ function suggestFromEventsSimple(maxLines = 1200) {
     });
   }
 
-  // Sort: highest occurrences first, then stable type
   out.sort((a, b) => (b.occurrences || 0) - (a.occurrences || 0) || String(a.type).localeCompare(String(b.type)));
-
   return out.slice(0, 80);
 }
 
@@ -725,24 +719,17 @@ let OFFERS = {
       MORSAT: "Android TV",
     },
   },
-  offers: {}, // { BRAND: [{model,size,type,price,class}] }
+  offers: {},
 };
 
 let OFFERS_INDEX = {
-  brands: [], // ["VISIO","TCL"...]
-  classes: [], // ["TV","Machine A Laver"...]
-  modelLookup: new Map(), // modelLower -> { brand, offer }
-  brandNorm: new Map(), // normBrand -> BRAND
-  classNorm: new Map(), // normClass -> ClassName
-  classToOffers: new Map(), // normClass -> [{brand, offer}]
-  classCanon: {
-    tv: null,
-    washing: null,
-    fridge: null,
-    waterHeater: null,
-    heating: null,
-    airConditioner: null,
-  },
+  brands: [],
+  classes: [],
+  modelLookup: new Map(),
+  brandNorm: new Map(),
+  classNorm: new Map(),
+  classToOffers: new Map(),
+  classCanon: { tv: null, washing: null, fridge: null, waterHeater: null, heating: null, airConditioner: null },
 };
 
 let lastOffersSync = { ok: false, at: null, error: null };
@@ -770,18 +757,19 @@ function parseSize(raw) {
   return Number.isFinite(n) ? n : 0;
 }
 
+function parseStock(raw) {
+  const s = arabicIndicToAsciiDigits(String(raw ?? "0").trim());
+  const n = Number(s.replace(/[^\d]/g, ""));
+  return Number.isFinite(n) ? n : 0;
+}
+
 function buildOffersFromCsv(csvText) {
-  const rowsRaw = parse(csvText, {
-    columns: true,
-    skip_empty_lines: true,
-    trim: true,
-  });
+  const rowsRaw = parse(csvText, { columns: true, skip_empty_lines: true, trim: true });
 
   const offers = {};
   let kept = 0;
 
   for (const row of rowsRaw) {
-    // Normalize keys once
     const r = {};
     for (const [k, v] of Object.entries(row)) r[normalizeHeader(k)] = v;
 
@@ -790,16 +778,42 @@ function buildOffersFromCsv(csvText) {
     const size = parseSize(r.size ?? r.inch ?? r.taille ?? 0);
     const type = String(r.type ?? "").trim();
     const price = parsePrice(r.price ?? "");
-    const cls = String(r.class ?? r.classe ?? "").trim(); // NEW column
+    const cls = String(r.class ?? r.classe ?? "").trim();
+
+    // Optional extra columns (if present in the Sheet)
+    const name = String(r.name ?? r.product_name ?? "").trim();
+    const category = String(r.category ?? r.categorie ?? "").trim();
+    const stock = parseStock(r.stock ?? r.qty ?? r.quantity ?? 0);
 
     if (!brand || !model || !Number.isFinite(price)) continue;
 
     if (!offers[brand]) offers[brand] = [];
-    offers[brand].push({ model, size, type, price, class: cls });
+    offers[brand].push({ model, name, category, stock, size, type, price, class: cls });
     kept += 1;
   }
 
   return { offers, kept };
+}
+
+function pickCanonicalClass(classes, tokens = []) {
+  if (!Array.isArray(classes) || !classes.length) return null;
+  const toks = tokens.map((t) => normMatch(t));
+  let best = null;
+
+  for (const c of classes) {
+    const nc = normMatch(c);
+    const ok = toks.every((t) => (t ? nc.includes(t) : true));
+    if (ok) { best = c; break; }
+  }
+
+  if (!best && toks.length) {
+    for (const c of classes) {
+      const nc = normMatch(c);
+      if (toks.some((t) => t && nc.includes(t))) { best = c; break; }
+    }
+  }
+
+  return best;
 }
 
 function rebuildOffersIndex() {
@@ -841,35 +855,6 @@ function rebuildOffersIndex() {
   OFFERS_INDEX = { brands, classes, modelLookup, brandNorm, classNorm, classToOffers, classCanon };
 }
 
-function pickCanonicalClass(classes, tokens = []) {
-  if (!Array.isArray(classes) || !classes.length) return null;
-  const toks = tokens.map((t) => normMatch(t));
-  let best = null;
-
-  for (const c of classes) {
-    const nc = normMatch(c);
-    // require all tokens to appear if tokens length > 1
-    const ok = toks.every((t) => (t ? nc.includes(t) : true));
-    if (ok) {
-      best = c;
-      break;
-    }
-  }
-
-  // fallback: try any token
-  if (!best && toks.length) {
-    for (const c of classes) {
-      const nc = normMatch(c);
-      if (toks.some((t) => t && nc.includes(t))) {
-        best = c;
-        break;
-      }
-    }
-  }
-
-  return best;
-}
-
 async function syncOffersFromGoogleSheet() {
   if (!OFFERS_CSV_URL) throw new Error("Missing OFFERS_CSV_URL in env");
 
@@ -896,36 +881,22 @@ async function refreshOffersSafe() {
   }
 }
 
-// Startup: memory load + offers refresh loop
 loadMemoryFromDisk();
 refreshOffersSafe();
 setInterval(refreshOffersSafe, CFG.refreshMs);
 
 // =====================
-// Intent detection (multi-language input ok)
+// Intent detection
 // =====================
 function isGreeting(text) {
   const s = normMatch(text).trim();
   if (!s) return false;
-  return (
-    s === "salam" ||
-    s === "slm" ||
-    s === "hi" ||
-    s === "hello" ||
-    s === "bonjour" ||
-    s === "salut" ||
-    s.includes("salam") ||
-    s.includes("slm") ||
-    s.includes("bonjour")
-  );
+  return s === "salam" || s === "slm" || s === "hi" || s === "hello" || s === "bonjour" || s === "salut" || s.includes("salam") || s.includes("slm") || s.includes("bonjour");
 }
 
 function isLocationIntent(text) {
   const s = normMatch(text);
-
-  // NOTE: JS word-boundary \b (or ASCII control \b) can be tricky across environments.
-  // Keep it simple and robust:
-  const finRe = /(^|\s)fin(\s|$)/i;   // darija latin "fin"
+  const finRe = /(^|\s)fin(\s|$)/i;
   const whereRe = /(^|\s)where(\s|$)/i;
 
   return (
@@ -944,17 +915,7 @@ function isLocationIntent(text) {
 
 function isCallMeIntent(text) {
   const s = normMatch(text);
-  return (
-    s.includes("3ayet") ||
-    s.includes("3ayt") ||
-    s.includes("call me") ||
-    s.includes("call") ||
-    s.includes("warid") ||
-    s.includes("t3ayet") ||
-    s.includes("tsl") ||
-    s.includes("اتصل") ||
-    s.includes("عيط")
-  );
+  return s.includes("3ayet") || s.includes("3ayt") || s.includes("call me") || s.includes("call") || s.includes("warid") || s.includes("t3ayet") || s.includes("tsl") || s.includes("اتصل") || s.includes("عيط");
 }
 
 function isBuyIntent(text) {
@@ -977,38 +938,11 @@ function isBuyIntent(text) {
   );
 }
 
-// Order status intent should NOT trigger for “I want to order”
-// (buy intent is checked before order status flow in the handler).
 function isOrderStatusIntent(text) {
   const s = normMatch(text);
-
   const hard = ["commande", "order", "tracking", "suivi", "livraison", "delivery", "talab", "tlb"];
-  const problem = [
-    "pas recu",
-    "pas reçu",
-    "j ai pas recu",
-    "je n ai pas recu",
-    "late",
-    "delayed",
-    "retard",
-    "takhert",
-    "t2khret",
-    "matwsl",
-    "matwslatch",
-    "ma wslatch",
-    "ma wsltch",
-    "لم اتوصل",
-    "ما توصلتش",
-    "ما وصلتش",
-    "متوصلتش",
-    "متأخر",
-    "تأخر",
-  ];
-
-  const hasHard = hard.some((k) => s.includes(k));
-  const hasProblem = problem.some((p) => s.includes(normMatch(p)));
-
-  return hasHard || hasProblem;
+  const problem = ["pas recu","pas reçu","j ai pas recu","je n ai pas recu","late","delayed","retard","takhert","t2khret","matwsl","matwslatch","ma wslatch","ma wsltch","لم اتوصل","ما توصلتش","ما وصلتش","متوصلتش","متأخر","تأخر"];
+  return hard.some((k) => s.includes(k)) || problem.some((p) => s.includes(normMatch(p)));
 }
 
 function extractOrderNumber(text) {
@@ -1018,10 +952,8 @@ function extractOrderNumber(text) {
 }
 
 function extractSizeOnly(text) {
-  // Accept: "32", "32 inch", "32 pouces", '32"', "32 بوصة"
   const s0 = arabicIndicToAsciiDigits(String(text || "")).trim();
   const s = normMatch(s0);
-
   const m = s.match(/^\s*(24|32|40|43|50|55|65|75)\s*(?:inch|inches|pouce|pouces|\"|”|″|بوصة|بوصات)?\s*$/i);
   return m ? Number(m[1]) : null;
 }
@@ -1032,7 +964,6 @@ function extractSizeOnly(text) {
 function detectBrand(text) {
   const s = normMatch(text);
 
-  // 1) learning brand aliases
   const aliases = LEARNING_RULES?.brand_aliases || {};
   for (const [canonical, list] of Object.entries(aliases)) {
     const arr = Array.isArray(list) ? list : [];
@@ -1044,7 +975,6 @@ function detectBrand(text) {
     }
   }
 
-  // 2) exact / substring match against sheet brands
   for (const b of OFFERS_INDEX.brands) {
     const nb = normMatch(b);
     if (!nb) continue;
@@ -1062,45 +992,22 @@ function detectBrand(text) {
 
 function detectModel(text) {
   const s = normMatch(text);
-  // Scan models (few hundred rows -> OK)
   for (const [mLower, entry] of OFFERS_INDEX.modelLookup.entries()) {
-    if (mLower && s.includes(mLower)) return entry; // {brand, offer}
+    if (mLower && s.includes(mLower)) return entry;
   }
   return null;
 }
 
-// Default aliases (handles Arabic/French/English inputs)
 function buildDefaultClassAliases() {
   const canon = OFFERS_INDEX.classCanon;
 
   const out = {};
-  if (canon.tv) {
-    out[canon.tv] = ["tv", "tele", "television", "télé", "télévision", "تلفاز", "تلفزيون", "تليفيزيون"];
-  }
-  if (canon.washing) {
-    out[canon.washing] = [
-      "machine a laver",
-      "machine à laver",
-      "lave linge",
-      "washing machine",
-      "washer",
-      "غسالة",
-      "غسالة ملابس",
-    ];
-  }
-  if (canon.fridge) {
-    out[canon.fridge] = ["refrigerateur", "réfrigérateur", "refregirateur", "frigo", "congelateur", "congélateur", "ثلاجة"];
-  }
-  if (canon.waterHeater) {
-    out[canon.waterHeater] = ["chauffe eau", "chauffe-eau", "water heater", "سخان", "سخان الماء", "chauffe"];
-  }
-  if (canon.heating) {
-    out[canon.heating] = ["chauffage", "heater", "radiateur", "chauffa", "دفاية", "سخان كهربائي"];
-  }
-  if (canon.airConditioner) {
-    out[canon.airConditioner] = ["clim", "climatiseur", "air conditioner", "ac", "مكيف", "مكيف هواء"];
-  }
-
+  if (canon.tv) out[canon.tv] = ["tv", "tele", "television", "télé", "télévision", "تلفاز", "تلفزيون", "تليفيزيون"];
+  if (canon.washing) out[canon.washing] = ["machine a laver","machine à laver","lave linge","washing machine","washer","غسالة","غسالة ملابس"];
+  if (canon.fridge) out[canon.fridge] = ["refrigerateur","réfrigérateur","refregirateur","frigo","congelateur","congélateur","ثلاجة"];
+  if (canon.waterHeater) out[canon.waterHeater] = ["chauffe eau","chauffe-eau","water heater","سخان","سخان الماء","chauffe"];
+  if (canon.heating) out[canon.heating] = ["chauffage","heater","radiateur","chauffa","دفاية","سخان كهربائي"];
+  if (canon.airConditioner) out[canon.airConditioner] = ["clim","climatiseur","air conditioner","ac","مكيف","مكيف هواء"];
   return out;
 }
 
@@ -1108,20 +1015,17 @@ function detectClass(text) {
   const s = normMatch(text).trim();
   if (!s) return null;
 
-  // 1) learning class aliases
   const aliases = LEARNING_RULES?.class_aliases || {};
   for (const [canonical, list] of Object.entries(aliases)) {
     const arr = Array.isArray(list) ? list : [];
     for (const a of arr) {
       if (a && s.includes(normMatch(a))) {
-        // map canonical to actual sheet class if possible
         const cls = OFFERS_INDEX.classNorm.get(normMatch(canonical)) || canonical;
         return cls;
       }
     }
   }
 
-  // 2) default aliases derived from sheet
   const defaults = buildDefaultClassAliases();
   for (const [cls, arr] of Object.entries(defaults)) {
     for (const a of arr) {
@@ -1129,7 +1033,6 @@ function detectClass(text) {
     }
   }
 
-  // 3) direct match against sheet classes
   for (const cls of OFFERS_INDEX.classes) {
     const ncls = normMatch(cls);
     if (!ncls) continue;
@@ -1156,13 +1059,17 @@ function lastMentionedClass(historyMsgs = []) {
 }
 
 // =====================
-// Deterministic offer responses (reduce LLM randomness)
+// Deterministic offer responses
 // =====================
 function formatOfferLine(brand, o) {
   const sizePart = o.size ? ` ${o.size}"` : "";
+  const namePart = o.name ? ` — ${o.name}` : "";
+  const catPart = o.category ? ` (${o.category})` : "";
   const typePart = o.type ? ` (${o.type})` : "";
   const clsPart = o.class ? ` [${o.class}]` : "";
-  return `- ${brand} ${o.model}${sizePart}: ${o.price} dh${typePart || clsPart ? "" : ""}`;
+  const stockN = Number(o.stock ?? 0);
+  const stockPart = Number.isFinite(stockN) ? (stockN > 0 ? ` | Stock: ${stockN}` : ` | Out of stock`) : "";
+  return `- ${brand} ${o.model}${sizePart}${namePart}${catPart}: ${o.price} dh${typePart}${clsPart}${stockPart}`;
 }
 
 function footerForContext({ isTv } = {}) {
@@ -1182,7 +1089,6 @@ function listOffersForBrand(brand, { cls = null, size = null, limit = 5 } = {}) 
     arr = arr.filter((o) => Number(o.size || 0) === Number(size));
   }
 
-  // Sort by price asc
   arr = arr
     .filter((o) => Number.isFinite(Number(o.price)))
     .sort((a, b) => Number(a.price) - Number(b.price))
@@ -1209,7 +1115,6 @@ function tryDirectOfferAnswer(userText, historyMsgs) {
 
   if (!Object.keys(OFFERS.offers || {}).length) return null;
 
-  // Model match
   const modelHit = detectModel(text);
   if (modelHit) {
     const { brand, offer } = modelHit;
@@ -1221,14 +1126,12 @@ function tryDirectOfferAnswer(userText, historyMsgs) {
   const cls = detectClass(text);
   const brand = detectBrand(text);
 
-  // Size-only -> use last brand (and last class if exists)
   const sizeOnly = extractSizeOnly(text);
   let brand2 = brand;
   let cls2 = cls;
 
   if (sizeOnly && !brand2) brand2 = lastMentionedBrand(historyMsgs);
 
-  // TV sizes (32/43/55...) almost always mean TV; avoid inheriting non-TV class from history.
   const tvCanon = OFFERS_INDEX.classCanon.tv;
   const lastCls = lastMentionedClass(historyMsgs);
 
@@ -1237,22 +1140,17 @@ function tryDirectOfferAnswer(userText, historyMsgs) {
     else if (!cls2) cls2 = lastCls || null;
   }
 
-  // Brand+size
   if (brand2 && sizeOnly) {
     const lines = listOffersForBrand(brand2, { cls: cls2, size: sizeOnly, limit: 6 });
     if (lines.length) {
       return `${brand2} ${sizeOnly}" options:\n${lines.join("\n")}\n${footerForContext({ isTv: true })}`;
     }
-    // If no exact size, show closest available sizes
-    const sizes = Array.from(new Set((OFFERS.offers[brand2] || []).map((o) => o.size).filter((n) => n > 0))).sort(
-      (a, b) => a - b
-    );
+    const sizes = Array.from(new Set((OFFERS.offers[brand2] || []).map((o) => o.size).filter((n) => n > 0))).sort((a, b) => a - b);
     if (sizes.length) {
-      return `No ${brand2} ${sizeOnly}" found in current offers. Available sizes: ${sizes.join(", ")}.`;
+      return finalizeReply(`No ${brand2} ${sizeOnly}" found in current offers. Available sizes: ${sizes.join(", ")}.`, { addCall: true });
     }
   }
 
-  // Brand + class
   if (brand && cls) {
     const lines = listOffersForBrand(brand, { cls, limit: 6 });
     if (lines.length) {
@@ -1261,7 +1159,6 @@ function tryDirectOfferAnswer(userText, historyMsgs) {
     }
   }
 
-  // Class only
   if (!brand && cls) {
     const lines = listOffersForClass(cls, { limit: 6 });
     if (lines.length) {
@@ -1270,28 +1167,17 @@ function tryDirectOfferAnswer(userText, historyMsgs) {
     }
   }
 
-  // Brand only (short query)
   const justBrand = brand && s.replace(/\s+/g, "") === normMatch(brand).replace(/\s+/g, "");
   if (brand && (justBrand || s.length <= 8)) {
-    // If brand has multiple classes, we usually ask which category.
-    // Upgrade: for VISIO and TCL, default to TVs (most common user intent) and show TV offers directly.
-    const classes = Array.from(
-      new Set((OFFERS.offers[brand] || []).map((o) => String(o.class || "").trim()).filter(Boolean))
-    ).sort();
+    const classes = Array.from(new Set((OFFERS.offers[brand] || []).map((o) => String(o.class || "").trim()).filter(Boolean))).sort();
+    const tvCanon2 = OFFERS_INDEX.classCanon.tv;
 
-    const tvCanon = OFFERS_INDEX.classCanon.tv;
-
-    if ((brand === "VISIO" || brand === "TCL") && tvCanon) {
-      const tvLines = listOffersForBrand(brand, { cls: tvCanon, limit: 6 });
-      if (tvLines.length) {
-        return `${brand} TV options:\n${tvLines.join("\n")}\n${footerForContext({ isTv: true })}`;
-      }
-      // If no TV rows, fall back to normal behavior below.
+    if ((brand === "VISIO" || brand === "TCL") && tvCanon2) {
+      const tvLines = listOffersForBrand(brand, { cls: tvCanon2, limit: 6 });
+      if (tvLines.length) return `${brand} TV options:\n${tvLines.join("\n")}\n${footerForContext({ isTv: true })}`;
     }
 
-    if (classes.length > 1) {
-      return `${brand}: which category do you want?\n- ${classes.slice(0, 8).join("\n- ")}`;
-    }
+    if (classes.length > 1) return `${brand}: which category do you want?\n- ${classes.slice(0, 8).join("\n- ")}`;
 
     const lines = listOffersForBrand(brand, { limit: 6 });
     if (lines.length) {
@@ -1304,16 +1190,13 @@ function tryDirectOfferAnswer(userText, historyMsgs) {
 }
 
 // =====================
-// LLM fallback (for complex questions)
+// LLM fallback
 // =====================
 function buildOffersSubsetForPrompt(userText, historyMsgs) {
-  // Keep prompt small: pick offers by detected brand/class/model or last context
   const combined = [userText, ...historyMsgs.map((m) => m.content)].join(" ");
 
   const modelHit = detectModel(combined);
-  if (modelHit) {
-    return { offers: { [modelHit.brand]: [modelHit.offer] } };
-  }
+  if (modelHit) return { offers: { [modelHit.brand]: [modelHit.offer] } };
 
   let brand = detectBrand(combined);
   let cls = detectClass(combined);
@@ -1326,9 +1209,7 @@ function buildOffersSubsetForPrompt(userText, historyMsgs) {
     return { offers: { [brand]: arr.slice(0, 60) }, meta: { brand, class: cls } };
   }
 
-  if (brand) {
-    return { offers: { [brand]: (OFFERS.offers[brand] || []).slice(0, 80) }, meta: { brand } };
-  }
+  if (brand) return { offers: { [brand]: (OFFERS.offers[brand] || []).slice(0, 80) }, meta: { brand } };
 
   if (cls) {
     const out = {};
@@ -1344,7 +1225,6 @@ function buildOffersSubsetForPrompt(userText, historyMsgs) {
     return { offers: out, meta: { class: cls } };
   }
 
-  // No detection: provide only the available classes + brands to avoid dumping full sheet
   return {
     offers: {
       AVAILABLE_CLASSES: OFFERS_INDEX.classes.slice(0, 60).map((c) => ({ class: c })),
@@ -1378,25 +1258,12 @@ ${JSON.stringify(offersSubset, null, 2)}
 }
 
 async function callOpenAIChat(messages, maxOut = 280) {
-  // Compatibility wrapper: prefer max_completion_tokens (your model needs it),
-  // fallback to max_tokens if a different model is used.
   try {
-    return await openai.chat.completions.create({
-      model: OPENAI_MODEL,
-      messages,
-      temperature: 0.4,
-      max_completion_tokens: maxOut,
-    });
+    return await openai.chat.completions.create({ model: OPENAI_MODEL, messages, temperature: 0.4, max_completion_tokens: maxOut });
   } catch (e) {
     const msg = String(e?.message || "");
-    if (msg.includes("max_tokens") && msg.includes("max_completion_tokens")) throw e; // already the right one
-    // fallback for older models
-    return await openai.chat.completions.create({
-      model: OPENAI_MODEL,
-      messages,
-      temperature: 0.4,
-      max_tokens: maxOut,
-    });
+    if (msg.includes("max_tokens") && msg.includes("max_completion_tokens")) throw e;
+    return await openai.chat.completions.create({ model: OPENAI_MODEL, messages, temperature: 0.4, max_tokens: maxOut });
   }
 }
 
@@ -1410,60 +1277,26 @@ async function digibotLLMReply(userText, historyMsgs) {
   ];
 
   const r = await callOpenAIChat(messages, 360);
-  let reply = r?.choices?.[0]?.message?.content?.trim() || "";
-
-  if (!reply) reply = "Thank you for your message. I may be missing some details. You can rephrase with brand/model/size, or call us directly at 0605123934 for quick help.";
-
-  return reply;
+  const raw = r?.choices?.[0]?.message?.content?.trim() || "";
+  return finalizeReply(raw || "I may be missing some details. Please rephrase with brand/model/size.", { addCall: looksLikeFallback(raw) });
 }
 
 // =====================
 // Order status flow state
 // =====================
-const pendingOrderStore = new Map(); // key -> { waiting:boolean, at:number }
-const lastOrderAckStore = new Map(); // key -> { at:number, orderNo?:string }
+const pendingOrderStore = new Map();
+const lastOrderAckStore = new Map();
 const PENDING_TTL_MS = 30 * 60 * 1000;
 
 setInterval(() => {
   const now = Date.now();
-  for (const [k, v] of pendingOrderStore.entries()) {
-    if (!v?.at || now - v.at > PENDING_TTL_MS) pendingOrderStore.delete(k);
-  }
-  for (const [k, v] of lastOrderAckStore.entries()) {
-    if (!v?.at || now - v.at > PENDING_TTL_MS) lastOrderAckStore.delete(k);
-  }
+  for (const [k, v] of pendingOrderStore.entries()) if (!v?.at || now - v.at > PENDING_TTL_MS) pendingOrderStore.delete(k);
+  for (const [k, v] of lastOrderAckStore.entries()) if (!v?.at || now - v.at > PENDING_TTL_MS) lastOrderAckStore.delete(k);
 }, 10 * 60 * 1000);
 
 // =====================
 // Routes
 // =====================
-// Small wrapper to safely use async route handlers without try/catch blocks
-// Small wrapper to safely use async route handlers without try/catch blocks
-function safeAsync(handler) {
-  return (req, res) => {
-    Promise.resolve(handler(req, res)).catch((err) => {
-      const t0 = res?.locals?.t0;
-      const reqId = res?.locals?.reqId || "unknown";
-      const latencyMs = typeof t0 === "number" ? Date.now() - t0 : undefined;
-
-      try {
-        console.error(
-          JSON.stringify({
-            level: "error",
-            msg: "wanotifier_error",
-            reqId,
-            latencyMs,
-            error: err?.message || String(err),
-          })
-        );
-      } catch {}
-
-      if (res.headersSent) return;
-      return res.status(500).json({ ok: false, error: "Server error" });
-    });
-  };
-}
-
 app.get("/", (_req, res) => res.status(200).send("OK - DigiBot running"));
 
 app.get("/offers-status", (_req, res) => {
@@ -1511,177 +1344,159 @@ app.post("/learning-suggest", (req, res) => {
   return res.json({ ok: true, wrote: suggestions.length });
 });
 
-
-// Returns suggestions without writing them (safe preview)
 app.get("/learning-suggestions", (req, res) => {
   if (!learningEnabled) return res.status(400).json({ ok: false, error: "Learning disabled" });
 
   if (LEARNING_TOKEN) {
     const token = req.headers["x-learning-token"];
-    if (token !== LEARNING_TOKEN) return res.status(401app.post("/wanotifier", safeAsync(async (req, res) => {
+    if (token !== LEARNING_TOKEN) return res.status(401).json({ ok: false, error: "Unauthorized" });
+  }
+
+  loadLearningRules();
+  const suggestions = suggestFromEventsSimple();
+  return res.json({ ok: true, count: suggestions.length, suggestions });
+});
+
+// Main webhook
+app.post("/wanotifier", async (req, res) => {
   const reqId = stableReqId();
   const t0 = Date.now();
-  res.locals.reqId = reqId;
-  res.locals.t0 = t0;
 
-  const incoming = normalizeIncoming(req.body || {}, req);
-  const key = incoming.key;
-  const phone = incoming.phone;
-  const userTextRaw = incoming.text.slice(0, 2000);
+  try {
+    const incoming = normalizeIncoming(req.body || {}, req);
+    const key = incoming.key;
+    const phone = incoming.phone;
+    const userTextRaw = incoming.text.slice(0, 2000);
 
-  if (!rateLimitOk(key)) return res.status(429).json({ ok: false, error: "Rate limit exceeded" });
+    if (!rateLimitOk(key)) return res.status(429).json({ ok: false, error: "Rate limit exceeded" });
 
-  if (looksLikeAudioOrEmptyMedia(req.body || {})) {
-    const reply = "Please send a written message (no voice note/audio).";
-    pushMemory(key, "assistant", reply);
-    return res.json({ ok: true, reply });
-  }
-
-  // If empty message
-  if (!userTextRaw) {
-    const reply = "Please type your message.";
-    pushMemory(key, "assistant", reply);
-    return res.json({ ok: true, reply });
-  }
-
-  // Save user message to memory FIRST (so follow-ups work even if we return early)
-  pushMemory(key, "user", userTextRaw);
-  const history = getMemory(key);
-
-  // 0) Greeting
-  if (isGreeting(userTextRaw) && userTextRaw.length <= 25) {
-    const reply = "Hello! Welcome to Digitronics. What are you looking for? (TV / washing machine / fridge / water heater...)";
-    pushMemory(key, "assistant", reply);
-    return res.json({ ok: true, reply: shorten(reply, 420) });
-  }
-
-  // 1) Location (must be before order status)
-  if (isLocationIntent(userTextRaw)) {
-    const reply = "Our address: 30 RUE 9 ETG RC LTS SMARA, Haj Fateh, Oulfa, Casablanca 20230.";
-    pushMemory(key, "assistant", reply);
-    return res.json({ ok: true, reply: shorten(reply, 420) });
-  }
-
-  // 2) Buy intent -> send order form (ONLY here)
-  if (isBuyIntent(userTextRaw)) {
-    const reply = `Great. Please fill this form to place the order: ${ORDER_FORM_URL}`;
-    pushMemory(key, "assistant", reply);
-    return res.json({ ok: true, reply: shorten(reply, 420) });
-  }
-
-  // 3) Pending order flow (status)
-  const pending = pendingOrderStore.get(key);
-  const orderNo = extractOrderNumber(userTextRaw);
-
-  if (pending?.waiting) {
-    if (orderNo) {
-      pendingOrderStore.delete(key);
-      lastOrderAckStore.set(key, { at: Date.now(), orderNo });
-      const reply = "Thanks. We received your order number. We will call you soon.";
-      pushMemory(key, "assistant", reply);
-      return res.json({ ok: true, reply });
-    }
-    const reply = "Please send your order number so we can check it.";
-    pushMemory(key, "assistant", reply);
-    return res.json({ ok: true, reply });
-  }
-
-  // If user asks “call me” soon after providing order number
-  if (isCallMeIntent(userTextRaw)) {
-    const recent = lastOrderAckStore.get(key);
-    if (recent?.at && Date.now() - recent.at < PENDING_TTL_MS) {
-      const reply = "Okay. We will call you soon.";
-      pushMemory(key, "assistant", reply);
-      return res.json({ ok: true, reply });
-    }
-    // Not in order context -> still answer politely
-    const reply = "Okay. We will call you soon. If you have an order number, please send it.";
-    pushMemory(key, "assistant", reply);
-    return res.json({ ok: true, reply: shorten(reply, 420) });
-  }
-
-  // Start order status flow only with strong intent
-  if (isOrderStatusIntent(userTextRaw)) {
-    // If the client already included the order number in the same message, acknowledge immediately.
-    if (orderNo) {
-      pendingOrderStore.delete(key);
-      lastOrderAckStore.set(key, { at: Date.now(), orderNo });
-      const reply = "Thanks. We received your order number. We will call you soon.";
+    if (looksLikeAudioOrEmptyMedia(req.body || {})) {
+      const reply = finalizeReply("Please send a written message (no voice note/audio).", { addCall: true });
       pushMemory(key, "assistant", reply);
       return res.json({ ok: true, reply });
     }
 
-    pendingOrderStore.set(key, { waiting: true, at: Date.now() });
-    const reply = "Please send your order number so we can check it.";
-    pushMemory(key, "assistant", reply);
-    return res.json({ ok: true, reply });
-  }
-
-  // 4) Size-only merge (fixes: "tcl" then "32")
-  const size = extractSizeOnly(userTextRaw);
-  if (size) {
-    const lastB = lastMentionedBrand(history);
-    if (lastB) {
-      const merged = `bghit ${lastB} ${size} inch`;
-      pushMemory(key, "user", merged);
+    // If no text but media exists (image/photo), prompt for details instead of treating as empty.
+    if (!userTextRaw && incoming.media) {
+      const reply = finalizeReply("I received your media. Please type the brand + size or the model code so I can check the price (example: TCL 55).", { addCall: true });
+      pushMemory(key, "assistant", reply);
+      return res.json({ ok: true, reply });
     }
-  }
 
-  // Refresh history after possible merge
-  const history2 = getMemory(key);
+    if (!userTextRaw) {
+      const reply = finalizeReply("Please type your message.", { addCall: true });
+      pushMemory(key, "assistant", reply);
+      return res.json({ ok: true, reply });
+    }
 
-  // 5) Try deterministic offer answer first
-  const direct = tryDirectOfferAnswer(userTextRaw, history2);
-  if (direct) {
-    const reply = shorten(direct, 520);
+    // Save user message to memory FIRST
+    pushMemory(key, "user", userTextRaw);
+    const history = getMemory(key);
+
+    if (isGreeting(userTextRaw) && userTextRaw.length <= 25) {
+      const reply = finalizeReply("Hello! Welcome to Digitronics. What are you looking for? (TV / washing machine / fridge / water heater...)");
+      pushMemory(key, "assistant", reply);
+      return res.json({ ok: true, reply: shorten(reply, 420) });
+    }
+
+    if (isLocationIntent(userTextRaw)) {
+      const reply = finalizeReply("Our address: 30 RUE 9 ETG RC LTS SMARA, Haj Fateh, Oulfa, Casablanca 20230.");
+      pushMemory(key, "assistant", reply);
+      return res.json({ ok: true, reply: shorten(reply, 420) });
+    }
+
+    if (isBuyIntent(userTextRaw)) {
+      const reply = finalizeReply(`Great. Please fill this form to place the order: ${ORDER_FORM_URL}`);
+      pushMemory(key, "assistant", reply);
+      return res.json({ ok: true, reply: shorten(reply, 420) });
+    }
+
+    const pending = pendingOrderStore.get(key);
+    const orderNo = extractOrderNumber(userTextRaw);
+
+    if (pending?.waiting) {
+      if (orderNo) {
+        pendingOrderStore.delete(key);
+        lastOrderAckStore.set(key, { at: Date.now(), orderNo });
+        const reply = finalizeReply("Thanks. We received your order number. We will call you soon.");
+        pushMemory(key, "assistant", reply);
+        return res.json({ ok: true, reply });
+      }
+      const reply = finalizeReply("Please send your order number so we can check it.");
+      pushMemory(key, "assistant", reply);
+      return res.json({ ok: true, reply });
+    }
+
+    if (isCallMeIntent(userTextRaw)) {
+      const recent = lastOrderAckStore.get(key);
+      if (recent?.at && Date.now() - recent.at < PENDING_TTL_MS) {
+        const reply = finalizeReply("Okay. We will call you soon.");
+        pushMemory(key, "assistant", reply);
+        return res.json({ ok: true, reply });
+      }
+      const reply = finalizeReply("Okay. We will call you soon. If you have an order number, please send it.");
+      pushMemory(key, "assistant", reply);
+      return res.json({ ok: true, reply: shorten(reply, 420) });
+    }
+
+    if (isOrderStatusIntent(userTextRaw)) {
+      if (orderNo) {
+        pendingOrderStore.delete(key);
+        lastOrderAckStore.set(key, { at: Date.now(), orderNo });
+        const reply = finalizeReply("Thanks. We received your order number. We will call you soon.");
+        pushMemory(key, "assistant", reply);
+        return res.json({ ok: true, reply });
+      }
+
+      pendingOrderStore.set(key, { waiting: true, at: Date.now() });
+      const reply = finalizeReply("Please send your order number so we can check it.");
+      pushMemory(key, "assistant", reply);
+      return res.json({ ok: true, reply });
+    }
+
+    // Size-only merge
+    const size = extractSizeOnly(userTextRaw);
+    if (size) {
+      const lastB = lastMentionedBrand(history);
+      if (lastB) {
+        const merged = `${lastB} ${size} inch`;
+        pushMemory(key, "user", merged);
+      }
+    }
+
+    const history2 = getMemory(key);
+
+    const direct = tryDirectOfferAnswer(userTextRaw, history2);
+    if (direct) {
+      const reply = finalizeReply(direct);
+      pushMemory(key, "assistant", reply);
+      return res.json({ ok: true, reply });
+    }
+
+    let reply = await digibotLLMReply(userTextRaw, history2);
+
+    if (learningEnabled && looksLikeFallback(reply)) {
+      appendNdjson(eventsPath, {
+        at: nowIso(),
+        key,
+        phone,
+        text: userTextRaw,
+        reason: "fallback_reply",
+        replyPreview: shorten(reply, 180),
+      });
+    }
+
     pushMemory(key, "assistant", reply);
+
+    const ms = Date.now() - t0;
+    console.log(JSON.stringify({ level: "info", msg: "wanotifier_ok", reqId, key: CFG.logDebug ? key : undefined, phone: CFG.logDebug ? phone : undefined, latencyMs: ms, replyChars: reply.length }));
+
     return res.json({ ok: true, reply });
-  }
-
-  // 6) LLM fallback
-  let reply = await digibotLLMReply(userTextRaw, history2);
-
-  // Learning log
-  if (looksLikeFallback(reply)) {
-    reply = reply + "\n\nFor faster assistance, please call us at 0605123934."; 
-    if (learningEnabled) {
-    appendNdjson(eventsPath, {
-      at: nowIso(),
-      key,
-      phone,
-      text: userTextRaw,
-      reason: "fallback_reply",
-      replyPreview: shorten(reply, 180),
-    });
-  }
-
-  reply = shorten(reply, 520);
-  pushMemory(key, "assistant", reply);
-
-  const ms = Date.now() - t0;
-  console.log(
-    JSON.stringify({
-      level: "info",
-      msg: "wanotifier_ok",
-      reqId,
-      key: CFG.logDebug ? key : undefined,
-      phone: CFG.logDebug ? phone : undefined,
-      latencyMs: ms,
-      replyChars: reply.length,
-    })
-  );
-
-  return res.json({ ok: true, reply });
-}));
-or",
-        reqId,
-        latencyMs: ms,
-        error: err?.message || String(err),
-      })
-    );
-    if (res.headersSent) return;
+  } catch (err) {
+    const ms = Date.now() - t0;
+    console.error(JSON.stringify({ level: "error", msg: "wanotifier_error", reqId, latencyMs: ms, error: err?.message || String(err) }));
     return res.status(500).json({ ok: false, error: "Server error" });
-  });
+  }
 });
 
 app.listen(Number(PORT), () => {
