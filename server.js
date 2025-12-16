@@ -32,6 +32,7 @@ const {
 
   OPENAI_API_KEY,
   OPENAI_MODEL = "gpt-5.2",
+  OPENAI_VISION_MODEL = "gpt-4.1-mini",
 
   OFFERS_CSV_URL = "",
   OFFERS_REFRESH_MS = "300000", // 5 min
@@ -1400,6 +1401,127 @@ async function callOpenAIChat(messages, maxOut = 280) {
   }
 }
 
+function isLikelyAudioMedia(body = {}) {
+  const media = extractMediaFromBody(body);
+  if (!media) return false;
+  const url = String(media).toLowerCase();
+  const txt = String(extractTextFromBody(body) || "").toLowerCase();
+
+  // Heuristics: file extensions or hints
+  if (url.includes(".ogg") || url.includes(".opus") || url.includes(".mp3") || url.includes(".m4a") || url.includes("audio")) return true;
+  if (txt.includes("voice") || txt.includes("vocal") || txt.includes("audio") || txt.includes("ptt")) return true;
+  return false;
+}
+
+async function callOpenAIVision(imageUrl, userHint = "") {
+  // Uses the OpenAI Responses API (multimodal) to read an image via URL.
+  // NOTE: imageUrl must be publicly accessible by OpenAI.
+  const model = process.env.OPENAI_VISION_MODEL || "gpt-4.1-mini";
+
+  try {
+    const r = await openai.responses.create({
+      model,
+      input: [
+        {
+          role: "user",
+          content: [
+            {
+              type: "input_text",
+              text:
+                "You are DigiBot assistant. Analyze the image and extract product info.\n" +
+                "Return ONLY a compact JSON object with keys:\n" +
+                "{brand, model, size_inch, class, text_found}\n" +
+                "Rules:\n" +
+                "- brand/model/class may be null if unknown\n" +
+                "- size_inch should be a number if visible, else null\n" +
+                "- text_found: short string of any visible labels/model codes.\n" +
+                (userHint ? ("User hint: " + userHint) : "")
+            },
+            { type: "input_image", image_url: imageUrl },
+          ],
+        },
+      ],
+    });
+
+    // Try to read as text
+    const out = (r && (r.output_text || r.output?.[0]?.content?.[0]?.text)) ? (r.output_text || r.output?.[0]?.content?.[0]?.text) : "";
+    return String(out || "").trim();
+  } catch (e) {
+    const msg = e?.message || String(e);
+    console.log("Vision error:", msg);
+    return "";
+  }
+}
+
+function safeJsonParse(s) {
+  try {
+    return JSON.parse(String(s || "").trim());
+  } catch {
+    // try to extract JSON substring
+    const txt = String(s || "");
+    const m = txt.match(/\{[\s\S]*\}/);
+    if (m) {
+      try { return JSON.parse(m[0]); } catch {}
+    }
+    return null;
+  }
+}
+
+async function detectProductFromImage(imageUrl, userHint = "") {
+  const raw = await callOpenAIVision(imageUrl, userHint);
+  const parsed = safeJsonParse(raw) || {};
+
+  const brand = parsed.brand ? String(parsed.brand).trim().toUpperCase() : null;
+  const model = parsed.model ? String(parsed.model).trim() : null;
+  const cls = parsed.class ? String(parsed.class).trim() : null;
+
+  const size = parsed.size_inch;
+  const size_inch = Number.isFinite(Number(size)) ? Number(size) : null;
+
+  const text_found = parsed.text_found ? String(parsed.text_found).trim() : "";
+
+  // Build a combined "pseudo user text" so we can reuse existing matching logic
+  const combined = [brand, model, cls, size_inch ? `${size_inch} inch` : "", text_found, userHint].filter(Boolean).join(" ");
+  return { brand, model, class: cls, size_inch, text_found, combined };
+}
+
+function autoMatchOffersFromDetected(detected, historyMsgs = []) {
+  if (!detected) return null;
+  const combined = detected.combined || "";
+
+  // 1) model direct hit
+  const modelHit = detectModel(combined);
+  if (modelHit) {
+    const { brand, offer } = modelHit;
+    const line = formatOfferLine(brand, offer);
+    const isTv = normMatch(offer.class || "").includes("tv") || offer.size > 0;
+    return `${line}\n${footerForContext({ isTv })}`;
+  }
+
+  // 2) brand + size (assume TV if size present)
+  const b = detectBrand(combined) || detected.brand || lastMentionedBrand(historyMsgs);
+  const size = detected.size_inch ? Number(detected.size_inch) : extractSizeOnly(combined);
+  const tvCanon = OFFERS_INDEX.classCanon.tv;
+
+  if (b && size) {
+    const lines = listOffersForBrand(b, { cls: tvCanon || null, size, limit: 6 });
+    if (lines.length) {
+      return `${b} ${size}" options:\n${lines.join("\n")}\n${footerForContext({ isTv: true })}`;
+    }
+  }
+
+  // 3) brand only
+  if (b) {
+    const lines = listOffersForBrand(b, { limit: 6 });
+    if (lines.length) {
+      return `${b} options:\n${lines.join("\n")}\n${footerForContext({ isTv: true })}`;
+    }
+  }
+
+  return null;
+}
+
+
 async function digibotLLMReply(userText, historyMsgs) {
   const offersSubset = buildOffersSubsetForPrompt(userText, historyMsgs);
 
@@ -1500,11 +1622,11 @@ app.get("/learning-suggestions", (req, res) => {
 });
 
 // Main webhook
-app.post("/wanotifier", (req, res) => {
+app.post("/wanotifier", async (req, res) => {
   const reqId = stableReqId();
   const t0 = Date.now();
 
-  (async () => {
+  try {
     const incoming = normalizeIncoming(req.body || {}, req);
     const key = incoming.key;
     const phone = incoming.phone;
@@ -1512,7 +1634,10 @@ app.post("/wanotifier", (req, res) => {
 
     if (!rateLimitOk(key)) return res.status(429).json({ ok: false, error: "Rate limit exceeded" });
 
-    if (looksLikeAudioOrEmptyMedia(req.body || {})) {
+    const incomingMedia = extractMediaFromBody(req.body || {});
+
+    // Voice notes / audio: ask for text
+    if (isLikelyAudioMedia(req.body || {})) {
       const reply = "Please send a written message (no voice note/audio).";
       pushMemory(key, "assistant", reply);
       return res.json({ ok: true, reply });
@@ -1524,6 +1649,32 @@ app.post("/wanotifier", (req, res) => {
       pushMemory(key, "assistant", reply);
       return res.json({ ok: true, reply });
     }
+
+    // Image flow: if media exists, try vision -> product detection -> offers matching
+    if (incomingMedia) {
+      const hint = userTextRaw || "";
+      const detected = await detectProductFromImage(incomingMedia, hint);
+
+      // Save a compact trace to memory for follow-ups (no huge content)
+      if (detected?.combined) pushMemory(key, "user", `image_info: ${shorten(detected.combined, 240)}`);
+
+      const historyImg = getMemory(key);
+
+      const matched = autoMatchOffersFromDetected(detected, historyImg);
+      if (matched) {
+        const reply = shorten(matched, 520);
+        pushMemory(key, "assistant", reply);
+        return res.json({ ok: true, reply });
+      }
+
+      // If no match, still respond helpfully + call option
+      const reply =
+        "Thank you. I checked the photo but I couldn't match it to a current offer. " +
+        "Please send the brand/model (or a clearer label photo), or call us at 0605123934 for quick help.";
+      pushMemory(key, "assistant", reply);
+      return res.json({ ok: true, reply: shorten(reply, 420) });
+    }
+
 
     // Save user message to memory FIRST (so follow-ups work even if we return early)
     pushMemory(key, "user", userTextRaw);
@@ -1653,8 +1804,8 @@ app.post("/wanotifier", (req, res) => {
     );
 
     return res.json({ ok: true, reply });
-  })().catch((err) => {
-const ms = Date.now() - t0;
+  } catch (err) {
+    const ms = Date.now() - t0;
     console.error(
       JSON.stringify({
         level: "error",
@@ -1664,9 +1815,8 @@ const ms = Date.now() - t0;
         error: err?.message || String(err),
       })
     );
-    if (res.headersSent) return;
     return res.status(500).json({ ok: false, error: "Server error" });
-  });
+  }
 });
 
 app.listen(Number(PORT), () => {
