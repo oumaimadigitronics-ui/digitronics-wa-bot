@@ -1500,11 +1500,11 @@ app.get("/learning-suggestions", (req, res) => {
 });
 
 // Main webhook
-app.post("/wanotifier", async (req, res) => {
+app.post("/wanotifier", (req, res) => {
   const reqId = stableReqId();
   const t0 = Date.now();
 
-  try {
+  (async () => {
     const incoming = normalizeIncoming(req.body || {}, req);
     const key = incoming.key;
     const phone = incoming.phone;
@@ -1653,8 +1653,8 @@ app.post("/wanotifier", async (req, res) => {
     );
 
     return res.json({ ok: true, reply });
-  } catch (err) {
-    const ms = Date.now() - t0;
+  })().catch((err) => {
+const ms = Date.now() - t0;
     console.error(
       JSON.stringify({
         level: "error",
@@ -1664,8 +1664,9 @@ app.post("/wanotifier", async (req, res) => {
         error: err?.message || String(err),
       })
     );
+    if (res.headersSent) return;
     return res.status(500).json({ ok: false, error: "Server error" });
-  }
+  });
 });
 
 app.listen(Number(PORT), () => {
