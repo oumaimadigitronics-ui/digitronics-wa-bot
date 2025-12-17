@@ -1416,6 +1416,37 @@ function listOffersForBrand(brand, { cls = null, category = null, size = null, l
 
   return arr.map((o) => formatOfferLine(brand, o));
 }
+function buildBigOffersForGreeting(brand, tvCanon) {
+  const BRAND = String(brand || "").trim().toUpperCase();
+
+  const wanted =
+    BRAND === "DAIKO"
+      ? ["GLED32H93DK", "GLED43H94DK", "GLED55AI96DK", "QLED50GU25DK"]
+      : [];
+
+  const arr0 = (OFFERS.offers[BRAND] || []).filter(
+    (o) => Number(o.stock || 0) > 0
+  );
+
+  if (wanted.length) {
+    const lines = [];
+
+    for (const model of wanted) {
+      const o = arr0.find(
+        (x) => normMatch(x.model) === normMatch(model)
+      );
+      if (!o) continue;
+
+      if (tvCanon && normMatch(o.class || "") !== normMatch(tvCanon)) continue;
+
+      lines.push(formatOfferLine(BRAND, o));
+    }
+
+    return lines;
+  }
+
+  return [];
+}
 
 function listOffersForClass(cls, { limit = 5 } = {}) {
   const k = normMatch(cls);
