@@ -1399,11 +1399,13 @@ function lastMentionedCategory(historyMsgs = []) {
 // =====================
 // Deterministic offer responses
 // =====================
-function formatOfferLineGreeting(brand, o) {
+function formatOfferLine(brand, o) {
   const sizePart = o.size ? ` ${o.size}"` : "";
-  const typePart = o.type ? ` — ${o.type}` : "";
-  return `• ${brand} ${o.model}${sizePart}: ${o.price} dh${typePart}`;
+  const namePart = o.name ? ` — ${o.name}` : "";
+  const typePart = o.type ? ` (${o.type})` : "";
+  return `• ${brand} ${o.model}${sizePart}: ${o.price} dh${typePart}${namePart}`;
 }
+
 
 
 function listOffersForBrand(
