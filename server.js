@@ -1428,31 +1428,30 @@ function listOffersForBrand(brand, { cls = null, category = null, size = null, l
 }
 function buildBigOffersForGreeting(brand, tvCanon) {
   const BRAND = String(brand || "").trim().toUpperCase();
+  const wanted = BRAND === "DAIKO" ? GREETING_DAIKO_MODELS : [];
 
-  const wanted =
-    BRAND === "DAIKO"
-      ? ["GLED32H93DK", "GLED43H94DK", "GLED55AI96DK", "QLED50GU25DK"]
-      : [];
+  const arr0 = (OFFERS.offers[BRAND] || []).filter((o) => Number(o.stock || 0) > 0);
 
-  const arr0 = (OFFERS.offers[BRAND] || []).filter(
-    (o) => Number(o.stock || 0) > 0
-  );
-
+  // If DAIKO fixed list => only those models (in that order)
   if (wanted.length) {
     const lines = [];
-
     for (const model of wanted) {
-      const o = arr0.find(
-        (x) => normMatch(x.model) === normMatch(model)
-      );
+      const o = arr0.find((x) => normMatch(x.model) === normMatch(model));
       if (!o) continue;
 
+      // If you want greeting to be TV-only, keep this:
+      if (tvCanon && normMatch(o.class || "") !== normMatch(tvCanon)) continue;
 
-      lines.push(formatOfferLineGreeting(BRAND, o));
+      lines.push(formatOfferLine(BRAND, o));
     }
-
     return lines;
   }
+
+  // Fallback for other brands
+  const tvLines = listOffersForBrand(BRAND, { cls: tvCanon, limit: 3 });
+  return tvLines.length ? tvLines : [];
+}
+
 
   return [];
 }
