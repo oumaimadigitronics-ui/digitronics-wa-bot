@@ -690,6 +690,10 @@ setInterval(() => {
   for (const [k, v] of ctxStore.entries()) {
     if (!v?.at || now - v.at > CTX_TTL_MS) ctxStore.delete(k);
   }
+    for (const [k, v] of supportModeStore.entries()) {
+    if (!v?.at || now - v.at > SUPPORT_TTL_MS) supportModeStore.delete(k);
+  }
+
   flushMemoryToDiskSoon();
 }, 10 * 60 * 1000);
 
@@ -990,8 +994,10 @@ setInterval(refreshOffersSafe, CFG.refreshMs);
 // Intent detection
 // =====================
 function isGreeting(text) {
-  const s = normMatch(text).trim();
+  const raw = String(text || "").trim();
+  const s = normMatch(raw).trim();
   if (!s) return false;
+
   return (
     s === "salam" ||
     s === "slm" ||
@@ -1003,7 +1009,7 @@ function isGreeting(text) {
     s.includes("slm") ||
     s.includes("bonjour") ||
     s.includes("salut") ||
-    (hasArabicScript(text) && (s.includes("سلام") || s.includes("السلام") || s.includes("مرحبا")))
+    (hasArabicScript(raw) && /سلام|السلام|مرحبا/.test(raw))
   );
 }
 
@@ -1058,6 +1064,33 @@ function isBuyIntent(text) {
     s.includes("بغيت نكموندي")
   );
 }
+function isSupportIntent(text) {
+  const raw = String(text || "");
+  const s = normMatch(raw);
+
+  const arabicProblem =
+    hasArabicScript(raw) && (/(ما\s*كايناش\s*الصورة|ما\s*كيشعلش|ما\s*خدامش|ما\s*كيخدمش|ما\s*كايناش\s*الصوت)/.test(raw));
+
+  return (
+    arabicProblem ||
+    s.includes("mouchkil") ||
+    s.includes("mochkil") ||
+    s.includes("mchkila") ||
+    s.includes("panne") ||
+    s.includes("problem") ||
+    s.includes("doesn't work") ||
+    s.includes("doesnt work") ||
+    s.includes("no signal") ||
+    s.includes("no power") ||
+    s.includes("ma kaych3elch") ||
+    s.includes("ma kaysh3elch") ||
+    s.includes("ma khadamch") ||
+    s.includes("مشكل") ||
+    s.includes("مشكلة") ||
+    s.includes("عطل")
+  );
+}
+
 
 function isOrderStatusIntent(text) {
   const s = normMatch(text);
@@ -1131,6 +1164,7 @@ function isPhotoRequestIntent(text) {
     s.includes("تصوير")
   );
 }
+
 
 function extractOrderNumber(text) {
   const s = arabicIndicToAsciiDigits(String(text || ""));
@@ -1741,19 +1775,18 @@ async function digibotLLMReply(userText, historyMsgs, lang, key) {
 // =====================
 // Order status flow state
 // =====================
-const pendingOrderStore = new Map(); // key -> { waiting:boolean, at:number }
-const lastOrderAckStore = new Map(); // key -> { at:number, orderNo?:string }
-const PENDING_TTL_MS = 30 * 60 * 1000;
+const pendingOrderStore = new Map();
+const lastOrderAckStore = new Map();
+const PENDING_TTL_MS = 30 * 60 * 1000; // 30 minutes
 
-setInterval(() => {
-  const now = Date.now();
-  for (const [k, v] of pendingOrderStore.entries()) {
-    if (!v?.at || now - v.at > PENDING_TTL_MS) pendingOrderStore.delete(k);
-  }
-  for (const [k, v] of lastOrderAckStore.entries()) {
-    if (!v?.at || now - v.at > PENDING_TTL_MS) lastOrderAckStore.delete(k);
-  }
-}, 10 * 60 * 1000);
+
+
+// =====================
+// Support mode (problem/after-sales)
+// =====================
+const supportModeStore = new Map(); // key -> { at:number }
+const SUPPORT_TTL_MS = 30 * 60 * 1000; // 30 minutes
+
 
 // =====================
 // Routes
@@ -1805,6 +1838,14 @@ app.post("/wanotifier", async (req, res) => {
 
     const lang = detectLang(userTextRaw);
 
+
+
+    // SAVE USER MESSAGE TO MEMORY
+if (userTextRaw) {
+  pushMemory(key, "user", userTextRaw);
+}
+
+
     if (!rateLimitOk(key)) return res.status(429).json({ ok: false, error: "Rate limit exceeded" });
 
     // Media/image/audio with no text
@@ -1814,6 +1855,7 @@ app.post("/wanotifier", async (req, res) => {
       return res.json({ ok: true, reply: shorten(reply, 420) });
     }
 
+    
     // If empty message
     if (!userTextRaw) {
       const reply = t(lang, "typeYourMessage");
@@ -1821,9 +1863,10 @@ app.post("/wanotifier", async (req, res) => {
       return res.json({ ok: true, reply: shorten(reply, 420) });
     }
 
-    // Save user message to memory FIRST
-    pushMemory(key, "user", userTextRaw);
+
+
     const history = getMemory(key);
+
 
     // Update lightweight context on every user message (best-effort)
     const b0 = detectBrand(userTextRaw);
@@ -1874,6 +1917,7 @@ app.post("/wanotifier", async (req, res) => {
       return res.json({ ok: true, reply: shorten(reply, 520) });
     }
 
+
     // Bank transfer question
     if (isBankTransferIntent(userTextRaw)) {
       const reply = t(lang, "bankTransferHow");
@@ -1912,55 +1956,95 @@ app.post("/wanotifier", async (req, res) => {
     }
 
     // 2) Buy intent -> send order form
-    if (isBuyIntent(userTextRaw)) {
-      const reply = t(lang, "orderForm");
-      pushMemory(key, "assistant", reply);
-      resetStrikes(key);
-      return res.json({ ok: true, reply: shorten(reply, 520) });
-    }
+if (isBuyIntent(userTextRaw)) {
+  supportModeStore.delete(key); // exit support mode if they want to buy
+  const reply = t(lang, "orderForm");
+  pushMemory(key, "assistant", reply);
+  resetStrikes(key);
+  return res.json({ ok: true, reply: shorten(reply, 520) });
+}
 
     // 3) Pending order flow (status)
-    const pending = pendingOrderStore.get(key);
-    const orderNo = extractOrderNumber(userTextRaw);
+const pending = pendingOrderStore.get(key);
+const orderNo = extractOrderNumber(userTextRaw);
 
-    if (pending?.waiting) {
-      if (orderNo) {
-        pendingOrderStore.delete(key);
-        lastOrderAckStore.set(key, { at: Date.now(), orderNo });
-        const reply = t(lang, "gotOrderNo");
-        pushMemory(key, "assistant", reply);
-        resetStrikes(key);
-        return res.json({ ok: true, reply: shorten(reply, 520) });
-      }
-      const reply = t(lang, "askOrderNo");
-      pushMemory(key, "assistant", reply);
-      return res.json({ ok: true, reply: shorten(reply, 420) });
-    }
+if (pending?.waiting) {
+  if (orderNo) {
+    pendingOrderStore.delete(key);
+    lastOrderAckStore.set(key, { at: Date.now(), orderNo });
+    const reply = t(lang, "gotOrderNo");
+    pushMemory(key, "assistant", reply);
+    resetStrikes(key);
+    return res.json({ ok: true, reply: shorten(reply, 520) });
+  }
+  const reply = t(lang, "askOrderNo");
+  pushMemory(key, "assistant", reply);
+  return res.json({ ok: true, reply: shorten(reply, 420) });
+}
 
-    // Call me intent
-    if (isCallMeIntent(userTextRaw)) {
-      const recent = lastOrderAckStore.get(key);
-      const reply = recent?.at && Date.now() - recent.at < PENDING_TTL_MS ? t(lang, "callSoon") : t(lang, "callSoonNeedOrder");
-      pushMemory(key, "assistant", reply);
-      resetStrikes(key);
-      return res.json({ ok: true, reply: shorten(reply, 420) });
-    }
+// Call me intent
+if (isCallMeIntent(userTextRaw)) {
+  const recent = lastOrderAckStore.get(key);
+  const reply =
+    recent?.at && Date.now() - recent.at < PENDING_TTL_MS
+      ? t(lang, "callSoon")
+      : t(lang, "callSoonNeedOrder");
+  pushMemory(key, "assistant", reply);
+  resetStrikes(key);
+  return res.json({ ok: true, reply: shorten(reply, 420) });
+}
 
-    // Start order status flow only with strong intent
-    if (isOrderStatusIntent(userTextRaw)) {
-      if (orderNo) {
-        pendingOrderStore.delete(key);
-        lastOrderAckStore.set(key, { at: Date.now(), orderNo });
-        const reply = t(lang, "gotOrderNo");
-        pushMemory(key, "assistant", reply);
-        resetStrikes(key);
-        return res.json({ ok: true, reply: shorten(reply, 520) });
-      }
-      pendingOrderStore.set(key, { waiting: true, at: Date.now() });
-      const reply = t(lang, "askOrderNo");
-      pushMemory(key, "assistant", reply);
-      return res.json({ ok: true, reply: shorten(reply, 420) });
-    }
+// Start order status flow only with strong intent
+if (isOrderStatusIntent(userTextRaw)) {
+  supportModeStore.delete(key); // ✅ exit support mode
+  if (orderNo) {
+    pendingOrderStore.delete(key);
+    lastOrderAckStore.set(key, { at: Date.now(), orderNo });
+    const reply = t(lang, "gotOrderNo");
+    pushMemory(key, "assistant", reply);
+    resetStrikes(key);
+    return res.json({ ok: true, reply: shorten(reply, 520) });
+  }
+  pendingOrderStore.set(key, { waiting: true, at: Date.now() });
+  const reply = t(lang, "askOrderNo");
+  pushMemory(key, "assistant", reply);
+  return res.json({ ok: true, reply: shorten(reply, 420) });
+}
+
+// ✅ ENTER SUPPORT MODE (only if not order/buy)
+const wasInSupportMode = supportModeStore.has(key);
+if (isSupportIntent(userTextRaw) && !isOrderStatusIntent(userTextRaw) && !isBuyIntent(userTextRaw)) {
+  supportModeStore.set(key, { at: Date.now() });
+}
+
+// Optional: exit support mode if user is clearly shopping again
+const shoppingSignal =
+  detectBrand(userTextRaw) ||
+  detectModel(userTextRaw) ||
+  extractSizeOnly(userTextRaw) ||   // use size-only (stricter)
+  detectClass(userTextRaw) ||
+  detectCategory(userTextRaw);
+
+if (wasInSupportMode && shoppingSignal) {
+  supportModeStore.delete(key);
+}
+
+
+
+    // If we are in support mode, do NOT suggest offers (avoid sales responses)
+if (supportModeStore.has(key)) {
+  const reply =
+    lang === "ar"
+      ? "تمام. شنو موديل الجهاز؟ وشنو المشكل بالضبط: ما كيشعلش، ما كايناش الصورة، ما كايناش الصوت، ولا كايبان كود خطأ؟"
+      : lang === "fr"
+      ? "D’accord. Quel est le modèle de l’appareil et quel est le problème exact (ne s’allume pas, pas d’image, pas de son, code erreur) ?"
+      : "Mzyan. 3afak 3tini modèle dyal l-appareil w achno l-mochkil bddabt (ma kaych3elch / ma kaynach tswira / ma kaynach s-sout / code d’erreur).";
+
+  pushMemory(key, "assistant", reply);
+  resetStrikes(key);
+  return res.json({ ok: true, reply: shorten(reply, 520) });
+}
+
 
     // 4) Deterministic offer answer first
     const direct = tryDirectOfferAnswer(userTextRaw, history, lang, key);
