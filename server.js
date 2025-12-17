@@ -151,7 +151,10 @@ function stableReqId() {
   return crypto.randomBytes(8).toString("hex");
 }
 
-function shorten(text, max = 520) {
+const MAX_WA_REPLY_CHARS = Number(process.env.MAX_WA_REPLY_CHARS || 950);
+
+function shorten(text, max = MAX_WA_REPLY_CHARS) {
+
   const t = String(text || "").trim();
   return t.length > max ? t.slice(0, max).trim() : t;
 }
@@ -1403,9 +1406,12 @@ function formatOfferLineGreeting(brand, o) {
 }
 
 
-function listOffersForBrand(brand, { cls = null, category = null, size = null, limit = 5 } = {}) {
+function listOffersForBrand(
+  brand,
+  { cls = null, category = null, size = null, limit = 5, format = "normal" } = {}
+) {
   const arr0 = OFFERS.offers[brand] || [];
-  let arr = arr0.filter((o) => Number(o.stock || 0) > 0); // filter out of stock
+  let arr = arr0.filter((o) => Number(o.stock || 0) > 0);
 
   if (cls) {
     const ncls = normMatch(cls);
@@ -1424,8 +1430,9 @@ function listOffersForBrand(brand, { cls = null, category = null, size = null, l
     .sort((a, b) => Number(a.price) - Number(b.price))
     .slice(0, limit);
 
-  return arr.map((o) => formatOfferLine(brand, o));
+  return arr.map((o) => (format === "greeting" ? formatOfferLineGreeting(brand, o) : formatOfferLine(brand, o)));
 }
+
 function buildBigOffersForGreeting(brand, tvCanon) {
   const BRAND = String(brand || "").trim().toUpperCase();
   const wanted = BRAND === "DAIKO" ? GREETING_DAIKO_MODELS : [];
@@ -1439,22 +1446,19 @@ function buildBigOffersForGreeting(brand, tvCanon) {
       const o = arr0.find((x) => normMatch(x.model) === normMatch(model));
       if (!o) continue;
 
-      // If you want greeting to be TV-only, keep this:
+      // TV-only if canonical TV class exists
       if (tvCanon && normMatch(o.class || "") !== normMatch(tvCanon)) continue;
 
-      lines.push(formatOfferLine(BRAND, o));
+      lines.push(formatOfferLineGreeting(BRAND, o));
     }
     return lines;
   }
 
   // Fallback for other brands
-  const tvLines = listOffersForBrand(BRAND, { cls: tvCanon, limit: 3 });
+  const tvLines = listOffersForBrand(BRAND, { cls: tvCanon, limit: 3, format: "greeting" });
   return tvLines.length ? tvLines : [];
 }
 
-
-  return [];
-}
 
 function listOffersForClass(cls, { limit = 5 } = {}) {
   const k = normMatch(cls);
@@ -1742,6 +1746,8 @@ STRICT STYLE:
 - Do NOT mention stock quantity.
 - Mention delivery/payment/warranty ONLY if the client asks.
 - If client asks for photo/picture/image: ONLY provide the product link if present, otherwise ask for model/brand/size.
+- Do NOT ask the client questions. If info is missing, give the closest direct answer using available offers.
+
 
 Company:
 - Address: ${COMPANY.address}
@@ -1790,18 +1796,20 @@ async function digibotLLMReply(userText, historyMsgs, lang, key) {
 
   const r = await callOpenAIChat(messages, 380);
   let reply = r?.choices?.[0]?.message?.content?.trim() || "";
-if (!reply) {
-  // fallback: show default offers instead of asking questions
-  const brand = detectBrand(userTextRaw) || "VISIO";
-  const size = detectSize(userTextRaw) || 32;
 
-  const lines = listOffersForBrand(brand, { size, limit: 6 });
-  if (lines.length) {
-    reply = `${offersHeader(lang, { brand, size })}\n${lines.join("\n\n")}`;
-  } else {
-    reply = t(lang, "noResults");
+  if (!reply) {
+    // fallback: show default TV offers directly (no questions)
+    const brand = detectBrand(userText) || "VISIO";
+    const size = extractSizeOnly(userText) || extractSizeAny(userText) || 32;
+    const tvCanon = OFFERS_INDEX.classCanon.tv || null;
+
+    const lines = listOffersForBrand(brand, { cls: tvCanon, size, limit: 6 });
+    reply = lines.length ? `${offersHeader(lang, { brand, size })}\n${lines.join("\n\n")}` : t(lang, "needDetails");
   }
+
+  return reply;
 }
+
 
 
 // =====================
@@ -1917,7 +1925,7 @@ if (userTextRaw) {
     }
 
     // 0) Greeting (FORCED Darija Latin)
-    if (isGreeting(userTextRaw)) {
+if (isGreeting(userTextRaw) && userTextRaw.length <= 25) {
   const bigLines = buildBigOffersForGreeting("DAIKO", OFFERS_INDEX.classCanon.tv || null);
   const reply = t("dzl", "greeting", { visioLines: bigLines }); // keep var name to avoid refactor
   pushMemory(key, "assistant", reply);
