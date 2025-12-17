@@ -1,10 +1,10 @@
 // server.js — DigiBot (Digitronics.ma)
 // ------------------------------------------------------------
 // Core features
-// - Loads offers from Google Sheet CSV (brand, model, name, category, size, type, price, class, stock)
+// - Loads offers from Google Sheet CSV (brand, model, name, category, size, type, price, class, stock, link)
 // - Live refresh (timer + manual /refresh-offers endpoint)
 // - Reliable conversation memory (stores BOTH user+bot messages, last N msgs, TTL)
-// - Size-only follow-up merge: "32" -> "TCL 32 inch" (uses last brand in memory)
+// - Size-only follow-up merge: "32" -> "TCL 32 inch" (uses last brand in context store)
 // - Order status flow: ask order number, then confirm "we will call you soon"
 // - Buy intent: ONLY then send order form link
 // - Location intent: handled early (won’t trigger order flow)
@@ -17,10 +17,7 @@
 // - Mention delivery/payment/warranty ONLY if the client asks (except in greeting).
 // - If the bot cannot answer 3 times in a row in a conversation, show call options.
 // - If client sends image/audio: ask politely to send text.
-//
-// Contacts
-// - WhatsApp messages: 0660111438
-// - Calls: 0605123934 / 0522895746
+// - If client asks for photo/picture/image: return product link (from CSV "link" column) if product can be resolved.
 // ------------------------------------------------------------
 
 import "dotenv/config";
@@ -95,6 +92,30 @@ const COMPANY = {
 };
 
 const openai = new OpenAI({ apiKey: OPENAI_API_KEY });
+
+// =====================
+// I18N STANDARD RULES (NO ENGLISH TO CUSTOMERS)
+// =====================
+const RULES_I18N = {
+  dzl: {
+    delivery: "Delivery: 1–7 ayam.",
+    payment: "Payment: cash 3nd ttsslim wla virement (zid note f formulaire).",
+    warranty: "Warranty: 1 an.",
+    wall_mount: "TV kayji m3ah support/bracket free.",
+  },
+  fr: {
+    delivery: "Livraison: 1 à 7 jours.",
+    payment: "Paiement: cash à la livraison ou virement (note à ajouter dans le formulaire).",
+    warranty: "Garantie: 1 an.",
+    wall_mount: "Support mural gratuit avec les TV.",
+  },
+  ar: {
+    delivery: "التوصيل: من 1 إلى 7 أيام.",
+    payment: "الدفع: نقداً عند التسليم أو تحويل بنكي (أضف ملاحظة في الاستمارة).",
+    warranty: "الضمان: سنة واحدة.",
+    wall_mount: "حامل/براكيط مجاني مع التلفاز.",
+  },
+};
 
 // =====================
 // Small text utils
@@ -194,7 +215,7 @@ function t(lang, key, vars = {}) {
         const offersPart = visioLines.length
           ? `Big offers f VISIO:\n${visioLines.join("\n\n")}\n\n`
           : "Kaynin big offers f VISIO.\n\n";
-        return `${offersPart}Ana Digitronics AI Bot.\nGhadi n3awnk b as2ila l-basita, ila ma qdrtch ghadi ykml m3ak agent.\nL3nwan: ${COMPANY.address}\nPayment: cash 3nd ttsslim wla virement (tktb note f formulaire).\nDelivery: 1–7 ayam.\nCommande: ${ORDER_FORM_URL}`;
+        return `${offersPart}Ana Digitronics AI Bot.\nGhadi n3awnk b as2ila l-basita, ila ma qdrtch ghadi ykml m3ak agent.\nL3nwan: ${COMPANY.address}\n${RULES_I18N.dzl.payment}\n${RULES_I18N.dzl.delivery}\nCommande: ${ORDER_FORM_URL}`;
       },
       address: `L3nwan dyalna: ${COMPANY.address}`,
       orderForm: `Tfdal/ي: 3mmer had formulaire bach tdir commande: ${ORDER_FORM_URL}`,
@@ -206,6 +227,9 @@ function t(lang, key, vars = {}) {
       bankTransferHow: `Ila bghiti tخلص b virement: mlli tdir commande, zid note f formulaire: "paiement par virement bancaire".\nFormulaire: ${ORDER_FORM_URL}`,
       needDetails: "3afak 3tini brand/model/size wla catégorie bach n3tik l-offres.",
       cannot3: `Ma qdrtch n3tik jawab bd9a daba. T9dr t3yt lina: ${CONTACTS.calls.join(" / ")}.`,
+      photoLink: (v) => `Hna link dyal l-produit: ${v.link}`,
+      photoNoLink: "Had l-produit ma 3ndnach link dyal tswira daba. 3tini model wla brand+size.",
+      askBrandModelSize: "3afak 3tini brand wla model wla size bach n3tik link/option.",
     },
     fr: {
       askTextInsteadMedia: "Merci. Pour que je comprenne, envoyez un message écrit (sans audio/image).",
@@ -215,7 +239,7 @@ function t(lang, key, vars = {}) {
         const offersPart = visioLines.length
           ? `Grandes offres VISIO:\n${visioLines.join("\n\n")}\n\n`
           : "Grandes offres VISIO disponibles.\n\n";
-        return `${offersPart}Bonjour, je suis le bot IA de Digitronics. Je réponds aux questions simples; si besoin, un agent prendra la suite.\nAdresse: ${COMPANY.address}\nPaiement: cash à la livraison ou virement (note à ajouter dans le formulaire).\nLivraison: 1 à 7 jours.\nPour commander: ${ORDER_FORM_URL}`;
+        return `${offersPart}Bonjour, je suis le bot IA de Digitronics. Je réponds aux questions simples; si besoin, un agent prendra la suite.\nAdresse: ${COMPANY.address}\n${RULES_I18N.fr.payment}\n${RULES_I18N.fr.delivery}\nPour commander: ${ORDER_FORM_URL}`;
       },
       address: `Notre adresse: ${COMPANY.address}`,
       orderForm: `Veuillez remplir ce formulaire pour commander: ${ORDER_FORM_URL}`,
@@ -230,6 +254,9 @@ function t(lang, key, vars = {}) {
       cannot3: `Je ne peux pas répondre avec certitude pour le moment. Vous pouvez appeler: ${CONTACTS.calls.join(
         " / "
       )}.`,
+      photoLink: (v) => `Voici le lien du produit: ${v.link}`,
+      photoNoLink: "Je n’ai pas de lien photo pour ce produit. Merci de préciser le modèle ou marque+taille.",
+      askBrandModelSize: "Merci de préciser la marque ou le modèle ou la taille.",
     },
     ar: {
       askTextInsteadMedia: "شكراً. من فضلك ارسل رسالة مكتوبة (بدون صوت/صورة) باش نقدر نفهمك.",
@@ -240,7 +267,7 @@ function t(lang, key, vars = {}) {
         const offersPart = visioLines.length
           ? `عروض كبيرة من VISIO:\n${visioLines.join("\n\n")}\n\n`
           : "عروض كبيرة من VISIO متوفرة.\n\n";
-        return `${offersPart}مرحباً، أنا بوت ذكاء اصطناعي من Digitronics. أجيب عن الأسئلة البسيطة، وإذا لم أستطع فسيكمل معك أحد الفريق.\nالعنوان: ${COMPANY.address}\nالدفع: نقداً عند التسليم أو تحويل بنكي (أضف ملاحظة في الاستمارة).\nالتوصيل: من 1 إلى 7 أيام.\nللطلب: ${ORDER_FORM_URL}`;
+        return `${offersPart}مرحباً، أنا بوت ذكاء اصطناعي من Digitronics. أجيب عن الأسئلة البسيطة، وإذا لم أستطع فسيكمل معك أحد الفريق.\nالعنوان: ${COMPANY.address}\n${RULES_I18N.ar.payment}\n${RULES_I18N.ar.delivery}\nللطلب: ${ORDER_FORM_URL}`;
       },
       address: `عنواننا: ${COMPANY.address}`,
       orderForm: `من فضلك عبّئ هذا الفورم للطلب: ${ORDER_FORM_URL}`,
@@ -252,6 +279,9 @@ function t(lang, key, vars = {}) {
       bankTransferHow: `باش تخلص بالتحويل البنكي: منين دير الطلب زيد ملاحظة فالفورم: "الدفع بتحويل بنكي".\nالفورم: ${ORDER_FORM_URL}`,
       needDetails: "من فضلك عطيني الماركة/الموديل/الحجم أو الفئة باش نعاونك.",
       cannot3: `ماقدرتش نعطيك جواب مؤكد دابا. تقدر تعيط لينا: ${CONTACTS.calls.join(" / ")}.`,
+      photoLink: (v) => `هاهو رابط المنتج: ${v.link}`,
+      photoNoLink: "ما كاينش رابط صورة لهاد المنتج دابا. عافاك عطيني الموديل ولا الماركة+الحجم.",
+      askBrandModelSize: "من فضلك عطيني الماركة ولا الموديل ولا الحجم.",
     },
   };
 
@@ -530,6 +560,10 @@ const memoryDirAbs = path.resolve(MEMORY_DIR);
 const memoryFile = path.join(memoryDirAbs, "memory_store.json");
 let memoryFlushTimer = null;
 
+// Light context store to avoid pushing synthetic "user" messages
+const ctxStore = new Map(); // key -> { lastBrand?:string, lastClass?:string, lastCategory?:string, at:number }
+const CTX_TTL_MS = 24 * 60 * 60 * 1000;
+
 function ensureMemoryDir() {
   if (!CFG.memoryPersist) return;
   if (!fs.existsSync(memoryDirAbs)) fs.mkdirSync(memoryDirAbs, { recursive: true });
@@ -602,6 +636,22 @@ function getMemory(key) {
   return entry?.msgs || [];
 }
 
+function setCtx(key, patch = {}) {
+  const now = Date.now();
+  const v = ctxStore.get(key) || { at: now };
+  ctxStore.set(key, { ...v, ...patch, at: now });
+}
+
+function getCtx(key) {
+  const v = ctxStore.get(key);
+  if (!v) return {};
+  if (!v.at || Date.now() - v.at > CTX_TTL_MS) {
+    ctxStore.delete(key);
+    return {};
+  }
+  return v;
+}
+
 // =====================
 // Fallback strike tracking (3 times -> call numbers)
 // =====================
@@ -637,6 +687,9 @@ setInterval(() => {
   for (const [k, v] of fallbackStrikeStore.entries()) {
     if (!v?.at || now - v.at > FALLBACK_TTL_MS) fallbackStrikeStore.delete(k);
   }
+  for (const [k, v] of ctxStore.entries()) {
+    if (!v?.at || now - v.at > CTX_TTL_MS) ctxStore.delete(k);
+  }
   flushMemoryToDiskSoon();
 }, 10 * 60 * 1000);
 
@@ -661,6 +714,7 @@ let LEARNING_RULES = {
   version: 1,
   brand_aliases: {},
   class_aliases: {},
+  category_aliases: {},
   guardrails: { min_occurrences_to_suggest: 2 },
 };
 
@@ -718,27 +772,27 @@ try {
 // OFFERS (in-memory)
 // =====================
 let OFFERS = {
+  // Keep internal rules/brand notes for LLM context only (never send directly to customers).
   rules: {
-    delivery: "Delivery available to all cities in Morocco. Delivery time between 1 and 7 days.",
-    payment: "Cash on delivery is available. Bank transfer is also possible (add a note in the order form).",
-    warranty: "Warranty: 1 year for all products.",
-    wall_mount: "All TVs include a free wall mount.",
     brands: {
       VISIO: "Google TV except model 32VB23E which is LED TV",
       TCL: "QLED",
       MORSAT: "Android TV",
     },
   },
-  offers: {}, // { BRAND: [{model,name,category,size,type,price,class,stock}] }
+  offers: {}, // { BRAND: [{model,name,category,size,type,price,class,stock,link}] }
 };
 
 let OFFERS_INDEX = {
   brands: [],
   classes: [],
+  categories: [],
   modelLookup: new Map(),
   brandNorm: new Map(),
   classNorm: new Map(),
+  categoryNorm: new Map(),
   classToOffers: new Map(),
+  categoryToOffers: new Map(),
   classCanon: {
     tv: null,
     washing: null,
@@ -800,11 +854,12 @@ function buildOffersFromCsv(csvText) {
     const price = parsePrice(r.price ?? "");
     const cls = String(r.class ?? r.classe ?? "").trim();
     const stock = parseStock(r.stock ?? r.qty ?? r.quantity ?? r.qte ?? 0);
+    const link = String(r.link ?? r.url ?? r.product_link ?? r.lien ?? "").trim();
 
     if (!brand || !model || !Number.isFinite(price)) continue;
 
     if (!offers[brand]) offers[brand] = [];
-    offers[brand].push({ model, name, category, size, type, price, class: cls, stock });
+    offers[brand].push({ model, name, category, size, type, price, class: cls, stock, link });
     kept += 1;
   }
 
@@ -839,10 +894,13 @@ function pickCanonicalClass(classes, tokens = []) {
 function rebuildOffersIndex() {
   const brands = Object.keys(OFFERS.offers || {}).sort();
   const classesSet = new Set();
+  const categoriesSet = new Set();
   const modelLookup = new Map();
   const brandNorm = new Map();
   const classNorm = new Map();
+  const categoryNorm = new Map();
   const classToOffers = new Map();
+  const categoryToOffers = new Map();
 
   for (const b of brands) {
     brandNorm.set(normMatch(b), b);
@@ -858,10 +916,21 @@ function rebuildOffersIndex() {
         if (!classToOffers.has(k)) classToOffers.set(k, []);
         classToOffers.get(k).push({ brand: b, offer: o });
       }
+
+      const cat = String(o?.category || "").trim();
+      if (cat) {
+        categoriesSet.add(cat);
+        categoryNorm.set(normMatch(cat), cat);
+        const k2 = normMatch(cat);
+        if (!categoryToOffers.has(k2)) categoryToOffers.set(k2, []);
+        categoryToOffers.get(k2).push({ brand: b, offer: o });
+      }
     }
   }
 
   const classes = Array.from(classesSet).sort((a, b) => a.localeCompare(b));
+  const categories = Array.from(categoriesSet).sort((a, b) => a.localeCompare(b));
+
   const classCanon = {
     tv: pickCanonicalClass(classes, ["tv"]),
     washing: pickCanonicalClass(classes, ["machine", "laver"]),
@@ -872,7 +941,18 @@ function rebuildOffersIndex() {
     dishwasher: pickCanonicalClass(classes, ["vaisselle"]),
   };
 
-  OFFERS_INDEX = { brands, classes, modelLookup, brandNorm, classNorm, classToOffers, classCanon };
+  OFFERS_INDEX = {
+    brands,
+    classes,
+    categories,
+    modelLookup,
+    brandNorm,
+    classNorm,
+    categoryNorm,
+    classToOffers,
+    categoryToOffers,
+    classCanon,
+  };
 }
 
 async function syncOffersFromGoogleSheet() {
@@ -887,7 +967,7 @@ async function syncOffersFromGoogleSheet() {
   OFFERS = { ...OFFERS, offers };
   rebuildOffersIndex();
 
-  return { kept, brands: OFFERS_INDEX.brands.length, classes: OFFERS_INDEX.classes.length };
+  return { kept, brands: OFFERS_INDEX.brands.length, classes: OFFERS_INDEX.classes.length, categories: OFFERS_INDEX.categories.length };
 }
 
 async function refreshOffersSafe() {
@@ -1038,6 +1118,20 @@ function asksAboutDeliveryPaymentWarranty(text) {
   );
 }
 
+function isPhotoRequestIntent(text) {
+  const s = normMatch(text);
+  return (
+    s.includes("photo") ||
+    s.includes("picture") ||
+    s.includes("image") ||
+    s.includes("pic") ||
+    s.includes("تصويرة") ||
+    s.includes("صورة") ||
+    s.includes("صور") ||
+    s.includes("تصوير")
+  );
+}
+
 function extractOrderNumber(text) {
   const s = arabicIndicToAsciiDigits(String(text || ""));
   const m = s.match(/\b\d{4,12}\b/);
@@ -1067,7 +1161,7 @@ function extractSizeAny(text) {
 }
 
 // =====================
-// Brand / class / model detection
+// Brand / class / category / model detection
 // =====================
 function detectBrand(text) {
   const s = normMatch(text);
@@ -1162,6 +1256,48 @@ function detectClass(text) {
   return null;
 }
 
+function buildDefaultCategoryAliases() {
+  // Categories are often short; keep a small multi-lingual set that maps to existing category labels if present
+  const out = {};
+  for (const cat of OFFERS_INDEX.categories || []) {
+    const n = normMatch(cat);
+    if (!n) continue;
+    // If category name already contains tv/frigo/etc, we can match directly; otherwise leave it as-is.
+    out[cat] = [cat];
+  }
+  return out;
+}
+
+function detectCategory(text) {
+  const s = normMatch(text).trim();
+  if (!s) return null;
+
+  const aliases = LEARNING_RULES?.category_aliases || {};
+  for (const [canonical, list] of Object.entries(aliases)) {
+    const arr = Array.isArray(list) ? list : [];
+    for (const a of arr) {
+      if (a && s.includes(normMatch(a))) {
+        const cat = OFFERS_INDEX.categoryNorm.get(normMatch(canonical)) || canonical;
+        return cat;
+      }
+    }
+  }
+
+  const defaults = buildDefaultCategoryAliases();
+  for (const [cat, arr] of Object.entries(defaults)) {
+    for (const a of arr) {
+      if (a && s.includes(normMatch(a))) return cat;
+    }
+  }
+
+  for (const cat of OFFERS_INDEX.categories) {
+    const ncat = normMatch(cat);
+    if (!ncat) continue;
+    if (s === ncat || s.includes(ncat)) return cat;
+  }
+  return null;
+}
+
 function lastMentionedBrand(historyMsgs = []) {
   for (let i = historyMsgs.length - 1; i >= 0; i--) {
     const b = detectBrand(historyMsgs[i]?.content || "");
@@ -1173,6 +1309,14 @@ function lastMentionedBrand(historyMsgs = []) {
 function lastMentionedClass(historyMsgs = []) {
   for (let i = historyMsgs.length - 1; i >= 0; i--) {
     const c = detectClass(historyMsgs[i]?.content || "");
+    if (c) return c;
+  }
+  return null;
+}
+
+function lastMentionedCategory(historyMsgs = []) {
+  for (let i = historyMsgs.length - 1; i >= 0; i--) {
+    const c = detectCategory(historyMsgs[i]?.content || "");
     if (c) return c;
   }
   return null;
@@ -1191,13 +1335,17 @@ function formatOfferLine(brand, o) {
   return `• ${brand} ${o.model}${sizePart}${namePart}: ${o.price} dh${typePart}${clsPart}${catPart}`;
 }
 
-function listOffersForBrand(brand, { cls = null, size = null, limit = 5 } = {}) {
+function listOffersForBrand(brand, { cls = null, category = null, size = null, limit = 5 } = {}) {
   const arr0 = OFFERS.offers[brand] || [];
   let arr = arr0.filter((o) => Number(o.stock || 0) > 0); // filter out of stock
 
   if (cls) {
     const ncls = normMatch(cls);
     arr = arr.filter((o) => normMatch(o.class || "") === ncls);
+  }
+  if (category) {
+    const ncat = normMatch(category);
+    arr = arr.filter((o) => normMatch(o.category || "") === ncat);
   }
   if (Number.isFinite(size) && size) {
     arr = arr.filter((o) => Number(o.size || 0) === Number(size));
@@ -1260,31 +1408,78 @@ function listOffersForClass(cls, { limit = 5 } = {}) {
   return sorted.map((it) => formatOfferLine(it.brand, it.offer));
 }
 
+function listOffersForCategory(cat, { limit = 5 } = {}) {
+  const k = normMatch(cat);
+  const items0 = OFFERS_INDEX.categoryToOffers.get(k) || [];
+  const items = items0.filter((it) => Number(it.offer?.stock || 0) > 0);
+
+  const sorted = items
+    .filter((it) => Number.isFinite(Number(it.offer?.price)))
+    .sort((a, b) => Number(a.offer.price) - Number(b.offer.price))
+    .slice(0, limit);
+
+  return sorted.map((it) => formatOfferLine(it.brand, it.offer));
+}
+
 function offersHeader(lang, ctx) {
-  const { brand, cls, size } = ctx || {};
+  const { brand, cls, category, size } = ctx || {};
   if (lang === "fr") {
     if (brand && size) return `Options ${brand} ${size}" :`;
+    if (brand && category) return `Options ${brand} (${category}) :`;
     if (brand && cls) return `Options ${brand} (${cls}) :`;
+    if (category) return `Options (${category}) :`;
     if (cls) return `Options (${cls}) :`;
     if (brand) return `Options ${brand} :`;
     return "Options :";
   }
   if (lang === "ar") {
     if (brand && size) return `خيارات ${brand} ${size} بوصة:`;
+    if (brand && category) return `خيارات ${brand} (${category}):`;
     if (brand && cls) return `خيارات ${brand} (${cls}):`;
+    if (category) return `خيارات (${category}):`;
     if (cls) return `خيارات (${cls}):`;
     if (brand) return `خيارات ${brand}:`;
     return "خيارات:";
   }
   // Default: Darija Latin
   if (brand && size) return `Options dyal ${brand} ${size}" :`;
+  if (brand && category) return `Options dyal ${brand} (${category}) :`;
   if (brand && cls) return `Options dyal ${brand} (${cls}) :`;
+  if (category) return `Options (${category}) :`;
   if (cls) return `Options (${cls}) :`;
   if (brand) return `Options dyal ${brand} :`;
   return "Options:";
 }
 
-function tryDirectOfferAnswer(userText, historyMsgs, lang) {
+function resolveOfferForPhoto(userText, historyMsgs, key) {
+  const text = String(userText || "");
+  const combined = [text, ...historyMsgs.map((m) => m.content)].join(" ");
+
+  // 1) Exact model
+  const modelHit = detectModel(combined);
+  if (modelHit && Number(modelHit.offer?.stock || 0) > 0) return modelHit;
+
+  // 2) Brand + size (size-only allowed via context/last brand)
+  const size = extractSizeOnly(text) || extractSizeAny(text);
+  let brand = detectBrand(combined);
+
+  if (!brand && size) {
+    const ctx = getCtx(key);
+    brand = ctx.lastBrand || lastMentionedBrand(historyMsgs) || null;
+  }
+
+  if (brand && size) {
+    const arr = (OFFERS.offers[brand] || []).filter((o) => Number(o.stock || 0) > 0 && Number(o.size || 0) === Number(size));
+    const best = arr
+      .filter((o) => Number.isFinite(Number(o.price)))
+      .sort((a, b) => Number(a.price) - Number(b.price))[0];
+    if (best) return { brand, offer: best };
+  }
+
+  return null;
+}
+
+function tryDirectOfferAnswer(userText, historyMsgs, lang, key) {
   const text = String(userText || "");
   const s = normMatch(text);
 
@@ -1295,63 +1490,108 @@ function tryDirectOfferAnswer(userText, historyMsgs, lang) {
   if (modelHit) {
     const { brand, offer } = modelHit;
     if (Number(offer.stock || 0) <= 0) return null;
+    setCtx(key, { lastBrand: brand, lastClass: offer.class || undefined, lastCategory: offer.category || undefined });
     return `${offersHeader(lang, { brand })}\n${formatOfferLine(brand, offer)}`;
   }
 
   const cls = detectClass(text);
+  const category = detectCategory(text);
   const brand = detectBrand(text);
 
   const sizeOnly = extractSizeOnly(text);
   const sizeAny = extractSizeAny(text);
   const sizeVal = sizeOnly || sizeAny;
-  let brand2 = brand;
-  let cls2 = cls;
 
-  if (sizeVal && !brand2) brand2 = lastMentionedBrand(historyMsgs);
+  const ctx = getCtx(key);
 
+  let brand2 = brand || null;
+  let cls2 = cls || null;
+  let category2 = category || null;
+
+  // Size-only: use last brand from context or history
+  if (sizeVal && !brand2) brand2 = ctx.lastBrand || lastMentionedBrand(historyMsgs);
+
+  // For size questions, bias to TV class if available
   const tvCanon = OFFERS_INDEX.classCanon.tv;
-  const lastCls = lastMentionedClass(historyMsgs);
-
+  const lastCls = ctx.lastClass || lastMentionedClass(historyMsgs);
   if (sizeVal) {
     if (tvCanon) cls2 = tvCanon;
     else if (!cls2) cls2 = lastCls || null;
   }
 
+  // Priority: Brand + size
   if (brand2 && sizeVal) {
-    const lines = listOffersForBrand(brand2, { cls: cls2, size: sizeVal, limit: 6 });
-    if (lines.length) return `${offersHeader(lang, { brand: brand2, size: sizeVal })}\n${lines.join("\n\n")}`;
+    const lines = listOffersForBrand(brand2, { cls: cls2, category: category2, size: sizeVal, limit: 6 });
+    if (lines.length) {
+      setCtx(key, { lastBrand: brand2, lastClass: cls2 || undefined, lastCategory: category2 || undefined });
+      return `${offersHeader(lang, { brand: brand2, size: sizeVal })}\n${lines.join("\n\n")}`;
+    }
     return null;
   }
 
-  if (brand && cls) {
-    const lines = listOffersForBrand(brand, { cls, limit: 6 });
-    if (lines.length) return `${offersHeader(lang, { brand, cls })}\n${lines.join("\n\n")}`;
+  // Priority: Brand + category
+  if (brand && category2) {
+    const lines = listOffersForBrand(brand, { category: category2, limit: 6 });
+    if (lines.length) {
+      setCtx(key, { lastBrand: brand, lastCategory: category2 || undefined });
+      return `${offersHeader(lang, { brand, category: category2 })}\n${lines.join("\n\n")}`;
+    }
   }
 
-  if (!brand && cls) {
-    const lines = listOffersForClass(cls, { limit: 6 });
-    if (lines.length) return `${offersHeader(lang, { cls })}\n${lines.join("\n\n")}`;
+  // Brand + class
+  if (brand && cls2) {
+    const lines = listOffersForBrand(brand, { cls: cls2, limit: 6 });
+    if (lines.length) {
+      setCtx(key, { lastBrand: brand, lastClass: cls2 || undefined });
+      return `${offersHeader(lang, { brand, cls: cls2 })}\n${lines.join("\n\n")}`;
+    }
   }
 
+  // Category only
+  if (!brand && category2) {
+    const lines = listOffersForCategory(category2, { limit: 6 });
+    if (lines.length) {
+      setCtx(key, { lastCategory: category2 || undefined });
+      return `${offersHeader(lang, { category: category2 })}\n${lines.join("\n\n")}`;
+    }
+  }
+
+  // Class only
+  if (!brand && cls2) {
+    const lines = listOffersForClass(cls2, { limit: 6 });
+    if (lines.length) {
+      setCtx(key, { lastClass: cls2 || undefined });
+      return `${offersHeader(lang, { cls: cls2 })}\n${lines.join("\n\n")}`;
+    }
+  }
+
+  // Just brand
   const justBrand = brand && s.replace(/\s+/g, "") === normMatch(brand).replace(/\s+/g, "");
   if (brand && (justBrand || s.length <= 8)) {
     const tvCanon2 = OFFERS_INDEX.classCanon.tv;
     if ((brand === "VISIO" || brand === "TCL") && tvCanon2) {
       const tvLines = listOffersForBrand(brand, { cls: tvCanon2, limit: 6 });
-      if (tvLines.length) return `${offersHeader(lang, { brand, cls: tvCanon2 })}\n${tvLines.join("\n\n")}`;
+      if (tvLines.length) {
+        setCtx(key, { lastBrand: brand, lastClass: tvCanon2 || undefined });
+        return `${offersHeader(lang, { brand, cls: tvCanon2 })}\n${tvLines.join("\n\n")}`;
+      }
     }
 
-    const classes = Array.from(
-      new Set((OFFERS.offers[brand] || []).map((o) => String(o.class || "").trim()).filter(Boolean))
+    const categories = Array.from(
+      new Set((OFFERS.offers[brand] || []).map((o) => String(o.category || "").trim()).filter(Boolean))
     ).sort();
-    if (classes.length > 1) {
-      if (lang === "fr") return `${brand}: quelle catégorie souhaitez-vous ?\n- ${classes.slice(0, 8).join("\n- ")}`;
-      if (lang === "ar") return `${brand}: شنو الفئة اللي باغي؟\n- ${classes.slice(0, 8).join("\n- ")}`;
-      return `${brand}: achno catégorie bghiti?\n- ${classes.slice(0, 8).join("\n- ")}`;
+
+    if (categories.length > 1) {
+      if (lang === "fr") return `${brand}: quelle catégorie souhaitez-vous ?\n- ${categories.slice(0, 8).join("\n- ")}`;
+      if (lang === "ar") return `${brand}: شنو الفئة اللي باغي؟\n- ${categories.slice(0, 8).join("\n- ")}`;
+      return `${brand}: achno catégorie bghiti?\n- ${categories.slice(0, 8).join("\n- ")}`;
     }
 
     const lines = listOffersForBrand(brand, { limit: 6 });
-    if (lines.length) return `${offersHeader(lang, { brand })}\n${lines.join("\n\n")}`;
+    if (lines.length) {
+      setCtx(key, { lastBrand: brand });
+      return `${offersHeader(lang, { brand })}\n${lines.join("\n\n")}`;
+    }
   }
 
   return null;
@@ -1360,17 +1600,23 @@ function tryDirectOfferAnswer(userText, historyMsgs, lang) {
 // =====================
 // LLM fallback
 // =====================
-function buildOffersSubsetForPrompt(userText, historyMsgs) {
+function buildOffersSubsetForPrompt(userText, historyMsgs, key) {
   const combined = [userText, ...historyMsgs.map((m) => m.content)].join(" ");
+  const ctx = getCtx(key);
 
   const modelHit = detectModel(combined);
   if (modelHit) return { offers: { [modelHit.brand]: [modelHit.offer] } };
 
-  let brand = detectBrand(combined);
-  let cls = detectClass(combined);
+  let brand = detectBrand(combined) || ctx.lastBrand || lastMentionedBrand(historyMsgs);
+  let cls = detectClass(combined) || ctx.lastClass || lastMentionedClass(historyMsgs);
+  let category = detectCategory(combined) || ctx.lastCategory || lastMentionedCategory(historyMsgs);
 
-  if (!brand) brand = lastMentionedBrand(historyMsgs);
-  if (!cls) cls = lastMentionedClass(historyMsgs);
+  if (brand && category) {
+    const arr = (OFFERS.offers[brand] || [])
+      .filter((o) => Number(o.stock || 0) > 0)
+      .filter((o) => normMatch(o.category || "") === normMatch(category));
+    return { offers: { [brand]: arr.slice(0, 80) }, meta: { brand, category } };
+  }
 
   if (brand && cls) {
     const arr = (OFFERS.offers[brand] || [])
@@ -1382,6 +1628,22 @@ function buildOffersSubsetForPrompt(userText, historyMsgs) {
   if (brand) {
     const arr = (OFFERS.offers[brand] || []).filter((o) => Number(o.stock || 0) > 0);
     return { offers: { [brand]: arr.slice(0, 80) }, meta: { brand } };
+  }
+
+  if (category) {
+    const out = {};
+    let total = 0;
+    for (const b of OFFERS_INDEX.brands) {
+      const arr = (OFFERS.offers[b] || [])
+        .filter((o) => Number(o.stock || 0) > 0)
+        .filter((o) => normMatch(o.category || "") === normMatch(category));
+      if (arr.length) {
+        out[b] = arr.slice(0, 8);
+        total += out[b].length;
+      }
+      if (total >= 80) break;
+    }
+    return { offers: out, meta: { category } };
   }
 
   if (cls) {
@@ -1402,6 +1664,7 @@ function buildOffersSubsetForPrompt(userText, historyMsgs) {
 
   return {
     offers: {
+      AVAILABLE_CATEGORIES: OFFERS_INDEX.categories.slice(0, 60).map((c) => ({ category: c })),
       AVAILABLE_CLASSES: OFFERS_INDEX.classes.slice(0, 60).map((c) => ({ class: c })),
       AVAILABLE_BRANDS: OFFERS_INDEX.brands.slice(0, 60).map((b) => ({ brand: b })),
     },
@@ -1410,6 +1673,7 @@ function buildOffersSubsetForPrompt(userText, historyMsgs) {
 }
 
 function buildSystemPrompt(offersSubset, lang) {
+  const rulesForLang = RULES_I18N[lang] || RULES_I18N.dzl;
   return `
 You are DigiBot for Digitronics.ma.
 
@@ -1421,14 +1685,18 @@ STRICT STYLE:
 - If a product is out of stock (stock <= 0), do NOT suggest it.
 - Do NOT mention stock quantity.
 - Mention delivery/payment/warranty ONLY if the client asks.
+- If client asks for photo/picture/image: ONLY provide the product link if present, otherwise ask for model/brand/size.
 
 Company:
 - Address: ${COMPANY.address}
 - WhatsApp (messages only): ${CONTACTS.whatsapp}
 - Calls: ${CONTACTS.calls.join(" / ")}
 
-Rules JSON:
-${JSON.stringify(OFFERS.rules, null, 2)}
+Standard rules (localized):
+${JSON.stringify(rulesForLang, null, 2)}
+
+Brand notes (internal):
+${JSON.stringify(OFFERS.rules?.brands || {}, null, 2)}
 
 Offers JSON (subset):
 ${JSON.stringify(offersSubset, null, 2)}
@@ -1455,8 +1723,8 @@ async function callOpenAIChat(messages, maxOut = 280) {
   }
 }
 
-async function digibotLLMReply(userText, historyMsgs, lang) {
-  const offersSubset = buildOffersSubsetForPrompt(userText, historyMsgs);
+async function digibotLLMReply(userText, historyMsgs, lang, key) {
+  const offersSubset = buildOffersSubsetForPrompt(userText, historyMsgs, key);
 
   const messages = [
     { role: "system", content: buildSystemPrompt(offersSubset, lang) },
@@ -1501,8 +1769,10 @@ app.get("/offers-status", (_req, res) => {
     totalRows,
     brands: OFFERS_INDEX.brands.length,
     classes: OFFERS_INDEX.classes.length,
+    categories: OFFERS_INDEX.categories.length,
     sampleBrands: OFFERS_INDEX.brands.slice(0, 12),
     sampleClasses: OFFERS_INDEX.classes.slice(0, 12),
+    sampleCategories: OFFERS_INDEX.categories.slice(0, 12),
   });
 });
 
@@ -1555,6 +1825,14 @@ app.post("/wanotifier", async (req, res) => {
     pushMemory(key, "user", userTextRaw);
     const history = getMemory(key);
 
+    // Update lightweight context on every user message (best-effort)
+    const b0 = detectBrand(userTextRaw);
+    const c0 = detectClass(userTextRaw);
+    const cat0 = detectCategory(userTextRaw);
+    if (b0) setCtx(key, { lastBrand: b0 });
+    if (c0) setCtx(key, { lastClass: c0 });
+    if (cat0) setCtx(key, { lastCategory: cat0 });
+
     // If client sends contact info (phone/name/address) -> ask to fill the form (no details collection)
     if (detectContactInfo(userTextRaw) && !isOrderStatusIntent(userTextRaw)) {
       const reply = t(lang, "thanksFillForm");
@@ -1580,6 +1858,22 @@ app.post("/wanotifier", async (req, res) => {
       return res.json({ ok: true, reply: shorten(reply, 420) });
     }
 
+    // Photo/picture/image request -> respond with product link if resolvable
+    if (isPhotoRequestIntent(userTextRaw)) {
+      const resolved = resolveOfferForPhoto(userTextRaw, history, key);
+      if (!resolved) {
+        const reply = t(lang, "askBrandModelSize");
+        pushMemory(key, "assistant", reply);
+        resetStrikes(key);
+        return res.json({ ok: true, reply: shorten(reply, 420) });
+      }
+      const link = String(resolved.offer?.link || "").trim();
+      const reply = link ? t(lang, "photoLink", { link }) : t(lang, "photoNoLink");
+      pushMemory(key, "assistant", reply);
+      resetStrikes(key);
+      return res.json({ ok: true, reply: shorten(reply, 520) });
+    }
+
     // Bank transfer question
     if (isBankTransferIntent(userTextRaw)) {
       const reply = t(lang, "bankTransferHow");
@@ -1588,13 +1882,13 @@ app.post("/wanotifier", async (req, res) => {
       return res.json({ ok: true, reply: shorten(reply, 520) });
     }
 
-    // Delivery/payment/warranty only if asked (explicit)
+    // Delivery/payment/warranty only if asked (explicit) - localized
     if (asksAboutDeliveryPaymentWarranty(userTextRaw)) {
       const s = normMatch(userTextRaw);
       const parts = [];
+      const r = RULES_I18N[lang] || RULES_I18N.dzl;
 
-      if (s.includes("delivery") || s.includes("livraison") || s.includes("توصيل") || s.includes("التوصيل"))
-        parts.push(OFFERS.rules.delivery);
+      if (s.includes("delivery") || s.includes("livraison") || s.includes("توصيل") || s.includes("التوصيل")) parts.push(r.delivery);
 
       if (
         s.includes("payment") ||
@@ -1605,13 +1899,11 @@ app.post("/wanotifier", async (req, res) => {
         s.includes("bank") ||
         s.includes("rib")
       )
-        parts.push(OFFERS.rules.payment);
+        parts.push(r.payment);
 
-      if (s.includes("warranty") || s.includes("garantie") || s.includes("الضمان") || s.includes("ضمان"))
-        parts.push(OFFERS.rules.warranty);
+      if (s.includes("warranty") || s.includes("garantie") || s.includes("الضمان") || s.includes("ضمان")) parts.push(r.warranty);
 
-      if (s.includes("wall mount") || s.includes("support") || s.includes("حامل") || s.includes("براكي"))
-        parts.push(OFFERS.rules.wall_mount);
+      if (s.includes("wall mount") || s.includes("support") || s.includes("حامل") || s.includes("براكي")) parts.push(r.wall_mount);
 
       const reply = parts.length ? parts.join("\n") : t(lang, "needDetails");
       pushMemory(key, "assistant", reply);
@@ -1670,17 +1962,8 @@ app.post("/wanotifier", async (req, res) => {
       return res.json({ ok: true, reply: shorten(reply, 420) });
     }
 
-    // 4) Size-only merge (e.g., "tcl" then "32")
-    const size = extractSizeOnly(userTextRaw) || extractSizeAny(userTextRaw);
-    if (size) {
-      const lastB = lastMentionedBrand(history);
-      if (lastB) pushMemory(key, "user", `${lastB} ${size} inch`);
-    }
-
-    const history2 = getMemory(key);
-
-    // 5) Deterministic offer answer first
-    const direct = tryDirectOfferAnswer(userTextRaw, history2, lang);
+    // 4) Deterministic offer answer first
+    const direct = tryDirectOfferAnswer(userTextRaw, history, lang, key);
     if (direct) {
       const reply = shorten(direct, 520);
       pushMemory(key, "assistant", reply);
@@ -1688,8 +1971,8 @@ app.post("/wanotifier", async (req, res) => {
       return res.json({ ok: true, reply });
     }
 
-    // 6) LLM fallback
-    let reply = await digibotLLMReply(userTextRaw, history2, lang);
+    // 5) LLM fallback
+    let reply = await digibotLLMReply(userTextRaw, history, lang, key);
 
     // Strike logic
     if (looksLikeFallback(reply)) {
