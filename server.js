@@ -237,54 +237,46 @@ function t(lang, key, vars = {}) {
         "Smah lia, ma nqdrch nfhem l-content mn image/voice. 3afak kteb l-message b text باش n3awnk.",
       typeYourMessage: "3afak kteb su2al dyalk.",
 
-      greeting: (vars2) => {
-        const lines = vars2.visioLines || [];
+      greeting: (v) => {
+        const lines = (v && v.visioLines) || [];
         const offersPart = lines.length
-          ? `Big offers f DAIKO:\n${lines.join("\n")}`
+          ? "Big offers f DAIKO:\n" + lines.join("\n")
           : "Kaynin big offers f DAIKO.";
 
-        return `Wa 3alaykom salam 👋 marhba bik f Digitronics.
-
-Ana Digitronics AI Bot.
-Ghadi n3awnk b as2ila l-basita, ila ma qdrtch ghadi ykml m3ak agent.
-
-📍 L3nwan: ${COMPANY.address}
-💳 ${RULES_I18N.dzl.payment}
-🚚 ${RULES_I18N.dzl.delivery}
-
-${offersPart}`.trim();
+        return (
+          "Wa 3alaykom salam 👋 marhba bik f Digitronics.\n\n" +
+          "Ana Digitronics AI Bot.\n" +
+          "Ghadi n3awnk b as2ila l-basita, ila ma qdrtch ghadi ykml m3ak agent.\n\n" +
+          "📍 L3nwan: " + COMPANY.address + "\n" +
+          "💳 " + RULES_I18N.dzl.payment + "\n" +
+          "🚚 " + RULES_I18N.dzl.delivery + "\n\n" +
+          offersPart
+        ).trim();
       },
 
-      address: `L3nwan dyalna: ${COMPANY.address}`,
-      orderForm: `Tfdal/ي: 3mmer had formulaire bach tdir commande: ${ORDER_FORM_URL}`,
-      // ... keep the rest exactly as-is
-    },
-
-    fr: { /* ... */ },
-    ar: { /* ... */ },
-  };
-
-  const val = dict[L]?.[key] ?? dict.dzl[key];
-  if (typeof val === "function") return val(vars);
-  return String(val || "");
-}
-
-
-
-      address: `L3nwan dyalna: ${COMPANY.address}`,
-      orderForm: `Tfdal/ي: 3mmer had formulaire bach tdir commande: ${ORDER_FORM_URL}`,
-      thanksFillForm: `Shokran 3la lma3lomat. 3afak 3mmer had formulaire bach tdir commande: ${ORDER_FORM_URL}`,
+      address: "L3nwan dyalna: " + COMPANY.address,
+      orderForm: "Tfdal/ي: 3mmer had formulaire bach tdir commande: " + ORDER_FORM_URL,
+      thanksFillForm: "Shokran 3la lma3lomat. 3afak 3mmer had formulaire bach tdir commande: " + ORDER_FORM_URL,
       askOrderNo: "3afak sft رقم الطلب باش n9dro n7ssbo.",
       gotOrderNo: "Shokran. Tsslna b رقم الطلب. Ghadi n3yto lik قريب.",
       callSoon: "Mzyan. Ghadi n3yto lik قريب.",
       callSoonNeedOrder: "Mzyan. Ghadi n3yto lik قريب. Ila 3ndk رقم الطلب sftih lina 3afak.",
-      bankTransferHow: `Ila bghiti tخلص b virement: mlli tdir commande, zid note f formulaire: "paiement par virement bancaire".\nFormulaire: ${ORDER_FORM_URL}`,
+      bankTransferHow:
+        'Ila bghiti tخلص b virement: mlli tdir commande, zid note f formulaire: "paiement par virement bancaire".\n' +
+        "Formulaire: " + ORDER_FORM_URL,
       needDetails: "3afak 3tini brand/model/size wla catégorie bach n3tik l-offres.",
-      cannot3: `Ma qdrtch n3tik jawab bd9a daba. T9dr t3yt lina: ${CONTACTS.calls.join(" / ")}.`,
-      photoLink: (v) => `Hna link dyal l-produit: ${v.link}`,
+      cannot3: "Ma qdrtch n3tik jawab bd9a daba. T9dr t3yt lina: " + CONTACTS.calls.join(" / ") + ".",
+      photoLink: (v) => "Hna link dyal l-produit: " + (v && v.link ? v.link : ""),
       photoNoLink: "Had l-produit ma 3ndnach link dyal tswira daba. 3tini model wla brand+size.",
       askBrandModelSize: "3afak 3tini brand wla model wla size bach n3tik link/option.",
     },
+
+    // (Keep fr/ar similarly; convert any `${...}` to concatenation)
+  };
+
+  const val = (dict[L] && dict[L][key]) ?? dict.dzl[key];
+  return typeof val === "function" ? val(vars) : String(val || "");
+}
     fr: {
       askTextInsteadMedia: "Merci. Pour que je comprenne, envoyez un message écrit (sans audio/image).",
       typeYourMessage: "Merci d’écrire votre demande.",
