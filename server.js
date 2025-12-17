@@ -233,13 +233,22 @@ function t(lang, key, vars = {}) {
       askTextInsteadMedia:
         "Smah lia, ma nqdrch nfhem l-content mn image/voice. 3afak kteb l-message b text باش n3awnk.",
       typeYourMessage: "3afak kteb su2al dyalk.",
-      greeting: (vars2) => {
-        const visioLines = vars2.visioLines || [];
-        const offersPart = visioLines.length
-          ? `Big offers f DAIKO:\n${visioLines.join("\n\n")}\n\n`
-          : "Kaynin big offers f DAIKO.\n\n";
-        return `${offersPart}Ana Digitronics AI Bot.\nGhadi n3awnk b as2ila l-basita, ila ma qdrtch ghadi ykml m3ak agent.\nL3nwan: ${COMPANY.address}\n${RULES_I18N.dzl.payment}\n${RULES_I18N.dzl.delivery}\nCommande: ${ORDER_FORM_URL}`;
+        greeting: (vars2) => {
+        const lines = vars2.visioLines || [];
+        const offersPart = lines.length
+          ? `Big offers f DAIKO:\n${lines.join("\n")}`
+          : "Kaynin big offers f DAIKO.";
+
+        return `Ana Digitronics AI Bot.
+      Ghadi n3awnk b as2ila l-basita, ila ma qdrtch ghadi ykml m3ak agent.
+      L3nwan: ${COMPANY.address}
+      ${RULES_I18N.dzl.payment}
+      ${RULES_I18N.dzl.delivery}
+      Commande: ${ORDER_FORM_URL}
+
+      ${offersPart}`.trim();
       },
+
       address: `L3nwan dyalna: ${COMPANY.address}`,
       orderForm: `Tfdal/ي: 3mmer had formulaire bach tdir commande: ${ORDER_FORM_URL}`,
       thanksFillForm: `Shokran 3la lma3lomat. 3afak 3mmer had formulaire bach tdir commande: ${ORDER_FORM_URL}`,
@@ -1385,8 +1394,10 @@ function lastMentionedCategory(historyMsgs = []) {
 // =====================
 function formatOfferLineGreeting(brand, o) {
   const sizePart = o.size ? ` ${o.size}"` : "";
-  return `• ${brand} ${o.model}${sizePart}: ${o.price} dh`;
+  const typePart = o.type ? ` (${o.type})` : "";
+  return `• ${brand} ${o.model}${sizePart}: ${o.price} dh${typePart}`;
 }
+
 
 
 function listOffersForBrand(brand, { cls = null, category = null, size = null, limit = 5 } = {}) {
@@ -1900,7 +1911,7 @@ if (userTextRaw) {
     }
 
     // 0) Greeting (FORCED Darija Latin)
-    if (isGreeting(userTextRaw) && userTextRaw.length <= 25) {
+    if (isGreeting(userTextRaw)) {
   const bigLines = buildBigOffersForGreeting("DAIKO", OFFERS_INDEX.classCanon.tv || null);
   const reply = t("dzl", "greeting", { visioLines: bigLines }); // keep var name to avoid refactor
   pushMemory(key, "assistant", reply);
