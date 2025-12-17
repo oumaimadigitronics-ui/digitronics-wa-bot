@@ -2013,8 +2013,23 @@ if (isOrderStatusIntent(userTextRaw)) {
 
 // ✅ ENTER SUPPORT MODE (only if not order/buy)
 const wasInSupportMode = supportModeStore.has(key);
+
 if (isSupportIntent(userTextRaw) && !isOrderStatusIntent(userTextRaw) && !isBuyIntent(userTextRaw)) {
   supportModeStore.set(key, { at: Date.now() });
+}
+
+    // If we are in support mode, do NOT suggest offers (avoid sales responses)
+if (supportModeStore.has(key)) {
+  const reply =
+    lang === "ar"
+      ? "تمام. شنو موديل الجهاز؟ وشنو المشكل بالضبط: ما كيشعلش، ما كايناش الصورة، ما كايناش الصوت، ولا كايبان كود خطأ؟"
+      : lang === "fr"
+      ? "D’accord. Quel est le modèle de l’appareil et quel est le problème exact (ne s’allume pas, pas d’image, pas de son, code erreur) ?"
+      : "Mzyan. 3afak 3tini modèle dyal l-appareil w achno l-mochkil bddabt (ma kaych3elch / ma kaynach tswira / ma kaynach s-sout / code d’erreur).";
+
+  pushMemory(key, "assistant", reply);
+  resetStrikes(key);
+  return res.json({ ok: true, reply: shorten(reply, 520) });
 }
 
 // Optional: exit support mode if user is clearly shopping again
