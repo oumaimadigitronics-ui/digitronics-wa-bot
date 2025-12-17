@@ -236,13 +236,14 @@ function t(lang, key, vars = {}) {
       askTextInsteadMedia:
         "Smah lia, ma nqdrch nfhem l-content mn image/voice. 3afak kteb l-message b text باش n3awnk.",
       typeYourMessage: "3afak kteb su2al dyalk.",
-        greeting: (vars2) => {
-  const lines = vars2.visioLines || [];
-  const offersPart = lines.length
-    ? `Big offers f DAIKO:\n${lines.join("\n")}`
-    : "Kaynin big offers f DAIKO.";
 
-  return `Wa 3alaykom salam 👋 marhba bik f Digitronics.
+      greeting: (vars2) => {
+        const lines = vars2.visioLines || [];
+        const offersPart = lines.length
+          ? `Big offers f DAIKO:\n${lines.join("\n")}`
+          : "Kaynin big offers f DAIKO.";
+
+        return `Wa 3alaykom salam 👋 marhba bik f Digitronics.
 
 Ana Digitronics AI Bot.
 Ghadi n3awnk b as2ila l-basita, ila ma qdrtch ghadi ykml m3ak agent.
@@ -252,7 +253,21 @@ Ghadi n3awnk b as2ila l-basita, ila ma qdrtch ghadi ykml m3ak agent.
 🚚 ${RULES_I18N.dzl.delivery}
 
 ${offersPart}`.trim();
-},
+      },
+
+      address: `L3nwan dyalna: ${COMPANY.address}`,
+      orderForm: `Tfdal/ي: 3mmer had formulaire bach tdir commande: ${ORDER_FORM_URL}`,
+      // ... keep the rest exactly as-is
+    },
+
+    fr: { /* ... */ },
+    ar: { /* ... */ },
+  };
+
+  const val = dict[L]?.[key] ?? dict.dzl[key];
+  if (typeof val === "function") return val(vars);
+  return String(val || "");
+}
 
 
 
@@ -1399,12 +1414,18 @@ function lastMentionedCategory(historyMsgs = []) {
 // =====================
 // Deterministic offer responses
 // =====================
+function formatOfferLineGreeting(brand, o) {
+  const sizePart = o.size ? ` ${o.size}"` : "";
+  const typePart = o.type ? ` — ${o.type}` : "";
+  return `• ${brand} ${o.model}${sizePart}: ${o.price} dh${typePart}`;
+}
+
 function formatOfferLine(brand, o) {
   const sizePart = o.size ? ` ${o.size}"` : "";
-  const namePart = o.name ? ` — ${o.name}` : "";
-  const typePart = o.type ? ` (${o.type})` : "";
-  return `• ${brand} ${o.model}${sizePart}: ${o.price} dh${typePart}${namePart}`;
+  const typePart = o.type ? ` — ${o.type}` : "";
+  return `• ${brand} ${o.model}${sizePart}: ${o.price} dh${typePart}`;
 }
+
 
 
 
