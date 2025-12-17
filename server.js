@@ -11,7 +11,7 @@
 // - Optional learning: logs fallback interactions + suggestions endpoint
 //
 // Behavior customizations
-// - Greeting is ALWAYS Darija Latin (short + polite) and mentions VISIO big offers + company/payment/delivery + order link.
+// - Greeting is ALWAYS Darija Latin (short + polite) and mentions DAIKO big offers + company/payment/delivery + order link.
 // - For every other reply: answer in the language used by the client in the latest message (Darija Latin / Arabic / French only).
 // - Do NOT show stock quantity; do NOT offer out-of-stock products (stock <= 0 filtered out).
 // - Mention delivery/payment/warranty ONLY if the client asks (except in greeting).
@@ -211,10 +211,10 @@ function t(lang, key, vars = {}) {
         "Smah lia, ma nqdrch nfhem l-content mn image/voice. 3afak kteb l-message b text باش n3awnk.",
       typeYourMessage: "3afak kteb su2al dyalk.",
       greeting: (vars2) => {
-        const visioLines = vars2.visioLines || [];
-        const offersPart = visioLines.length
-          ? `Big offers f VISIO:\n${visioLines.join("\n\n")}\n\n`
-          : "Kaynin big offers f VISIO.\n\n";
+        const DAIKOLines = vars2.DAIKOLines || [];
+        const offersPart = DAIKOoLines.length
+          ? `Big offers f DAIKO:\n${DAIKOLinesLines.join("\n\n")}\n\n`
+          : "Kaynin big offers f DAIKO.\n\n";
         return `${offersPart}Ana Digitronics AI Bot.\nGhadi n3awnk b as2ila l-basita, ila ma qdrtch ghadi ykml m3ak agent.\nL3nwan: ${COMPANY.address}\n${RULES_I18N.dzl.payment}\n${RULES_I18N.dzl.delivery}\nCommande: ${ORDER_FORM_URL}`;
       },
       address: `L3nwan dyalna: ${COMPANY.address}`,
@@ -235,10 +235,10 @@ function t(lang, key, vars = {}) {
       askTextInsteadMedia: "Merci. Pour que je comprenne, envoyez un message écrit (sans audio/image).",
       typeYourMessage: "Merci d’écrire votre demande.",
       greeting: (vars2) => {
-        const visioLines = vars2.visioLines || [];
-        const offersPart = visioLines.length
-          ? `Grandes offres VISIO:\n${visioLines.join("\n\n")}\n\n`
-          : "Grandes offres VISIO disponibles.\n\n";
+        const DAIKOLines = vars2.DAIKOLines || [];
+        const offersPart = DAIKOLines.length
+          ? `Grandes offres DAIKO:\n${DAIKOLines.join("\n\n")}\n\n`
+          : "Grandes offres DAIKO disponibles.\n\n";
         return `${offersPart}Bonjour, je suis le bot IA de Digitronics. Je réponds aux questions simples; si besoin, un agent prendra la suite.\nAdresse: ${COMPANY.address}\n${RULES_I18N.fr.payment}\n${RULES_I18N.fr.delivery}\nPour commander: ${ORDER_FORM_URL}`;
       },
       address: `Notre adresse: ${COMPANY.address}`,
@@ -263,10 +263,10 @@ function t(lang, key, vars = {}) {
       typeYourMessage: "من فضلك اكتب رسالتك.",
       // Greeting is forced Darija Latin elsewhere; keep fallback text:
       greeting: (vars2) => {
-        const visioLines = vars2.visioLines || [];
-        const offersPart = visioLines.length
-          ? `عروض كبيرة من VISIO:\n${visioLines.join("\n\n")}\n\n`
-          : "عروض كبيرة من VISIO متوفرة.\n\n";
+        const DAIKOLines = vars2.DAIKOLines || [];
+        const offersPart = DAIKOLines.length
+          ? `عروض كبيرة من DAIKO:\n${DAIKOLines.join("\n\n")}\n\n`
+          : "عروض كبيرة من DAIKO متوفرة.\n\n";
         return `${offersPart}مرحباً، أنا بوت ذكاء اصطناعي من Digitronics. أجيب عن الأسئلة البسيطة، وإذا لم أستطع فسيكمل معك أحد الفريق.\nالعنوان: ${COMPANY.address}\n${RULES_I18N.ar.payment}\n${RULES_I18N.ar.delivery}\nللطلب: ${ORDER_FORM_URL}`;
       },
       address: `عنواننا: ${COMPANY.address}`,
@@ -1393,9 +1393,9 @@ function listOffersForBrand(brand, { cls = null, category = null, size = null, l
   return arr.map((o) => formatOfferLine(brand, o));
 }
 
-function buildVisioBigOffersForGreeting(tvCanon) {
-  // Desired: 32 LED, 32 Google TV, 43 Google TV (in stock only).
-  const arr0 = (OFFERS.offers["VISIO"] || []).filter((o) => Number(o.stock || 0) > 0);
+function buildDAIKOBigOffersForGreeting(tvCanon) {
+  // Desired: 32 Google TV, 43 Google TV (in stock only).
+  const arr0 = (OFFERS.offers["DAIKO"] || []).filter((o) => Number(o.stock || 0) > 0);
 
   function pickOne({ size, includeType, excludeType } = {}) {
     let arr = arr0;
@@ -1422,11 +1422,11 @@ function buildVisioBigOffersForGreeting(tvCanon) {
   ].filter(Boolean);
 
   if (picked.length < 3) {
-    const tvLines = listOffersForBrand("VISIO", { cls: tvCanon, limit: 3 });
+    const tvLines = listOffersForBrand("DAIKO", { cls: tvCanon, limit: 3 });
     return tvLines.length ? tvLines : [];
   }
 
-  return picked.map((o) => formatOfferLine("VISIO", o));
+  return picked.map((o) => formatOfferLine("DAIKO", o));
 }
 
 function listOffersForClass(cls, { limit = 5 } = {}) {
@@ -1886,8 +1886,8 @@ if (userTextRaw) {
 
     // 0) Greeting (FORCED Darija Latin)
     if (isGreeting(userTextRaw) && userTextRaw.length <= 25) {
-      const visioLines = buildVisioBigOffersForGreeting(OFFERS_INDEX.classCanon.tv || null);
-      const reply = t("dzl", "greeting", { visioLines });
+      const DAIKOLines = buildDAIKOBigOffersForGreeting(OFFERS_INDEX.classCanon.tv || null);
+      const reply = t("dzl", "greeting", { DAIKOLinesLines });
       pushMemory(key, "assistant", reply);
       resetStrikes(key);
       return res.json({ ok: true, reply: shorten(reply, 520) });
