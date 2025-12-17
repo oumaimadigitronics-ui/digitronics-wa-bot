@@ -116,6 +116,21 @@ const RULES_I18N = {
     wall_mount: "حامل/براكيط مجاني مع التلفاز.",
   },
 };
+function warrantyTextForBrand(lang, brand, cls) {
+  const L = lang || "dzl";
+  const b = String(brand || "").toUpperCase();
+  const isTv = cls && normMatch(cls).includes("tv");
+
+  // DAIKO TVs => 2 years warranty
+  if (b === "DAIKO" && isTv) {
+    if (L === "fr") return "Garantie: 2 ans (TV DAIKO).";
+    if (L === "ar") return "الضمان: سنتين (تلفاز DAIKO).";
+    return "Warranty: 2 ans (TV DAIKO).";
+  }
+
+  // default warranty (1 year)
+  return (RULES_I18N[L] || RULES_I18N.dzl).warranty;
+}
 
 // =====================
 // Small text utils
@@ -1951,7 +1966,12 @@ if (isPhotoRequestIntent(userTextRaw) && !supportModeStore.has(key)) {
       )
         parts.push(r.payment);
 
-      if (s.includes("warranty") || s.includes("garantie") || s.includes("الضمان") || s.includes("ضمان")) parts.push(r.warranty);
+if (s.includes("warranty") || s.includes("garantie") || s.includes("الضمان") || s.includes("ضمان")) {
+  const ctx = getCtx(key);
+  const brandGuess = ctx.lastBrand || lastMentionedBrand(history) || null;
+  const clsGuess = ctx.lastClass || lastMentionedClass(history) || null;
+  parts.push(warrantyTextForBrand(lang, brandGuess, clsGuess));
+}
 
       if (s.includes("wall mount") || s.includes("support") || s.includes("حامل") || s.includes("براكي")) parts.push(r.wall_mount);
 
