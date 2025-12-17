@@ -239,7 +239,7 @@ function t(lang, key, vars = {}) {
     ? `Big offers f DAIKO:\n${lines.join("\n")}`
     : "Kaynin big offers f DAIKO.";
 
-  return `Salam 👋 marhba bik f Digitronics.
+  return `Wa 3alaykom salam 👋 marhba bik f Digitronics.
 
 Ana Digitronics AI Bot.
 Ghadi n3awnk b as2ila l-basita, ila ma qdrtch ghadi ykml m3ak agent.
@@ -251,6 +251,7 @@ Ghadi n3awnk b as2ila l-basita, ila ma qdrtch ghadi ykml m3ak agent.
 
 ${offersPart}`.trim();
 },
+
 
 
       address: `L3nwan dyalna: ${COMPANY.address}`,
@@ -1405,6 +1406,7 @@ function formatOfferLineGreeting(brand, o) {
 
 
 
+
 function listOffersForBrand(brand, { cls = null, category = null, size = null, limit = 5 } = {}) {
   const arr0 = OFFERS.offers[brand] || [];
   let arr = arr0.filter((o) => Number(o.stock || 0) > 0); // filter out of stock
@@ -1920,7 +1922,7 @@ if (userTextRaw) {
   const reply = t("dzl", "greeting", { visioLines: bigLines }); // keep var name to avoid refactor
   pushMemory(key, "assistant", reply);
   resetStrikes(key);
-  return res.json({ ok: true, reply: shorten(reply, 520) });
+  return res.json({ ok: true, reply: shorten(reply, 1000) });
 }
 
 
