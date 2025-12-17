@@ -247,7 +247,6 @@ Ghadi n3awnk b as2ila l-basita, ila ma qdrtch ghadi ykml m3ak agent.
 📍 L3nwan: ${COMPANY.address}
 💳 ${RULES_I18N.dzl.payment}
 🚚 ${RULES_I18N.dzl.delivery}
-📝 Commande: ${ORDER_FORM_URL}
 
 ${offersPart}`.trim();
 },
@@ -1402,9 +1401,6 @@ function formatOfferLineGreeting(brand, o) {
   const typePart = o.type ? ` — ${o.type}` : "";
   return `• ${brand} ${o.model}${sizePart}: ${o.price} dh${typePart}`;
 }
-
-
-
 
 
 function listOffersForBrand(brand, { cls = null, category = null, size = null, limit = 5 } = {}) {
