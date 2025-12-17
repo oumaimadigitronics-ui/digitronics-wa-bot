@@ -91,6 +91,14 @@ const COMPANY = {
     "Ville de Casablanca – Quartier Oulfa (Haj Fateh) – Rue 9 – Rond-point Chahdiya – à côté de la boulangerie Pan Com",
 };
 
+const GREETING_DAIKO_MODELS = [
+  "GLED32H93DK",
+  "GLED43H94DK",
+  "GLED55AI96DK",
+  "QLED50GU25DK",
+];
+
+
 const openai = new OpenAI({ apiKey: OPENAI_API_KEY });
 
 // =====================
@@ -1411,25 +1419,31 @@ function listOffersForBrand(brand, { cls = null, category = null, size = null, l
 
 function buildBigOffersForGreeting(brand, tvCanon) {
   const BRAND = String(brand || "").trim().toUpperCase();
+  const wanted = BRAND === "DAIKO" ? GREETING_DAIKO_MODELS : [];
+
   const arr0 = (OFFERS.offers[BRAND] || []).filter((o) => Number(o.stock || 0) > 0);
 
-  function pickOne({ size, includeType, excludeType } = {}) {
-    let arr = arr0;
-    if (Number.isFinite(size) && size) arr = arr.filter((o) => Number(o.size || 0) === Number(size));
+  // If brand is DAIKO and we have a fixed list => return only those models (in that order)
+  if (wanted.length) {
+    const lines = [];
 
-    const it = String(includeType || "").trim();
-    const et = String(excludeType || "").trim();
-    if (it) arr = arr.filter((o) => normMatch(o.type || "").includes(normMatch(it)));
-    if (et) arr = arr.filter((o) => !normMatch(o.type || "").includes(normMatch(et)));
+    for (const model of wanted) {
+      const o = arr0.find((x) => normMatch(x.model) === normMatch(model));
+      if (!o) continue;
 
-    if (tvCanon) arr = arr.filter((o) => normMatch(o.class || "") === normMatch(tvCanon));
+      // Optional: ensure it’s TV class if you want greeting to be TV-only
+      if (tvCanon && normMatch(o.class || "") !== normMatch(tvCanon)) continue;
 
-    arr = arr
-      .filter((o) => Number.isFinite(Number(o.price)))
-      .sort((a, b) => Number(a.price) - Number(b.price));
+      lines.push(formatOfferLine(BRAND, o));
+    }
 
-    return arr[0] || null;
+    return lines; // may be 0..N depending on stock and availability
   }
+
+  // Fallback behavior for other brands (keep your old logic if needed)
+  const tvLines = listOffersForBrand(BRAND, { cls: tvCanon, limit: 3 });
+  return tvLines.length ? tvLines : [];
+}
 
   // Keep same “desired” sizes/types logic (optional)
   const picked = [
