@@ -1907,7 +1907,7 @@ if (userTextRaw) {
       const reply = t(lang, "thanksFillForm");
       pushMemory(key, "assistant", reply);
       resetStrikes(key);
-      return res.json({ ok: true, reply: shorten(reply, 900) });
+      return res.json({ ok: true, reply: shorten(reply, 1700) });
     }
 
     // 0) Greeting (FORCED Darija Latin)
