@@ -12,7 +12,7 @@
 //
 // Behavior customizations
 // - Greeting is ALWAYS Darija Latin (short + polite) and mentions VISIO big offers + company/payment/delivery + order link.
-// - For every other reply: answer in the language used by the client in the latest message (Arabic/French/English/Darija Latin).
+// - For every other reply: answer in the language used by the client in the latest message (Darija Latin / Arabic / French only).
 // - Do NOT show stock quantity; do NOT offer out-of-stock products (stock <= 0 filtered out).
 // - Mention delivery/payment/warranty ONLY if the client asks (except in greeting).
 // - If the bot cannot answer 3 times in a row in a conversation, show call options.
@@ -90,7 +90,8 @@ const CONTACTS = {
 
 const COMPANY = {
   name: "Digitronics",
-  address: "Ville de Casablanca – Quartier Oulfa (Haj Fateh) – Rue 9 – Rond-point Chahdiya – à côté de la boulangerie Pan Com",
+  address:
+    "Ville de Casablanca – Quartier Oulfa (Haj Fateh) – Rue 9 – Rond-point Chahdiya – à côté de la boulangerie Pan Com",
 };
 
 const openai = new OpenAI({ apiKey: OPENAI_API_KEY });
@@ -124,8 +125,26 @@ function stripDiacritics(s) {
 function arabicIndicToAsciiDigits(s) {
   const str = String(s || "");
   const map = {
-    "٠": "0", "١": "1", "٢": "2", "٣": "3", "٤": "4", "٥": "5", "٦": "6", "٧": "7", "٨": "8", "٩": "9",
-    "۰": "0", "۱": "1", "۲": "2", "۳": "3", "۴": "4", "۵": "5", "۶": "6", "۷": "7", "۸": "8", "۹": "9",
+    "٠": "0",
+    "١": "1",
+    "٢": "2",
+    "٣": "3",
+    "٤": "4",
+    "٥": "5",
+    "٦": "6",
+    "٧": "7",
+    "٨": "8",
+    "٩": "9",
+    "۰": "0",
+    "۱": "1",
+    "۲": "2",
+    "۳": "3",
+    "۴": "4",
+    "۵": "5",
+    "۶": "6",
+    "۷": "7",
+    "۸": "8",
+    "۹": "9",
   };
   return str.replace(/[٠-٩۰-۹]/g, (d) => map[d] ?? d);
 }
@@ -140,29 +159,42 @@ function hasArabicScript(text) {
 }
 
 function detectLang(text) {
-  const t = String(text || "").trim();
-  const s = normMatch(t);
+  const t0 = String(text || "").trim();
+  const s = normMatch(t0);
 
-  if (hasArabicScript(t)) return "ar";
-  // rough french signal
-  if (/[éèêàçùôî]/i.test(t) || s.includes("bonjour") || s.includes("prix") || s.includes("livraison") || s.includes("commande"))
+  // Arabic script -> Arabic
+  if (hasArabicScript(t0)) return "ar";
+
+  // French signals
+  if (
+    /[éèêàçùôî]/i.test(t0) ||
+    s.includes("bonjour") ||
+    s.includes("prix") ||
+    s.includes("livraison") ||
+    s.includes("commande") ||
+    s.includes("svp") ||
+    s.includes("s'il") ||
+    s.includes("merci")
+  )
     return "fr";
-  // darija latin common tokens
-  if (s.includes("bghit") || s.includes("salam") || s.includes("slm") || s.includes("fin") || s.includes("chhal") || s.includes("wach"))
-    return "dzl"; // darija latin
-  return "en";
+
+  // Default: Darija Latin (main language)
+  return "dzl";
 }
 
 function t(lang, key, vars = {}) {
-  const L = lang || "en";
+  const L = lang || "dzl";
   const dict = {
     dzl: {
-      askTextInsteadMedia: "Smah lia, ma nqdrch nfhem l-content mn image/voice. 3afak kteb l-message b text باش n3awnk.",
+      askTextInsteadMedia:
+        "Smah lia, ma nqdrch nfhem l-content mn image/voice. 3afak kteb l-message b text باش n3awnk.",
       typeYourMessage: "3afak kteb su2al dyalk.",
-      greeting: (vars) => {
-        const visioLines = vars.visioLines || [];
-        const offersPart = visioLines.length ? `Big offers f VISIO:\n${visioLines.join("\n\n")}\n\n` : "Kaynin big offers f VISIO.\n\n";
-        return `${offersPart}Marhba bik f Digitronics.\nL3nwan: ${COMPANY.address}\nPayment: cash 3nd ttsslim wla virement (tktb note f formulaire).\nDelivery: 1–7 ayam.\nIla bghiti t-commandi: ${ORDER_FORM_URL}`;
+      greeting: (vars2) => {
+        const visioLines = vars2.visioLines || [];
+        const offersPart = visioLines.length
+          ? `Big offers f VISIO:\n${visioLines.join("\n\n")}\n\n`
+          : "Kaynin big offers f VISIO.\n\n";
+        return `${offersPart}Ana Digitronics AI Bot.\nGhadi n3awnk b as2ila l-basita, ila ma qdrtch ghadi ykml m3ak agent.\nL3nwan: ${COMPANY.address}\nPayment: cash 3nd ttsslim wla virement (tktb note f formulaire).\nDelivery: 1–7 ayam.\nCommande: ${ORDER_FORM_URL}`;
       },
       address: `L3nwan dyalna: ${COMPANY.address}`,
       orderForm: `Tfdal/ي: 3mmer had formulaire bach tdir commande: ${ORDER_FORM_URL}`,
@@ -176,48 +208,40 @@ function t(lang, key, vars = {}) {
       cannot3: `Ma qdrtch n3tik jawab bd9a daba. T9dr t3yt lina: ${CONTACTS.calls.join(" / ")}.`,
     },
     fr: {
-      askTextInsteadMedia: "Merci. Pour que je comprenne, envoyez plutôt un message écrit (pas d’audio/image).",
+      askTextInsteadMedia: "Merci. Pour que je comprenne, envoyez un message écrit (sans audio/image).",
       typeYourMessage: "Merci d’écrire votre demande.",
-      greeting: (vars) => {
-        const visioLines = vars.visioLines || [];
-        const offersPart = visioLines.length ? `Grandes offres VISIO:\n${visioLines.join("\n\n")}\n\n` : "Grandes offres VISIO disponibles.\n\n";
-        return `${offersPart}Bienvenue chez Digitronics.\nAdresse: ${COMPANY.address}\nPaiement: cash à la livraison ou virement (note à ajouter dans le formulaire).\nLivraison: 1 à 7 jours.\nPour commander: ${ORDER_FORM_URL}`;
+      greeting: (vars2) => {
+        const visioLines = vars2.visioLines || [];
+        const offersPart = visioLines.length
+          ? `Grandes offres VISIO:\n${visioLines.join("\n\n")}\n\n`
+          : "Grandes offres VISIO disponibles.\n\n";
+        return `${offersPart}Bonjour, je suis le bot IA de Digitronics. Je réponds aux questions simples; si besoin, un agent prendra la suite.\nAdresse: ${COMPANY.address}\nPaiement: cash à la livraison ou virement (note à ajouter dans le formulaire).\nLivraison: 1 à 7 jours.\nPour commander: ${ORDER_FORM_URL}`;
       },
       address: `Notre adresse: ${COMPANY.address}`,
-      orderForm: `Merci de remplir ce formulaire pour commander: ${ORDER_FORM_URL}`,
+      orderForm: `Veuillez remplir ce formulaire pour commander: ${ORDER_FORM_URL}`,
       thanksFillForm: `Merci pour les informations. Veuillez remplir ce formulaire pour passer la commande : ${ORDER_FORM_URL}`,
       askOrderNo: "Merci d’envoyer votre numéro de commande pour vérification.",
       gotOrderNo: "Merci. Nous avons bien reçu votre numéro de commande. Nous vous appellerons bientôt.",
       callSoon: "D’accord. Nous vous appellerons bientôt.",
-      callSoonNeedOrder: "D’accord. Nous vous appellerons bientôt. Si vous avez un numéro de commande, envoyez-le.",
+      callSoonNeedOrder:
+        "D’accord. Nous vous appellerons bientôt. Si vous avez un numéro de commande, envoyez-le.",
       bankTransferHow: `Paiement par virement: lors de la commande, ajoutez une note dans le formulaire: "paiement par virement bancaire".\nFormulaire: ${ORDER_FORM_URL}`,
       needDetails: "Merci de préciser la marque/le modèle/la taille ou la catégorie.",
-      cannot3: `Je ne peux pas répondre avec certitude pour le moment. Vous pouvez appeler: ${CONTACTS.calls.join(" / ")}.`,
-    },
-    en: {
-      askTextInsteadMedia: "Thank you. Please send a written message (no audio/image) so I can understand.",
-      typeYourMessage: "Please type your message.",
-      greeting: (vars) => {
-        const visioLines = vars.visioLines || [];
-        const offersPart = visioLines.length ? `Big VISIO offers:\n${visioLines.join("\n\n")}\n\n` : "Big VISIO offers available.\n\n";
-        return `${offersPart}Welcome to Digitronics.\nAddress: ${COMPANY.address}\nPayment: cash on delivery or bank transfer (add a note in the form).\nDelivery: 1–7 days.\nTo order: ${ORDER_FORM_URL}`;
-      },
-      address: `Our address: ${COMPANY.address}`,
-      orderForm: `Please fill this form to place the order: ${ORDER_FORM_URL}`,
-      thanksFillForm: `Thanks for the details. Please fill this form to place the order: ${ORDER_FORM_URL}`,
-      askOrderNo: "Please send your order number so we can check it.",
-      gotOrderNo: "Thanks. We received your order number. We will call you soon.",
-      callSoon: "Okay. We will call you soon.",
-      callSoonNeedOrder: "Okay. We will call you soon. If you have an order number, please send it.",
-      bankTransferHow: `For bank transfer: when you place the order, add a note in the form: "pay by bank transfer".\nForm: ${ORDER_FORM_URL}`,
-      needDetails: "Please share brand/model/size or category so I can help.",
-      cannot3: `I can’t answer reliably right now. You can call: ${CONTACTS.calls.join(" / ")}.`,
+      cannot3: `Je ne peux pas répondre avec certitude pour le moment. Vous pouvez appeler: ${CONTACTS.calls.join(
+        " / "
+      )}.`,
     },
     ar: {
       askTextInsteadMedia: "شكراً. من فضلك ارسل رسالة مكتوبة (بدون صوت/صورة) باش نقدر نفهمك.",
       typeYourMessage: "من فضلك اكتب رسالتك.",
-      // Greeting is forced Darija Latin elsewhere; keep for completeness.
-      greeting: (vars) => (t("dzl", "greeting", vars)),
+      // Greeting is forced Darija Latin elsewhere; keep fallback text:
+      greeting: (vars2) => {
+        const visioLines = vars2.visioLines || [];
+        const offersPart = visioLines.length
+          ? `عروض كبيرة من VISIO:\n${visioLines.join("\n\n")}\n\n`
+          : "عروض كبيرة من VISIO متوفرة.\n\n";
+        return `${offersPart}مرحباً، أنا بوت ذكاء اصطناعي من Digitronics. أجيب عن الأسئلة البسيطة، وإذا لم أستطع فسيكمل معك أحد الفريق.\nالعنوان: ${COMPANY.address}\nالدفع: نقداً عند التسليم أو تحويل بنكي (أضف ملاحظة في الاستمارة).\nالتوصيل: من 1 إلى 7 أيام.\nللطلب: ${ORDER_FORM_URL}`;
+      },
       address: `عنواننا: ${COMPANY.address}`,
       orderForm: `من فضلك عبّئ هذا الفورم للطلب: ${ORDER_FORM_URL}`,
       thanksFillForm: `شكرًا على المعلومات. من فضلك املأ هذه الاستمارة لإتمام الطلب: ${ORDER_FORM_URL}`,
@@ -231,7 +255,7 @@ function t(lang, key, vars = {}) {
     },
   };
 
-  const val = dict[L]?.[key] ?? dict.en[key];
+  const val = dict[L]?.[key] ?? dict.dzl[key];
   if (typeof val === "function") return val(vars);
   return String(val || "");
 }
@@ -245,7 +269,20 @@ function detectContactInfo(text) {
   }
   const s = normMatch(s0);
   // address-like
-  const addrTokens = ["rue", "bd", "boulevard", "avenue", "quartier", "hay", "حي", "زنقة", "شارع", "adresse", "address", "العنوان"];
+  const addrTokens = [
+    "rue",
+    "bd",
+    "boulevard",
+    "avenue",
+    "quartier",
+    "hay",
+    "حي",
+    "زنقة",
+    "شارع",
+    "adresse",
+    "address",
+    "العنوان",
+  ];
   if (addrTokens.some((k) => s.includes(normMatch(k)))) return true;
   // name-like
   const nameTokens = ["smiya", "smiyti", "ismi", "nom", "name", "انا", "أنا", "اسمي", "سميتي"];
@@ -361,17 +398,73 @@ function extractConversationId(body = {}) {
   return s ? s.slice(0, 120) : null;
 }
 
+function stableHash(input) {
+  try {
+    return crypto.createHash("sha256").update(String(input || "")).digest("hex").slice(0, 18);
+  } catch {
+    return crypto.randomBytes(9).toString("hex");
+  }
+}
+
+function buildConversationKey({ phone, convId, remoteJid, chatId, from, sender }, req, body) {
+  // Never fall back to IP (Render/NAT can make different clients share the same IP).
+  if (phone) return phone;
+
+  const cid = String(convId || "").trim();
+  if (cid) return `conv:${cid}`;
+
+  const rj = String(remoteJid || "").trim();
+  if (rj) return `jid:${rj.slice(0, 120)}`;
+
+  const ch = String(chatId || "").trim();
+  if (ch) return `chat:${ch.slice(0, 120)}`;
+
+  const f = String(from || sender || "").trim();
+  if (f) return `from:${stableHash(f)}`;
+
+  // Last resort: hash a small stable fingerprint from payload + user-agent (not IP)
+  const ua = String(req?.headers?.["user-agent"] || "").slice(0, 120);
+  const payloadHint = JSON.stringify({
+    a: body?.wa_id || body?.waId || body?.data?.wa_id || body?.data?.waId || null,
+    b: body?.contact_id || body?.contactId || body?.data?.contact_id || body?.data?.contactId || null,
+    c: body?.thread_id || body?.threadId || body?.data?.thread_id || body?.data?.threadId || null,
+    ua,
+  });
+  return `anon:${stableHash(payloadHint)}`;
+}
+
 function normalizeIncoming(body = {}, req = null) {
   const textRaw = extractTextFromBody(body);
   const media = extractMediaFromBody(body);
 
   const senderCandidates = [
-    body?.wa_number, body?.waNumber, body?.whatsapp_number, body?.whatsappNumber,
-    body?.from, body?.sender, body?.contact, body?.phone, body?.msisdn, body?.number,
-    body?.wa_id, body?.waId, body?.chatId, body?.chat_id, body?.remoteJid,
-    body?.data?.wa_number, body?.data?.waNumber, body?.data?.from, body?.data?.sender,
-    body?.data?.contact, body?.data?.phone, body?.data?.msisdn, body?.data?.number,
-    body?.data?.wa_id, body?.data?.waId, body?.data?.chatId, body?.data?.chat_id,
+    body?.wa_number,
+    body?.waNumber,
+    body?.whatsapp_number,
+    body?.whatsappNumber,
+    body?.from,
+    body?.sender,
+    body?.contact,
+    body?.phone,
+    body?.msisdn,
+    body?.number,
+    body?.wa_id,
+    body?.waId,
+    body?.chatId,
+    body?.chat_id,
+    body?.remoteJid,
+    body?.data?.wa_number,
+    body?.data?.waNumber,
+    body?.data?.from,
+    body?.data?.sender,
+    body?.data?.contact,
+    body?.data?.phone,
+    body?.data?.msisdn,
+    body?.data?.number,
+    body?.data?.wa_id,
+    body?.data?.waId,
+    body?.data?.chatId,
+    body?.data?.chat_id,
   ];
 
   let phone = null;
@@ -383,14 +476,19 @@ function normalizeIncoming(body = {}, req = null) {
   if (!phone) phone = findPhoneInObject(body);
 
   const convId = extractConversationId(body);
-  const convKey = phone ? phone : convId ? `conv:${convId}` : null;
 
-  const ip =
-    (req?.headers?.["x-forwarded-for"] && String(req.headers["x-forwarded-for"]).split(",")[0].trim()) ||
-    req?.ip ||
-    "anon";
-
-  const key = convKey || `anon:${ip}`;
+  const key = buildConversationKey(
+    {
+      phone,
+      convId,
+      remoteJid: body?.remoteJid || body?.data?.remoteJid,
+      chatId: body?.chat_id || body?.chatId || body?.data?.chat_id || body?.data?.chatId,
+      from: body?.from || body?.data?.from,
+      sender: body?.sender || body?.data?.sender,
+    },
+    req,
+    body
+  );
 
   return {
     key,
@@ -542,8 +640,14 @@ setInterval(() => {
   flushMemoryToDiskSoon();
 }, 10 * 60 * 1000);
 
-process.on("SIGTERM", () => { flushMemoryToDiskNow(); process.exit(0); });
-process.on("SIGINT", () => { flushMemoryToDiskNow(); process.exit(0); });
+process.on("SIGTERM", () => {
+  flushMemoryToDiskNow();
+  process.exit(0);
+});
+process.on("SIGINT", () => {
+  flushMemoryToDiskNow();
+  process.exit(0);
+});
 
 // =====================
 // Learning (conservative)
@@ -568,7 +672,11 @@ function ensureLearningFiles() {
 }
 
 function readJsonSafe(p, fallback) {
-  try { return JSON.parse(fs.readFileSync(p, "utf8")); } catch { return fallback; }
+  try {
+    return JSON.parse(fs.readFileSync(p, "utf8"));
+  } catch {
+    return fallback;
+  }
 }
 
 function loadLearningRules() {
@@ -578,7 +686,9 @@ function loadLearningRules() {
 }
 
 function appendNdjson(p, obj) {
-  try { fs.appendFileSync(p, JSON.stringify(obj) + "\n", "utf8"); } catch {}
+  try {
+    fs.appendFileSync(p, JSON.stringify(obj) + "\n", "utf8");
+  } catch {}
 }
 
 function looksLikeFallback(reply) {
@@ -597,7 +707,12 @@ function looksLikeFallback(reply) {
   );
 }
 
-try { ensureLearningFiles(); loadLearningRules(); } catch (e) { console.log("Learning init failed:", e?.message || String(e)); }
+try {
+  ensureLearningFiles();
+  loadLearningRules();
+} catch (e) {
+  console.log("Learning init failed:", e?.message || String(e));
+}
 
 // =====================
 // OFFERS (in-memory)
@@ -608,7 +723,11 @@ let OFFERS = {
     payment: "Cash on delivery is available. Bank transfer is also possible (add a note in the order form).",
     warranty: "Warranty: 1 year for all products.",
     wall_mount: "All TVs include a free wall mount.",
-    brands: { VISIO: "Google TV except model 32VB23E which is LED TV", TCL: "QLED", MORSAT: "Android TV" },
+    brands: {
+      VISIO: "Google TV except model 32VB23E which is LED TV",
+      TCL: "QLED",
+      MORSAT: "Android TV",
+    },
   },
   offers: {}, // { BRAND: [{model,name,category,size,type,price,class,stock}] }
 };
@@ -620,7 +739,15 @@ let OFFERS_INDEX = {
   brandNorm: new Map(),
   classNorm: new Map(),
   classToOffers: new Map(),
-  classCanon: { tv: null, washing: null, fridge: null, waterHeater: null, heating: null, airConditioner: null, dishwasher: null },
+  classCanon: {
+    tv: null,
+    washing: null,
+    fridge: null,
+    waterHeater: null,
+    heating: null,
+    airConditioner: null,
+    dishwasher: null,
+  },
 };
 
 let lastOffersSync = { ok: false, at: null, error: null };
@@ -692,12 +819,18 @@ function pickCanonicalClass(classes, tokens = []) {
   for (const c of classes) {
     const nc = normMatch(c);
     const ok = toks.every((t) => (t ? nc.includes(t) : true));
-    if (ok) { best = c; break; }
+    if (ok) {
+      best = c;
+      break;
+    }
   }
   if (!best && toks.length) {
     for (const c of classes) {
       const nc = normMatch(c);
-      if (toks.some((t) => t && nc.includes(t))) { best = c; break; }
+      if (toks.some((t) => t && nc.includes(t))) {
+        best = c;
+        break;
+      }
     }
   }
   return best;
@@ -780,8 +913,16 @@ function isGreeting(text) {
   const s = normMatch(text).trim();
   if (!s) return false;
   return (
-    s === "salam" || s === "slm" || s === "hi" || s === "hello" || s === "bonjour" || s === "salut" ||
-    s.includes("salam") || s.includes("slm") || s.includes("bonjour") || s.includes("salut") ||
+    s === "salam" ||
+    s === "slm" ||
+    s === "hi" ||
+    s === "hello" ||
+    s === "bonjour" ||
+    s === "salut" ||
+    s.includes("salam") ||
+    s.includes("slm") ||
+    s.includes("bonjour") ||
+    s.includes("salut") ||
     (hasArabicScript(text) && (s.includes("سلام") || s.includes("السلام") || s.includes("مرحبا")))
   );
 }
@@ -793,32 +934,69 @@ function isLocationIntent(text) {
   return (
     whereRe.test(s) ||
     finRe.test(s) ||
-    s.includes("address") || s.includes("adresse") || s.includes("location") || s.includes("localisation") ||
-    s.includes("فين") || s.includes("العنوان") || s.includes("عنوان") || s.includes("المحل")
+    s.includes("address") ||
+    s.includes("adresse") ||
+    s.includes("location") ||
+    s.includes("localisation") ||
+    s.includes("فين") ||
+    s.includes("العنوان") ||
+    s.includes("عنوان") ||
+    s.includes("المحل")
   );
 }
 
 function isCallMeIntent(text) {
   const s = normMatch(text);
   return (
-    s.includes("3ayet") || s.includes("3ayt") || s.includes("call me") || s.includes("call") ||
-    s.includes("warid") || s.includes("t3ayet") || s.includes("tsl") || s.includes("اتصل") || s.includes("عيط")
+    s.includes("3ayet") ||
+    s.includes("3ayt") ||
+    s.includes("call me") ||
+    s.includes("call") ||
+    s.includes("warid") ||
+    s.includes("t3ayet") ||
+    s.includes("tsl") ||
+    s.includes("اتصل") ||
+    s.includes("عيط")
   );
 }
 
 function isBuyIntent(text) {
   const s = normMatch(text);
   return (
-    s.includes("bghit nchri") || s.includes("bghit ncharri") || s.includes("bghit ncommandi") || s.includes("bghit ncommander") ||
-    s.includes("ncommandi") || s.includes("commander") || s.includes("acheter") || s.includes("buy") || s.includes("purchase") ||
-    s.includes("أريد الشراء") || s.includes("اريد الشراء") || s.includes("بغيت نشري") || s.includes("بغيت نكموندي")
+    s.includes("bghit nchri") ||
+    s.includes("bghit ncharri") ||
+    s.includes("bghit ncommandi") ||
+    s.includes("bghit ncommander") ||
+    s.includes("ncommandi") ||
+    s.includes("commander") ||
+    s.includes("acheter") ||
+    s.includes("buy") ||
+    s.includes("purchase") ||
+    s.includes("أريد الشراء") ||
+    s.includes("اريد الشراء") ||
+    s.includes("بغيت نشري") ||
+    s.includes("بغيت نكموندي")
   );
 }
 
 function isOrderStatusIntent(text) {
   const s = normMatch(text);
   const hard = ["commande", "order", "tracking", "suivi", "livraison", "delivery", "talab", "tlb", "statut", "status"];
-  const problem = ["pas recu","late","delayed","retard","takhert","t2khret","matwsl","ma wslatch","لم اتوصل","ما توصلتش","ما وصلتش","متأخر","تأخر"];
+  const problem = [
+    "pas recu",
+    "late",
+    "delayed",
+    "retard",
+    "takhert",
+    "t2khret",
+    "matwsl",
+    "ma wslatch",
+    "لم اتوصل",
+    "ما توصلتش",
+    "ما وصلتش",
+    "متأخر",
+    "تأخر",
+  ];
   const hasHard = hard.some((k) => s.includes(k));
   const hasProblem = problem.some((p) => s.includes(normMatch(p)));
   return hasHard || hasProblem;
@@ -827,18 +1005,36 @@ function isOrderStatusIntent(text) {
 function isBankTransferIntent(text) {
   const s = normMatch(text);
   return (
-    s.includes("virement") || s.includes("virment") || s.includes("transfer") || s.includes("bank") || s.includes("rib") ||
-    s.includes("تحويل") || s.includes("بنكي") || s.includes("حوالة")
+    s.includes("virement") ||
+    s.includes("virment") ||
+    s.includes("transfer") ||
+    s.includes("bank") ||
+    s.includes("rib") ||
+    s.includes("تحويل") ||
+    s.includes("بنكي") ||
+    s.includes("حوالة")
   );
 }
 
 function asksAboutDeliveryPaymentWarranty(text) {
   const s = normMatch(text);
   return (
-    s.includes("delivery") || s.includes("livraison") || s.includes("توصيل") || s.includes("التوصيل") ||
-    s.includes("payment") || s.includes("paiement") || s.includes("الدفع") || s.includes("cash") ||
-    s.includes("warranty") || s.includes("garantie") || s.includes("الضمان") || s.includes("ضمان") ||
-    s.includes("wall mount") || s.includes("support") || s.includes("حامل") || s.includes("براكي")
+    s.includes("delivery") ||
+    s.includes("livraison") ||
+    s.includes("توصيل") ||
+    s.includes("التوصيل") ||
+    s.includes("payment") ||
+    s.includes("paiement") ||
+    s.includes("الدفع") ||
+    s.includes("cash") ||
+    s.includes("warranty") ||
+    s.includes("garantie") ||
+    s.includes("الضمان") ||
+    s.includes("ضمان") ||
+    s.includes("wall mount") ||
+    s.includes("support") ||
+    s.includes("حامل") ||
+    s.includes("براكي")
   );
 }
 
@@ -850,8 +1046,23 @@ function extractOrderNumber(text) {
 
 function extractSizeOnly(text) {
   const s0 = arabicIndicToAsciiDigits(String(text || "")).trim();
+  if (!s0) return null;
+
+  // Accept: "55", "55pouce", "55 pouce", '55"', "55 inch", Arabic بوصة
+  const m = s0.match(/(?:^|\s)(24|32|40|43|50|55|65|75)\s*(?:inch|inches|pouce|pouces|["”″]|بوصة|بوصات)?(?:\s|$)/i);
+  if (m) return Number(m[1]);
+
+  // If message is only a number
   const s = normMatch(s0);
-  const m = s.match(/^\s*(24|32|40|43|50|55|65|75)\s*(?:inch|inches|pouce|pouces|\"|”|″|بوصة|بوصات)?\s*$/i);
+  const m2 = s.match(/^\s*(24|32|40|43|50|55|65|75)\s*$/i);
+  return m2 ? Number(m2[1]) : null;
+}
+
+function extractSizeAny(text) {
+  const s0 = arabicIndicToAsciiDigits(String(text || ""));
+  const s = normMatch(s0);
+  // capture common TV sizes anywhere in text
+  const m = s.match(/\b(24|32|40|43|50|55|65|75)\b\s*(?:inch|inches|pouce|pouces|"|”|″|بوصة|بوصات)?/i);
   return m ? Number(m[1]) : null;
 }
 
@@ -896,13 +1107,27 @@ function buildDefaultClassAliases() {
   const canon = OFFERS_INDEX.classCanon;
   const out = {};
 
-  if (canon.tv) out[canon.tv] = ["tv", "tele", "television", "télé", "télévision", "تلفاز", "تلفزيون", "تليفيزيون", "google tv", "smart tv"];
-  if (canon.washing) out[canon.washing] = ["machine a laver","machine à laver","lave linge","washing machine","washer","غسالة","غسالة ملابس"];
-  if (canon.fridge) out[canon.fridge] = ["refrigerateur","réfrigérateur","refregirateur","frigo","congelateur","congélateur","ثلاجة"];
-  if (canon.waterHeater) out[canon.waterHeater] = ["chauffe eau","chauffe-eau","water heater","سخان","سخان الماء","chauffe"];
-  if (canon.heating) out[canon.heating] = ["chauffage","heater","radiateur","دفاية","سخان كهربائي"];
-  if (canon.airConditioner) out[canon.airConditioner] = ["clim","climatiseur","air conditioner","ac","مكيف","مكيف هواء"];
-  if (canon.dishwasher) out[canon.dishwasher] = ["lave vaisselle","lave-vaisselle","dishwasher","غسالة صحون","غسالة مواعن","غسالة المواعن","مواعن","صحون"];
+  if (canon.tv)
+    out[canon.tv] = ["tv", "tele", "television", "télé", "télévision", "تلفاز", "تلفزيون", "google tv", "smart tv"];
+  if (canon.washing)
+    out[canon.washing] = [
+      "machine a laver",
+      "machine à laver",
+      "lave linge",
+      "washing machine",
+      "washer",
+      "غسالة",
+      "غسالة ملابس",
+    ];
+  if (canon.fridge)
+    out[canon.fridge] = ["refrigerateur", "réfrigérateur", "refregirateur", "frigo", "congelateur", "congélateur", "ثلاجة"];
+  if (canon.waterHeater)
+    out[canon.waterHeater] = ["chauffe eau", "chauffe-eau", "water heater", "سخان", "سخان الماء", "chauffe"];
+  if (canon.heating) out[canon.heating] = ["chauffage", "heater", "radiateur", "دفاية", "سخان كهربائي"];
+  if (canon.airConditioner)
+    out[canon.airConditioner] = ["clim", "climatiseur", "air conditioner", "ac", "مكيف", "مكيف هواء"];
+  if (canon.dishwasher)
+    out[canon.dishwasher] = ["lave vaisselle", "lave-vaisselle", "dishwasher", "غسالة صحون", "غسالة المواعن", "غسالة مواعن", "مواعن", "صحون"];
 
   return out;
 }
@@ -963,7 +1188,7 @@ function formatOfferLine(brand, o) {
   const clsPart = o.class ? ` [${o.class}]` : "";
   const catPart = o.category ? ` [${o.category}]` : "";
   // No stock qty displayed.
-  return `• ${brand} ${o.model}${sizePart}${namePart}: ${o.price} dh${typePart}${clsPart || catPart ? "" : ""}${clsPart}${catPart}`;
+  return `• ${brand} ${o.model}${sizePart}${namePart}: ${o.price} dh${typePart}${clsPart}${catPart}`;
 }
 
 function listOffersForBrand(brand, { cls = null, size = null, limit = 5 } = {}) {
@@ -993,15 +1218,14 @@ function buildVisioBigOffersForGreeting(tvCanon) {
   function pickOne({ size, includeType, excludeType } = {}) {
     let arr = arr0;
     if (Number.isFinite(size) && size) arr = arr.filter((o) => Number(o.size || 0) === Number(size));
+
     const it = String(includeType || "").trim();
     const et = String(excludeType || "").trim();
     if (it) arr = arr.filter((o) => normMatch(o.type || "").includes(normMatch(it)));
     if (et) arr = arr.filter((o) => !normMatch(o.type || "").includes(normMatch(et)));
 
-    // Prefer TV class if known
     if (tvCanon) arr = arr.filter((o) => normMatch(o.class || "") === normMatch(tvCanon));
 
-    // Cheapest first
     arr = arr
       .filter((o) => Number.isFinite(Number(o.price)))
       .sort((a, b) => Number(a.price) - Number(b.price));
@@ -1015,15 +1239,13 @@ function buildVisioBigOffersForGreeting(tvCanon) {
     pickOne({ size: 43, includeType: "google" }),
   ].filter(Boolean);
 
-  // Fallback: any 3 VISIO TV offers
   if (picked.length < 3) {
-    const fallback = listOffersForBrand("VISIO", { cls: tvCanon, limit: 3, inStockOnly: true });
-    return fallback;
+    const tvLines = listOffersForBrand("VISIO", { cls: tvCanon, limit: 3 });
+    return tvLines.length ? tvLines : [];
   }
 
   return picked.map((o) => formatOfferLine("VISIO", o));
 }
-
 
 function listOffersForClass(cls, { limit = 5 } = {}) {
   const k = normMatch(cls);
@@ -1054,18 +1276,11 @@ function offersHeader(lang, ctx) {
     if (brand) return `خيارات ${brand}:`;
     return "خيارات:";
   }
-  if (lang === "dzl") {
-    if (brand && size) return `Options dyal ${brand} ${size}" :`;
-    if (brand && cls) return `Options dyal ${brand} (${cls}) :`;
-    if (cls) return `Options (${cls}) :`;
-    if (brand) return `Options dyal ${brand} :`;
-    return "Options:";
-  }
-  // en
-  if (brand && size) return `${brand} ${size}" options:`;
-  if (brand && cls) return `${brand} (${cls}) options:`;
-  if (cls) return `${cls} options:`;
-  if (brand) return `${brand} options:`;
+  // Default: Darija Latin
+  if (brand && size) return `Options dyal ${brand} ${size}" :`;
+  if (brand && cls) return `Options dyal ${brand} (${cls}) :`;
+  if (cls) return `Options (${cls}) :`;
+  if (brand) return `Options dyal ${brand} :`;
   return "Options:";
 }
 
@@ -1087,23 +1302,24 @@ function tryDirectOfferAnswer(userText, historyMsgs, lang) {
   const brand = detectBrand(text);
 
   const sizeOnly = extractSizeOnly(text);
+  const sizeAny = extractSizeAny(text);
+  const sizeVal = sizeOnly || sizeAny;
   let brand2 = brand;
   let cls2 = cls;
 
-  if (sizeOnly && !brand2) brand2 = lastMentionedBrand(historyMsgs);
+  if (sizeVal && !brand2) brand2 = lastMentionedBrand(historyMsgs);
 
-  // If user gives TV size, force TV class
   const tvCanon = OFFERS_INDEX.classCanon.tv;
   const lastCls = lastMentionedClass(historyMsgs);
 
-  if (sizeOnly) {
+  if (sizeVal) {
     if (tvCanon) cls2 = tvCanon;
     else if (!cls2) cls2 = lastCls || null;
   }
 
-  if (brand2 && sizeOnly) {
-    const lines = listOffersForBrand(brand2, { cls: cls2, size: sizeOnly, limit: 6 });
-    if (lines.length) return `${offersHeader(lang, { brand: brand2, size: sizeOnly })}\n${lines.join("\n\n")}`;
+  if (brand2 && sizeVal) {
+    const lines = listOffersForBrand(brand2, { cls: cls2, size: sizeVal, limit: 6 });
+    if (lines.length) return `${offersHeader(lang, { brand: brand2, size: sizeVal })}\n${lines.join("\n\n")}`;
     return null;
   }
 
@@ -1125,13 +1341,13 @@ function tryDirectOfferAnswer(userText, historyMsgs, lang) {
       if (tvLines.length) return `${offersHeader(lang, { brand, cls: tvCanon2 })}\n${tvLines.join("\n\n")}`;
     }
 
-    const classes = Array.from(new Set((OFFERS.offers[brand] || []).map((o) => String(o.class || "").trim()).filter(Boolean))).sort();
+    const classes = Array.from(
+      new Set((OFFERS.offers[brand] || []).map((o) => String(o.class || "").trim()).filter(Boolean))
+    ).sort();
     if (classes.length > 1) {
-      // keep answer short/formal
       if (lang === "fr") return `${brand}: quelle catégorie souhaitez-vous ?\n- ${classes.slice(0, 8).join("\n- ")}`;
       if (lang === "ar") return `${brand}: شنو الفئة اللي باغي؟\n- ${classes.slice(0, 8).join("\n- ")}`;
-      if (lang === "dzl") return `${brand}: achno catégorie bghiti?\n- ${classes.slice(0, 8).join("\n- ")}`;
-      return `${brand}: which category do you want?\n- ${classes.slice(0, 8).join("\n- ")}`;
+      return `${brand}: achno catégorie bghiti?\n- ${classes.slice(0, 8).join("\n- ")}`;
     }
 
     const lines = listOffersForBrand(brand, { limit: 6 });
@@ -1199,7 +1415,9 @@ You are DigiBot for Digitronics.ma.
 
 STRICT STYLE:
 - Be formal and only answer what the client asked.
-- Use the SAME language as the client's latest message: ${lang}.
+- Use ONLY one of these languages: Darija Latin, Arabic, or French.
+- Use ONLY this language for the full reply: ${lang} (dzl/ar/fr).
+- NEVER reply in English.
 - If a product is out of stock (stock <= 0), do NOT suggest it.
 - Do NOT mention stock quantity.
 - Mention delivery/payment/warranty ONLY if the client asks.
@@ -1337,7 +1555,7 @@ app.post("/wanotifier", async (req, res) => {
     pushMemory(key, "user", userTextRaw);
     const history = getMemory(key);
 
-    // If client sends contact info (phone/name/address) -> order link (formal)
+    // If client sends contact info (phone/name/address) -> ask to fill the form (no details collection)
     if (detectContactInfo(userTextRaw) && !isOrderStatusIntent(userTextRaw)) {
       const reply = t(lang, "thanksFillForm");
       pushMemory(key, "assistant", reply);
@@ -1345,11 +1563,10 @@ app.post("/wanotifier", async (req, res) => {
       return res.json({ ok: true, reply: shorten(reply, 520) });
     }
 
-    // 0) Greeting
+    // 0) Greeting (FORCED Darija Latin)
     if (isGreeting(userTextRaw) && userTextRaw.length <= 25) {
-      const lang = detectLang(userTextRaw) || "dzl";
       const visioLines = buildVisioBigOffersForGreeting(OFFERS_INDEX.classCanon.tv || null);
-      const reply = t(lang, "greeting", { visioLines });
+      const reply = t("dzl", "greeting", { visioLines });
       pushMemory(key, "assistant", reply);
       resetStrikes(key);
       return res.json({ ok: true, reply: shorten(reply, 520) });
@@ -1373,14 +1590,28 @@ app.post("/wanotifier", async (req, res) => {
 
     // Delivery/payment/warranty only if asked (explicit)
     if (asksAboutDeliveryPaymentWarranty(userTextRaw)) {
-      // Keep it short and only what asked
       const s = normMatch(userTextRaw);
       const parts = [];
-      if (s.includes("delivery") || s.includes("livraison") || s.includes("توصيل") || s.includes("التوصيل")) parts.push(OFFERS.rules.delivery);
-      if (s.includes("payment") || s.includes("paiement") || s.includes("الدفع") || s.includes("cash") || s.includes("virement") || s.includes("bank") || s.includes("rib"))
+
+      if (s.includes("delivery") || s.includes("livraison") || s.includes("توصيل") || s.includes("التوصيل"))
+        parts.push(OFFERS.rules.delivery);
+
+      if (
+        s.includes("payment") ||
+        s.includes("paiement") ||
+        s.includes("الدفع") ||
+        s.includes("cash") ||
+        s.includes("virement") ||
+        s.includes("bank") ||
+        s.includes("rib")
+      )
         parts.push(OFFERS.rules.payment);
-      if (s.includes("warranty") || s.includes("garantie") || s.includes("الضمان") || s.includes("ضمان")) parts.push(OFFERS.rules.warranty);
-      if (s.includes("wall mount") || s.includes("support") || s.includes("حامل") || s.includes("براكي")) parts.push(OFFERS.rules.wall_mount);
+
+      if (s.includes("warranty") || s.includes("garantie") || s.includes("الضمان") || s.includes("ضمان"))
+        parts.push(OFFERS.rules.warranty);
+
+      if (s.includes("wall mount") || s.includes("support") || s.includes("حامل") || s.includes("براكي"))
+        parts.push(OFFERS.rules.wall_mount);
 
       const reply = parts.length ? parts.join("\n") : t(lang, "needDetails");
       pushMemory(key, "assistant", reply);
@@ -1390,7 +1621,7 @@ app.post("/wanotifier", async (req, res) => {
 
     // 2) Buy intent -> send order form
     if (isBuyIntent(userTextRaw)) {
-      const reply = t(lang, "thanksFillForm");
+      const reply = t(lang, "orderForm");
       pushMemory(key, "assistant", reply);
       resetStrikes(key);
       return res.json({ ok: true, reply: shorten(reply, 520) });
@@ -1440,7 +1671,7 @@ app.post("/wanotifier", async (req, res) => {
     }
 
     // 4) Size-only merge (e.g., "tcl" then "32")
-    const size = extractSizeOnly(userTextRaw);
+    const size = extractSizeOnly(userTextRaw) || extractSizeAny(userTextRaw);
     if (size) {
       const lastB = lastMentionedBrand(history);
       if (lastB) pushMemory(key, "user", `${lastB} ${size} inch`);
@@ -1484,26 +1715,30 @@ app.post("/wanotifier", async (req, res) => {
     pushMemory(key, "assistant", reply);
 
     const ms = Date.now() - t0;
-    console.log(JSON.stringify({
-      level: "info",
-      msg: "wanotifier_ok",
-      reqId,
-      key: CFG.logDebug ? key : undefined,
-      phone: CFG.logDebug ? phone : undefined,
-      latencyMs: ms,
-      replyChars: reply.length,
-    }));
+    console.log(
+      JSON.stringify({
+        level: "info",
+        msg: "wanotifier_ok",
+        reqId,
+        key: CFG.logDebug ? key : undefined,
+        phone: CFG.logDebug ? phone : undefined,
+        latencyMs: ms,
+        replyChars: reply.length,
+      })
+    );
 
     return res.json({ ok: true, reply });
   } catch (err) {
     const ms = Date.now() - t0;
-    console.error(JSON.stringify({
-      level: "error",
-      msg: "wanotifier_error",
-      reqId,
-      latencyMs: ms,
-      error: err?.message || String(err),
-    }));
+    console.error(
+      JSON.stringify({
+        level: "error",
+        msg: "wanotifier_error",
+        reqId,
+        latencyMs: ms,
+        error: err?.message || String(err),
+      })
+    );
     return res.status(500).json({ ok: false, error: "Server error" });
   }
 });
