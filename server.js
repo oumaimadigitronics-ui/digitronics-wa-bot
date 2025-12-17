@@ -1643,11 +1643,6 @@ function tryDirectOfferAnswer(userText, historyMsgs, lang, key) {
       new Set((OFFERS.offers[brand] || []).map((o) => String(o.category || "").trim()).filter(Boolean))
     ).sort();
 
-    if (categories.length > 1) {
-      if (lang === "fr") return `${brand}: quelle catégorie souhaitez-vous ?\n- ${categories.slice(0, 8).join("\n- ")}`;
-      if (lang === "ar") return `${brand}: شنو الفئة اللي باغي؟\n- ${categories.slice(0, 8).join("\n- ")}`;
-      return `${brand}: achno catégorie bghiti?\n- ${categories.slice(0, 8).join("\n- ")}`;
-    }
 
     const lines = listOffersForBrand(brand, { limit: 6 });
     if (lines.length) {
@@ -1796,9 +1791,19 @@ async function digibotLLMReply(userText, historyMsgs, lang, key) {
 
   const r = await callOpenAIChat(messages, 380);
   let reply = r?.choices?.[0]?.message?.content?.trim() || "";
-  if (!reply) reply = t(lang, "needDetails");
-  return reply;
+if (!reply) {
+  // fallback: show default offers instead of asking questions
+  const brand = detectBrand(userTextRaw) || "VISIO";
+  const size = detectSize(userTextRaw) || 32;
+
+  const lines = listOffersForBrand(brand, { size, limit: 6 });
+  if (lines.length) {
+    reply = `${offersHeader(lang, { brand, size })}\n${lines.join("\n\n")}`;
+  } else {
+    reply = t(lang, "noResults");
+  }
 }
+
 
 // =====================
 // Order status flow state
