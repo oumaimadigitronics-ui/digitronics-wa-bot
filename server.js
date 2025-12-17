@@ -234,20 +234,24 @@ function t(lang, key, vars = {}) {
         "Smah lia, ma nqdrch nfhem l-content mn image/voice. 3afak kteb l-message b text باش n3awnk.",
       typeYourMessage: "3afak kteb su2al dyalk.",
         greeting: (vars2) => {
-        const lines = vars2.visioLines || [];
-        const offersPart = lines.length
-          ? `Big offers f DAIKO:\n${lines.join("\n")}`
-          : "Kaynin big offers f DAIKO.";
+  const lines = vars2.visioLines || [];
+  const offersPart = lines.length
+    ? `Big offers f DAIKO:\n${lines.join("\n")}`
+    : "Kaynin big offers f DAIKO.";
 
-        return `Ana Digitronics AI Bot.
-      Ghadi n3awnk b as2ila l-basita, ila ma qdrtch ghadi ykml m3ak agent.
-      L3nwan: ${COMPANY.address}
-      ${RULES_I18N.dzl.payment}
-      ${RULES_I18N.dzl.delivery}
-      Commande: ${ORDER_FORM_URL}
+  return `Salam 👋 marhba bik f Digitronics.
 
-      ${offersPart}`.trim();
-      },
+Ana Digitronics AI Bot.
+Ghadi n3awnk b as2ila l-basita, ila ma qdrtch ghadi ykml m3ak agent.
+
+📍 L3nwan: ${COMPANY.address}
+💳 ${RULES_I18N.dzl.payment}
+🚚 ${RULES_I18N.dzl.delivery}
+📝 Commande: ${ORDER_FORM_URL}
+
+${offersPart}`.trim();
+},
+
 
       address: `L3nwan dyalna: ${COMPANY.address}`,
       orderForm: `Tfdal/ي: 3mmer had formulaire bach tdir commande: ${ORDER_FORM_URL}`,
@@ -1394,9 +1398,10 @@ function lastMentionedCategory(historyMsgs = []) {
 // =====================
 function formatOfferLineGreeting(brand, o) {
   const sizePart = o.size ? ` ${o.size}"` : "";
-  const typePart = o.type ? ` (${o.type})` : "";
+  const typePart = o.type ? ` — ${o.type}` : "";
   return `• ${brand} ${o.model}${sizePart}: ${o.price} dh${typePart}`;
 }
+
 
 
 
@@ -1444,7 +1449,6 @@ function buildBigOffersForGreeting(brand, tvCanon) {
       );
       if (!o) continue;
 
-      if (tvCanon && normMatch(o.class || "") !== normMatch(tvCanon)) continue;
 
       lines.push(formatOfferLineGreeting(BRAND, o));
     }
@@ -1907,7 +1911,7 @@ if (userTextRaw) {
       const reply = t(lang, "thanksFillForm");
       pushMemory(key, "assistant", reply);
       resetStrikes(key);
-      return res.json({ ok: true, reply: shorten(reply, 1700) });
+      return res.json({ ok: true, reply: shorten(reply, 900) });
     }
 
     // 0) Greeting (FORCED Darija Latin)
