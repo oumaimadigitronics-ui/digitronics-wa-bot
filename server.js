@@ -1901,8 +1901,9 @@ if (userTextRaw) {
       return res.json({ ok: true, reply: shorten(reply, 420) });
     }
 
-    // Photo/picture/image request -> respond with product link if resolvable
-    if (isPhotoRequestIntent(userTextRaw)) {
+// Photo/picture/image request (ONLY IF NOT IN SUPPORT MODE)
+if (isPhotoRequestIntent(userTextRaw) && !supportModeStore.has(key)) {
+
       const resolved = resolveOfferForPhoto(userTextRaw, history, key);
       if (!resolved) {
         const reply = t(lang, "askBrandModelSize");
@@ -2044,9 +2045,7 @@ if (wasInSupportMode && shoppingSignal) {
   supportModeStore.delete(key);
 }
 
-
-
-    // If we are in support mode, do NOT suggest offers (avoid sales responses)
+// If we are in support mode, do NOT suggest offers (avoid sales responses)
 if (supportModeStore.has(key)) {
   const reply =
     lang === "ar"
