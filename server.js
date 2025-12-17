@@ -1383,15 +1383,11 @@ function lastMentionedCategory(historyMsgs = []) {
 // =====================
 // Deterministic offer responses
 // =====================
-function formatOfferLine(brand, o) {
+function formatOfferLineGreeting(brand, o) {
   const sizePart = o.size ? ` ${o.size}"` : "";
-  const namePart = o.name ? ` — ${o.name}` : "";
-  const typePart = o.type ? ` (${o.type})` : "";
-  const clsPart = o.class ? ` [${o.class}]` : "";
-  const catPart = o.category ? ` [${o.category}]` : "";
-  // No stock qty displayed.
-  return `• ${brand} ${o.model}${sizePart}${namePart}: ${o.price} dh${typePart}${clsPart}${catPart}`;
+  return `• ${brand} ${o.model}${sizePart}: ${o.price} dh`;
 }
+
 
 function listOffersForBrand(brand, { cls = null, category = null, size = null, limit = 5 } = {}) {
   const arr0 = OFFERS.offers[brand] || [];
@@ -1439,7 +1435,7 @@ function buildBigOffersForGreeting(brand, tvCanon) {
 
       if (tvCanon && normMatch(o.class || "") !== normMatch(tvCanon)) continue;
 
-      lines.push(formatOfferLine(BRAND, o));
+      lines.push(formatOfferLineGreeting(BRAND, o));
     }
 
     return lines;
@@ -1900,7 +1896,7 @@ if (userTextRaw) {
       const reply = t(lang, "thanksFillForm");
       pushMemory(key, "assistant", reply);
       resetStrikes(key);
-      return res.json({ ok: true, reply: shorten(reply, 520) });
+      return res.json({ ok: true, reply: shorten(reply, 900) });
     }
 
     // 0) Greeting (FORCED Darija Latin)
