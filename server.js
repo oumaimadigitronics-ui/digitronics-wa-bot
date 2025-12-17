@@ -231,90 +231,92 @@ function detectLang(text) {
 
 function t(lang, key, vars = {}) {
   const L = lang || "dzl";
+
   const dict = {
     dzl: {
       askTextInsteadMedia:
         "Smah lia, ma nqdrch nfhem l-content mn image/voice. 3afak kteb l-message b text باش n3awnk.",
       typeYourMessage: "3afak kteb su2al dyalk.",
 
-      greeting: (v) => {
-        const lines = (v && v.visioLines) || [];
-        const offersPart = lines.length
-          ? "Big offers f DAIKO:\n" + lines.join("\n")
+      greeting: ({ visioLines = [] } = {}) => {
+        const offersPart = visioLines.length
+          ? `Big offers f DAIKO:\n${visioLines.join("\n")}`
           : "Kaynin big offers f DAIKO.";
 
-        return (
-          "Wa 3alaykom salam 👋 marhba bik f Digitronics.\n\n" +
-          "Ana Digitronics AI Bot.\n" +
-          "Ghadi n3awnk b as2ila l-basita, ila ma qdrtch ghadi ykml m3ak agent.\n\n" +
-          "📍 L3nwan: " + COMPANY.address + "\n" +
-          "💳 " + RULES_I18N.dzl.payment + "\n" +
-          "🚚 " + RULES_I18N.dzl.delivery + "\n\n" +
-          offersPart
-        ).trim();
+        return `Wa 3alaykom salam 👋 marhba bik f Digitronics.
+
+Ana Digitronics AI Bot.
+Ghadi n3awnk b as2ila l-basita, ila ma qdrtch ghadi ykml m3ak agent.
+
+📍 L3nwan: ${COMPANY.address}
+💳 ${RULES_I18N.dzl.payment}
+🚚 ${RULES_I18N.dzl.delivery}
+
+${offersPart}`.trim();
       },
 
-      address: "L3nwan dyalna: " + COMPANY.address,
-      orderForm: "Tfdal/ي: 3mmer had formulaire bach tdir commande: " + ORDER_FORM_URL,
-      thanksFillForm: "Shokran 3la lma3lomat. 3afak 3mmer had formulaire bach tdir commande: " + ORDER_FORM_URL,
+      address: `L3nwan dyalna: ${COMPANY.address}`,
+      orderForm: `Tfdal/ي: 3mmer had formulaire bach tdir commande: ${ORDER_FORM_URL}`,
+      thanksFillForm: `Shokran 3la lma3lomat. 3afak 3mmer had formulaire bach tdir commande: ${ORDER_FORM_URL}`,
       askOrderNo: "3afak sft رقم الطلب باش n9dro n7ssbo.",
       gotOrderNo: "Shokran. Tsslna b رقم الطلب. Ghadi n3yto lik قريب.",
       callSoon: "Mzyan. Ghadi n3yto lik قريب.",
       callSoonNeedOrder: "Mzyan. Ghadi n3yto lik قريب. Ila 3ndk رقم الطلب sftih lina 3afak.",
-      bankTransferHow:
-        'Ila bghiti tخلص b virement: mlli tdir commande, zid note f formulaire: "paiement par virement bancaire".\n' +
-        "Formulaire: " + ORDER_FORM_URL,
+      bankTransferHow: `Ila bghiti tخلص b virement: mlli tdir commande, zid note f formulaire: "paiement par virement bancaire".\nFormulaire: ${ORDER_FORM_URL}`,
       needDetails: "3afak 3tini brand/model/size wla catégorie bach n3tik l-offres.",
-      cannot3: "Ma qdrtch n3tik jawab bd9a daba. T9dr t3yt lina: " + CONTACTS.calls.join(" / ") + ".",
-      photoLink: (v) => "Hna link dyal l-produit: " + (v && v.link ? v.link : ""),
+      cannot3: `Ma qdrtch n3tik jawab bd9a daba. T9dr t3yt lina: ${CONTACTS.calls.join(" / ")}.`,
+      photoLink: ({ link }) => `Hna link dyal l-produit: ${link}`,
       photoNoLink: "Had l-produit ma 3ndnach link dyal tswira daba. 3tini model wla brand+size.",
       askBrandModelSize: "3afak 3tini brand wla model wla size bach n3tik link/option.",
     },
 
-    // (Keep fr/ar similarly; convert any `${...}` to concatenation)
-  };
-
-  const val = (dict[L] && dict[L][key]) ?? dict.dzl[key];
-  return typeof val === "function" ? val(vars) : String(val || "");
-}
     fr: {
       askTextInsteadMedia: "Merci. Pour que je comprenne, envoyez un message écrit (sans audio/image).",
       typeYourMessage: "Merci d’écrire votre demande.",
-      greeting: (vars2) => {
-        const visioLines = vars2.visioLines || [];
+
+      greeting: ({ visioLines = [] } = {}) => {
         const offersPart = visioLines.length
           ? `Grandes offres DAIKO:\n${visioLines.join("\n\n")}\n\n`
           : "Grandes offres DAIKO disponibles.\n\n";
-        return `${offersPart}Bonjour, je suis le bot IA de Digitronics. Je réponds aux questions simples; si besoin, un agent prendra la suite.\nAdresse: ${COMPANY.address}\n${RULES_I18N.fr.payment}\n${RULES_I18N.fr.delivery}\nPour commander: ${ORDER_FORM_URL}`;
+
+        return `${offersPart}Bonjour, je suis le bot IA de Digitronics. Je réponds aux questions simples; si besoin, un agent prendra la suite.
+Adresse: ${COMPANY.address}
+${RULES_I18N.fr.payment}
+${RULES_I18N.fr.delivery}
+Pour commander: ${ORDER_FORM_URL}`;
       },
+
       address: `Notre adresse: ${COMPANY.address}`,
       orderForm: `Veuillez remplir ce formulaire pour commander: ${ORDER_FORM_URL}`,
       thanksFillForm: `Merci pour les informations. Veuillez remplir ce formulaire pour passer la commande : ${ORDER_FORM_URL}`,
       askOrderNo: "Merci d’envoyer votre numéro de commande pour vérification.",
       gotOrderNo: "Merci. Nous avons bien reçu votre numéro de commande. Nous vous appellerons bientôt.",
       callSoon: "D’accord. Nous vous appellerons bientôt.",
-      callSoonNeedOrder:
-        "D’accord. Nous vous appellerons bientôt. Si vous avez un numéro de commande, envoyez-le.",
+      callSoonNeedOrder: "D’accord. Nous vous appellerons bientôt. Si vous avez un numéro de commande, envoyez-le.",
       bankTransferHow: `Paiement par virement: lors de la commande, ajoutez une note dans le formulaire: "paiement par virement bancaire".\nFormulaire: ${ORDER_FORM_URL}`,
       needDetails: "Merci de préciser la marque/le modèle/la taille ou la catégorie.",
-      cannot3: `Je ne peux pas répondre avec certitude pour le moment. Vous pouvez appeler: ${CONTACTS.calls.join(
-        " / "
-      )}.`,
-      photoLink: (v) => `Voici le lien du produit: ${v.link}`,
+      cannot3: `Je ne peux pas répondre avec certitude pour le moment. Vous pouvez appeler: ${CONTACTS.calls.join(" / ")}.`,
+      photoLink: ({ link }) => `Voici le lien du produit: ${link}`,
       photoNoLink: "Je n’ai pas de lien photo pour ce produit. Merci de préciser le modèle ou marque+taille.",
       askBrandModelSize: "Merci de préciser la marque ou le modèle ou la taille.",
     },
+
     ar: {
       askTextInsteadMedia: "شكراً. من فضلك ارسل رسالة مكتوبة (بدون صوت/صورة) باش نقدر نفهمك.",
       typeYourMessage: "من فضلك اكتب رسالتك.",
-      // Greeting is forced Darija Latin elsewhere; keep fallback text:
-      greeting: (vars2) => {
-        const visioLines = vars2.visioLines || [];
+
+      greeting: ({ visioLines = [] } = {}) => {
         const offersPart = visioLines.length
           ? `عروض كبيرة من VISIO:\n${visioLines.join("\n\n")}\n\n`
           : "عروض كبيرة من VISIO متوفرة.\n\n";
-        return `${offersPart}مرحباً، أنا بوت ذكاء اصطناعي من Digitronics. أجيب عن الأسئلة البسيطة، وإذا لم أستطع فسيكمل معك أحد الفريق.\nالعنوان: ${COMPANY.address}\n${RULES_I18N.ar.payment}\n${RULES_I18N.ar.delivery}\nللطلب: ${ORDER_FORM_URL}`;
+
+        return `${offersPart}مرحباً، أنا بوت ذكاء اصطناعي من Digitronics. أجيب عن الأسئلة البسيطة، وإذا لم أستطع فسيكمل معك أحد الفريق.
+العنوان: ${COMPANY.address}
+${RULES_I18N.ar.payment}
+${RULES_I18N.ar.delivery}
+للطلب: ${ORDER_FORM_URL}`;
       },
+
       address: `عنواننا: ${COMPANY.address}`,
       orderForm: `من فضلك عبّئ هذا الفورم للطلب: ${ORDER_FORM_URL}`,
       thanksFillForm: `شكرًا على المعلومات. من فضلك املأ هذه الاستمارة لإتمام الطلب: ${ORDER_FORM_URL}`,
@@ -325,16 +327,17 @@ function t(lang, key, vars = {}) {
       bankTransferHow: `باش تخلص بالتحويل البنكي: منين دير الطلب زيد ملاحظة فالفورم: "الدفع بتحويل بنكي".\nالفورم: ${ORDER_FORM_URL}`,
       needDetails: "من فضلك عطيني الماركة/الموديل/الحجم أو الفئة باش نعاونك.",
       cannot3: `ماقدرتش نعطيك جواب مؤكد دابا. تقدر تعيط لينا: ${CONTACTS.calls.join(" / ")}.`,
-      photoLink: (v) => `هاهو رابط المنتج: ${v.link}`,
+      photoLink: ({ link }) => `هاهو رابط المنتج: ${link}`,
       photoNoLink: "ما كاينش رابط صورة لهاد المنتج دابا. عافاك عطيني الموديل ولا الماركة+الحجم.",
       askBrandModelSize: "من فضلك عطيني الماركة ولا الموديل ولا الحجم.",
     },
   };
 
-  const val = dict[L]?.[key] ?? dict.dzl[key];
+  const val = dict[L]?.[key] ?? dict.dzl?.[key];
   if (typeof val === "function") return val(vars);
   return String(val || "");
 }
+
 
 function detectContactInfo(text) {
   const s0 = arabicIndicToAsciiDigits(String(text || ""));
