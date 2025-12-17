@@ -214,7 +214,7 @@ function t(lang, key, vars = {}) {
         const visioLines = vars2.visioLines || [];
         const offersPart = visioLines.length
           ? `Big offers f DAIKO:\n${visioLines.join("\n\n")}\n\n`
-          : "Kaynin big offers f VISIO.\n\n";
+          : "Kaynin big offers f DAIKO.\n\n";
         return `${offersPart}Ana Digitronics AI Bot.\nGhadi n3awnk b as2ila l-basita, ila ma qdrtch ghadi ykml m3ak agent.\nL3nwan: ${COMPANY.address}\n${RULES_I18N.dzl.payment}\n${RULES_I18N.dzl.delivery}\nCommande: ${ORDER_FORM_URL}`;
       },
       address: `L3nwan dyalna: ${COMPANY.address}`,
@@ -780,7 +780,7 @@ let OFFERS = {
   rules: {
     brands: {
       VISIO: "Google TV except model 32VB23E which is LED TV",
-      DAIKO: "Google TV except 2 YEARS WARRANITY",
+      DAIKO: "Google TV models (internal note).",
       TCL: "QLED",
       MORSAT: "Android TV",
     },
@@ -1607,7 +1607,7 @@ function tryDirectOfferAnswer(userText, historyMsgs, lang, key) {
   const justBrand = brand && s.replace(/\s+/g, "") === normMatch(brand).replace(/\s+/g, "");
   if (brand && (justBrand || s.length <= 8)) {
     const tvCanon2 = OFFERS_INDEX.classCanon.tv;
-    if ((brand === "VISIO" || brand === "TCL") && tvCanon2) {
+  if ((brand === "VISIO" || brand === "TCL" || brand === "DAIKO") && tvCanon2) {
       const tvLines = listOffersForBrand(brand, { cls: tvCanon2, limit: 6 });
       if (tvLines.length) {
         setCtx(key, { lastBrand: brand, lastClass: tvCanon2 || undefined });
