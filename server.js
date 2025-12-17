@@ -1417,51 +1417,6 @@ function listOffersForBrand(brand, { cls = null, category = null, size = null, l
   return arr.map((o) => formatOfferLine(brand, o));
 }
 
-function buildBigOffersForGreeting(brand, tvCanon) {
-  const BRAND = String(brand || "").trim().toUpperCase();
-  const wanted = BRAND === "DAIKO" ? GREETING_DAIKO_MODELS : [];
-
-  const arr0 = (OFFERS.offers[BRAND] || []).filter((o) => Number(o.stock || 0) > 0);
-
-  // If brand is DAIKO and we have a fixed list => return only those models (in that order)
-  if (wanted.length) {
-    const lines = [];
-
-    for (const model of wanted) {
-      const o = arr0.find((x) => normMatch(x.model) === normMatch(model));
-      if (!o) continue;
-
-      // Optional: ensure it’s TV class if you want greeting to be TV-only
-      if (tvCanon && normMatch(o.class || "") !== normMatch(tvCanon)) continue;
-
-      lines.push(formatOfferLine(BRAND, o));
-    }
-
-    return lines; // may be 0..N depending on stock and availability
-  }
-
-  // Fallback behavior for other brands (keep your old logic if needed)
-  const tvLines = listOffersForBrand(BRAND, { cls: tvCanon, limit: 3 });
-  return tvLines.length ? tvLines : [];
-}
-
-  // Keep same “desired” sizes/types logic (optional)
-  const picked = [
-    pickOne({ size: 32, includeType: "google" }),
-    pickOne({ size: 43, includeType: "google" }),
-    pickOne({ size: 50, includeType: "google" }),
-
-  ].filter(Boolean);
-
-
-  if (picked.length < 3) {
-    const tvLines = listOffersForBrand(BRAND, { cls: tvCanon, limit: 3 });
-    return tvLines.length ? tvLines : [];
-  }
-
-  return picked.map((o) => formatOfferLine(BRAND, o));
-}
-
 function listOffersForClass(cls, { limit = 5 } = {}) {
   const k = normMatch(cls);
   const items0 = OFFERS_INDEX.classToOffers.get(k) || [];
