@@ -112,7 +112,7 @@ const RULES_I18N = {
     wall_mount: "TV kayji m3ah support/bracket free.",
   },
   fr: {
-    delivery: "Livraison: 1 à 7 jours.",
+    delivery: "Livraison : entre 1 et 7 jours selon la ville.",
     payment: "Paiement: cash à la livraison ou virement (note à ajouter dans le formulaire).",
     warranty: "Garantie: 1 an.",
     wall_mount: "Support mural gratuit avec les TV.",
@@ -138,6 +138,21 @@ function warrantyTextForBrand(lang, brand, cls) {
 
   // default warranty (1 year)
   return (RULES_I18N[L] || RULES_I18N.dzl).warranty;
+}
+
+// =====================
+// DAIKO GREETING EXTRAS
+// =====================
+const DAIKO_GREETING_EXTRAS = {
+  dzl:
+    "✅ TV DAIKO: Garantie 2 ans.\n" +
+    "✅ Kayjiw b 2 télécommandes.\n" +
+    "✅ Taman kaychmel support/bracket mural.\n" +
+    "✅ Livraison gratuite.",
+};
+
+function daikoGreetingExtras() {
+  return DAIKO_GREETING_EXTRAS.dzl;
 }
 
 // =====================
@@ -238,7 +253,7 @@ function t(lang, key, vars = {}) {
         "Smah lia, ma nqdrch nfhem l-content mn image/voice. 3afak kteb l-message b text باش n3awnk.",
       typeYourMessage: "3afak kteb su2al dyalk.",
 
-      greeting: ({ visioLines = [] } = {}) => {
+      greeting: ({ visioLines = [], extraLines = "" } = {}) => {
         const offersPart = visioLines.length
           ? `Big offers f DAIKO:\n${visioLines.join("\n")}`
           : "Kaynin big offers f DAIKO.";
@@ -252,8 +267,10 @@ Ghadi n3awnk b as2ila l-basita, ila ma qdrtch ghadi ykml m3ak agent.
 💳 ${RULES_I18N.dzl.payment}
 🚚 ${RULES_I18N.dzl.delivery}
 
-${offersPart}`.trim();
-      },
+${offersPart}
+
+${extraLines}`.trim();
+},
 
       address: `L3nwan dyalna: ${COMPANY.address}`,
       orderForm: `Tfdal/ي: 3mmer had formulaire bach tdir commande: ${ORDER_FORM_URL}`,
