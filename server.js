@@ -11,7 +11,7 @@
 // - Optional learning: logs fallback interactions + suggestions endpoint
 //
 // Behavior customizations
-// - Greeting is ALWAYS Darija Latin (short + polite) and mentions VISIO big offers + company/payment/delivery + order link.
+// - Greeting is ALWAYS Darija Latin (short + polite) and mentions DAIKO big offers + company/payment/delivery + order link.
 // - For every other reply: answer in the language used by the client in the latest message (Darija Latin / Arabic / French only).
 // - Do NOT show stock quantity; do NOT offer out-of-stock products (stock <= 0 filtered out).
 // - Mention delivery/payment/warranty ONLY if the client asks (except in greeting).
@@ -759,6 +759,13 @@ setInterval(() => {
     for (const [k, v] of supportModeStore.entries()) {
     if (!v?.at || now - v.at > SUPPORT_TTL_MS) supportModeStore.delete(k);
   }
+  for (const [k, v] of pendingOrderStore.entries()) {
+  if (!v?.at || now - v.at > PENDING_TTL_MS) pendingOrderStore.delete(k);
+}
+
+for (const [k, v] of lastOrderAckStore.entries()) {
+  if (!v?.at || now - v.at > PENDING_TTL_MS) lastOrderAckStore.delete(k);
+}
 
   flushMemoryToDiskSoon();
 }, 10 * 60 * 1000);
@@ -1161,7 +1168,7 @@ function isSupportIntent(text) {
 
 function isOrderStatusIntent(text) {
   const s = normMatch(text);
-  const hard = ["commande", "order", "tracking", "suivi", "livraison", "delivery", "talab", "tlb", "statut", "status"];
+const hard = ["commande", "order", "tracking", "suivi", "talab", "tlb", "statut", "status"];
   const problem = [
     "pas recu",
     "late",
@@ -1303,7 +1310,7 @@ function buildDefaultClassAliases() {
   const out = {};
 
   if (canon.tv)
-    out[canon.tv] = ["tv", "tele", "television", "télé", "télévision", "تلفاز", "تلفزيون", "google tv", "smart tv"];
+      out[canon.tv] = ["tv", "television", "télévision", "تلفاز", "تلفزيون", "google tv", "smart tv"];
   if (canon.washing)
     out[canon.washing] = [
       "machine a laver",
@@ -2054,8 +2061,31 @@ if (isBuyIntent(userTextRaw)) {
 }
 
     // 3) Pending order flow (status)
-const pending = pendingOrderStore.get(key);
+let pending = pendingOrderStore.get(key);
 const orderNo = extractOrderNumber(userTextRaw);
+
+if (pending?.waiting && !orderNo) {
+  const exitPending =
+    isBuyIntent(userTextRaw) ||
+    isLocationIntent(userTextRaw) ||
+    isBankTransferIntent(userTextRaw) ||
+    isPhotoRequestIntent(userTextRaw) ||
+    detectContactInfo(userTextRaw) ||
+    isSupportIntent(userTextRaw) ||
+    asksAboutDeliveryPaymentWarranty(userTextRaw) ||
+    detectBrand(userTextRaw) ||
+    detectModel(userTextRaw) ||
+    extractSizeOnly(userTextRaw) ||
+    extractSizeAny(userTextRaw) ||
+    detectClass(userTextRaw) ||
+    detectCategory(userTextRaw);
+
+  if (exitPending) {
+    pendingOrderStore.delete(key);
+    pending = null; // ✅ important: stop the block below
+  }
+}
+
 
 if (pending?.waiting) {
   if (orderNo) {
@@ -2132,21 +2162,6 @@ const shoppingSignal =
 if (wasInSupportMode && shoppingSignal) {
   supportModeStore.delete(key);
 }
-
-// If we are in support mode, do NOT suggest offers (avoid sales responses)
-if (supportModeStore.has(key)) {
-  const reply =
-    lang === "ar"
-      ? "تمام. شنو موديل الجهاز؟ وشنو المشكل بالضبط: ما كيشعلش، ما كايناش الصورة، ما كايناش الصوت، ولا كايبان كود خطأ؟"
-      : lang === "fr"
-      ? "D’accord. Quel est le modèle de l’appareil et quel est le problème exact (ne s’allume pas, pas d’image, pas de son, code erreur) ?"
-      : "Mzyan. 3afak 3tini modèle dyal l-appareil w achno l-mochkil bddabt (ma kaych3elch / ma kaynach tswira / ma kaynach s-sout / code d’erreur).";
-
-  pushMemory(key, "assistant", reply);
-  resetStrikes(key);
-  return res.json({ ok: true, reply: shorten(reply, 520) });
-}
-
 
     // 4) Deterministic offer answer first
     const direct = tryDirectOfferAnswer(userTextRaw, history, lang, key);
