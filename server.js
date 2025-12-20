@@ -2409,17 +2409,16 @@ pushMemory(key, "user", userTextRaw);
     // 0) Greeting (FORCED Darija Latin)
 if (isGreeting(userTextRaw) && userTextRaw.length <= 25) {
   const bigLines = buildBigOffersForGreeting("DAIKO", OFFERS_INDEX.classCanon.tv || null);
-const reply = t("dzl", "greeting", {
-  visioLines: bigLines,
-extraLines:
-extraLines:
-  "✅ TV DAIKO: Daman 2 snin.\n" +
-  "✅ Kayjiw b joj télécommandes.\n" +
-  "✅ Taman kaychmel support/bracket mural.\n" +
-  "✅ Livraison free.",
 
+  const reply = t("dzl", "greeting", {
+    visioLines: bigLines,
+    extraLines:
+      "✅ TV DAIKO: Garantie 2 ans.\n" +
+      "✅ Kayjiw b 2 télécommandes.\n" +
+      "✅ Taman kaychmel support/bracket mural.\n" +
+      "✅ Livraison gratuite.",
+  });
 
-}); // keep var name to avoid refactor
   pushMemory(key, "assistant", reply);
   resetStrikes(key);
   return res.json({ ok: true, reply: shorten(reply, 1000) });
