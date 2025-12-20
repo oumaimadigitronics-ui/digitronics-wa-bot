@@ -1620,6 +1620,36 @@ function benefitForOffer(lang, offer) {
   return isSmart ? "Smart/Google TV: apps بزاف وكتخدم بسلاسة." : "عملية ومزيانة لTV/YouTube.";
 }
 
+function listOffersForSizeAcrossBrands(size, { cls = null, limit = 3 } = {}) {
+  const out = [];
+
+  for (const b of OFFERS_INDEX.brands) {
+    let arr = (OFFERS.offers[b] || []).filter((o) => Number(o.stock || 0) > 0);
+
+    if (cls) arr = arr.filter((o) => normMatch(o.class || "") === normMatch(cls));
+    if (Number(size)) arr = arr.filter((o) => Number(o.size || 0) === Number(size));
+
+    // pick cheapest per brand
+    const best = arr
+      .filter((o) => Number.isFinite(Number(o.price)))
+      .sort((a, b) => Number(a.price) - Number(b.price))[0];
+
+    if (best) out.push({ brand: b, offer: best });
+  }
+
+  // sort globally by price
+  out.sort((a, b) => Number(a.offer.price) - Number(b.offer.price));
+
+  // optional: prefer focus brand first without hiding others
+  if (hasFocusBrand() && FOCUS.mode === "preferred") {
+    const focus = out.filter((x) => x.brand === FOCUS.brand);
+    const rest = out.filter((x) => x.brand !== FOCUS.brand);
+    return [...focus, ...rest].slice(0, limit);
+  }
+
+  return out.slice(0, limit);
+}
+
 function formatSalesOfferLines(lang, lines = [], offers = []) {
   const L = lang || "dzl";
   if (!Array.isArray(lines) || !lines.length) return "";
@@ -1833,10 +1863,26 @@ function tryDirectOfferAnswer(userText, historyMsgs, lang, key) {
     const ctxBrand = ctx.lastBrand || lastMentionedBrand(historyMsgs) || null;
     brand2 = ctxBrand ? ctxBrand : FOCUS.brand;
   }
+// Size-only (no brand mentioned, no brand in context) => show across brands
+const ctxBrand0 = ctx.lastBrand || lastMentionedBrand(historyMsgs) || null;
+if (sizeVal && !brand && !ctxBrand0) {
+  const tvCanon = OFFERS_INDEX.classCanon.tv;
 
-  if (sizeVal && !brand2) {
-    brand2 = ctx.lastBrand || lastMentionedBrand(historyMsgs) || (hasFocusBrand() ? FOCUS.brand : null);
+  const picks = listOffersForSizeAcrossBrands(sizeVal, { cls: tvCanon, limit: 3 });
+
+  if (picks.length) {
+    const lines = picks.map((it) => formatOfferLine(it.brand, it.offer));
+    setCtx(key, { lastClass: tvCanon || undefined });
+
+    const intro = salesIntro(lang, { size: sizeVal, cls: tvCanon });
+    return `${intro}\n\n${lines.join("\n\n")}\n\n${closingQuestion(lang)}`;
   }
+}
+
+if (sizeVal && !brand2) {
+  brand2 = ctxBrand0 || (hasFocusBrand() ? FOCUS.brand : null);
+}
+
 
   // For size questions, force TV class
   const tvCanon = OFFERS_INDEX.classCanon.tv;
