@@ -98,6 +98,20 @@ const GREETING_DAIKO_MODELS = [
   "GLED55AI96DK",
 ];
 
+const {
+  // ...
+  FOCUS_BRAND = "",
+  FOCUS_MODE = "preferred",
+} = process.env;
+
+const FOCUS = {
+  brand: String(FOCUS_BRAND || "").trim().toUpperCase(),
+  mode: String(FOCUS_MODE || "preferred").trim().toLowerCase(), // "preferred"
+};
+
+function hasFocusBrand() {
+  return Boolean(FOCUS.brand && OFFERS?.offers?.[FOCUS.brand]);
+}
 
 const openai = new OpenAI({ apiKey: OPENAI_API_KEY });
 
@@ -1687,6 +1701,23 @@ function formatSalesOfferLines(lang, lines = [], offers = []) {
   return out.join("\n\n");
 }
 
+function mergeFocusFirst(focusLines = [], otherLines = [], limit = 3) {
+  const out = [];
+
+  // 1) Always push focus brand first
+  for (const line of focusLines) {
+    if (out.length >= limit) break;
+    if (!out.includes(line)) out.push(line);
+  }
+
+  // 2) Fill remaining slots with other brands
+  for (const line of otherLines) {
+    if (out.length >= limit) break;
+    if (!out.includes(line)) out.push(line);
+  }
+
+  return out.slice(0, limit);
+}
 
 function closingQuestion(lang) {
   if (lang === "fr") return "Vous préférez le moins cher ou le meilleur choix ?";
@@ -1861,30 +1892,37 @@ function tryDirectOfferAnswer(userText, historyMsgs, lang, key) {
   }
 
   const cls = detectClass(text);
-  const category = detectCategory(text);
-  const brand = detectBrand(text);
+const category = detectCategory(text);
+const brand = detectBrand(text);
 
-  const sizeOnly = extractSizeOnly(text);
-  const sizeAny = extractSizeAny(text);
-  const sizeVal = sizeOnly || sizeAny;
+const sizeOnly = extractSizeOnly(text);
+const sizeAny = extractSizeAny(text);
+const sizeVal = sizeOnly || sizeAny;
 
-  const ctx = getCtx(key);
+const ctx = getCtx(key);
 
-  let brand2 = brand || null;
-  let cls2 = cls || null;
-  let category2 = category || null;
+// Working vars (will be adjusted below)
+let brand2 = brand || null;
+let cls2 = cls || null;
+let category2 = category || null;
 
-  // Size-only: use last brand from context or history
-  if (sizeVal && !brand2) brand2 = ctx.lastBrand || lastMentionedBrand(historyMsgs);
-
-  // For size questions, bias to TV class if available
-  const tvCanon = OFFERS_INDEX.classCanon.tv;
-  const lastCls = ctx.lastClass || lastMentionedClass(historyMsgs);
-if (sizeVal) {
-  // Size ALWAYS implies TV
-  cls2 = tvCanon || cls2 || lastCls || null;
+// If customer didn't specify a brand, prefer the focus brand (preferred mode),
+// but keep context brand first if it exists (more natural).
+if (!brand2 && hasFocusBrand() && FOCUS.mode === "preferred") {
+  brand2 = ctx.lastBrand || lastMentionedBrand(historyMsgs) || FOCUS.brand;
 }
 
+// Size-only already uses last brand; with the change above it will fall back to FOCUS.brand.
+if (sizeVal && !brand2) {
+  brand2 = ctx.lastBrand || lastMentionedBrand(historyMsgs) || (hasFocusBrand() ? FOCUS.brand : null);
+}
+
+// For size questions, force TV class
+const tvCanon = OFFERS_INDEX.classCanon.tv;
+const lastCls = ctx.lastClass || lastMentionedClass(historyMsgs);
+if (sizeVal) {
+  cls2 = tvCanon || cls2 || lastCls || null;
+}
 
 // Priority: Brand + size
 if (brand2 && sizeVal) {
@@ -1924,21 +1962,37 @@ if (brand2 && cls2) {
 
 // Category only
 if (!brand2 && category2) {
-  const lines = listOffersForCategory(category2, { limit: 3 });
+  let lines = listOffersForCategory(category2, { limit: 3 });
+
+  if (hasFocusBrand() && FOCUS.mode === "preferred") {
+    const focusLines = listOffersForBrand(FOCUS.brand, { category: category2, limit: 3 });
+    if (focusLines.length) lines = mergeFocusFirst(focusLines, lines, 3);
+  }
+
   if (lines.length) {
     setCtx(key, { lastCategory: category2 || undefined });
     return `${offersHeader(lang, { category: category2 })}\n${lines.join("\n\n")}`;
   }
 }
 
+
 // Class only
 if (!brand2 && cls2) {
-  const lines = listOffersForClass(cls2, { limit: 3 });
+  let lines = listOffersForClass(cls2, { limit: 3 });
+
+  if (hasFocusBrand() && FOCUS.mode === "preferred") {
+    const tvCanon = OFFERS_INDEX.classCanon.tv;
+    // Focus brand offers for this class
+    const focusLines = listOffersForBrand(FOCUS.brand, { cls: cls2, limit: 3 });
+    if (focusLines.length) lines = mergeFocusFirst(focusLines, lines, 3);
+  }
+
   if (lines.length) {
     setCtx(key, { lastClass: cls2 || undefined });
     return `${offersHeader(lang, { cls: cls2 })}\n${lines.join("\n\n")}`;
   }
 }
+
 
   // Just brand
   const justBrand = brand && s.replace(/\s+/g, "") === normMatch(brand).replace(/\s+/g, "");
@@ -1978,8 +2032,12 @@ function buildOffersSubsetForPrompt(userText, historyMsgs, key) {
   if (modelHit) return { offers: { [modelHit.brand]: [modelHit.offer] } };
 
 let brand = detectBrand(combined) || ctx.lastBrand || lastMentionedBrand(historyMsgs);
+
 let cls = detectClass(combined) || ctx.lastClass || lastMentionedClass(historyMsgs);
 let category = detectCategory(combined) || ctx.lastCategory || lastMentionedCategory(historyMsgs);
+if (!brand && hasFocusBrand() && FOCUS.mode === "preferred") {
+  brand = FOCUS.brand;
+}
 
 // Safety: brand must exist in offers
 if (brand && !OFFERS.offers?.[brand]) brand = null;
@@ -2224,7 +2282,12 @@ app.post("/learning-accept", (req, res) => {
   const { type, canonical, alias } = req.body || {};
   const rules = loadLearningRules();
 
-  const result = addAliasToRules(rules, String(type || ""), canonical, alias);
+const result = addAliasToRules(
+  rules,
+  String(type || ""),
+  String(canonical || ""),
+  String(alias || "")
+);
   if (!result.ok) return res.status(400).json({ ok: false, error: result.error });
 
   if (result.changed) {
@@ -2270,7 +2333,10 @@ app.get("/learning-suggestions", (req, res) => {
 
 function atomicWriteJson(filePath, obj) {
   const dir = path.dirname(filePath);
-  const tmp = path.join(dir, `.tmp_${path.basename(filePath)}_${Date.now()}_${crypto.randomBytes(4).toString("hex")}`);
+  const tmp = path.join(
+    dir,
+    `.tmp_${path.basename(filePath)}_${Date.now()}_${crypto.randomBytes(4).toString("hex")}`
+  );
   fs.writeFileSync(tmp, JSON.stringify(obj, null, 2), "utf8");
   fs.renameSync(tmp, filePath);
 }
@@ -2287,12 +2353,14 @@ function normalizeAliasValue(v) {
 function canonicalExists(type, canonical) {
   const c = String(canonical || "").trim();
   if (!c) return false;
+
   if (type === "brand_alias") {
     const b = OFFERS_INDEX.brandNorm.get(normMatch(c)) || c.toUpperCase();
-    return Boolean(OFFERS.offers[b]);
+    return Boolean(OFFERS.offers?.[b]);
   }
   if (type === "class_alias") return Boolean(OFFERS_INDEX.classNorm.get(normMatch(c)));
   if (type === "category_alias") return Boolean(OFFERS_INDEX.categoryNorm.get(normMatch(c)));
+
   return false;
 }
 
@@ -2302,6 +2370,7 @@ function addAliasToRules(rules, type, canonical, alias) {
     class_alias: "class_aliases",
     category_alias: "category_aliases",
   };
+
   const g = groups[type];
   if (!g) return { ok: false, error: "Invalid type" };
 
@@ -2323,7 +2392,6 @@ function addAliasToRules(rules, type, canonical, alias) {
   rules[g][canon] = arr;
   return { ok: true, changed: !already };
 }
-
 
 
 
