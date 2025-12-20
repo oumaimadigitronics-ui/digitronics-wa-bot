@@ -2552,7 +2552,7 @@ app.post("/wanotifier", async (req, res) => {
     const userTextRaw = incoming.text.slice(0, 2000);
 
     const lang = detectLang(userTextRaw);
-
+}
 
 
 // Pre-checks (rate-limit + media/empty) before storing user message
@@ -2820,16 +2820,8 @@ function isTotalPriceIntent(text) {
   );
 }
 
-// Keep shopping context stable
-if (brand) {
-  setCtx(key, {
-    lastBrand: brand,
-    lastClass: offer?.class || undefined,
-    lastCategory: offer?.category || undefined,
-  });
-}
 
-}
+
     // If we are in support mode, do NOT suggest offers (avoid sales responses)
 if (supportModeStore.has(key)) {
   const reply =
@@ -2844,35 +2836,29 @@ if (supportModeStore.has(key)) {
   return res.json({ ok: true, reply: shorten(reply, 520) });
 }
 
+// 4) Deterministic offer answer first
+if (isTotalPriceIntent(userTextRaw)) {
+  const history2 = getMemory(key);
+  const combined = [userTextRaw, ...history2.map((m) => m.content)].join(" ");
 
-
-    // 4) Deterministic offer answer first
-    if (isTotalPriceIntent(userTextRaw)) {
-  const history = getMemory(key);
-  const combined = [userTextRaw, ...history.map(m => m.content)].join(" ");
-
-  // Resolve offer: model first
   const modelHit = detectModel(combined);
 
-  // Resolve brand + size if no model
   const size = extractSizeAny(combined) || extractSizeOnly(combined);
   const ctx = getCtx(key);
-  const brand = modelHit?.brand || ctx.lastBrand || lastMentionedBrand(history) || null;
+  const brand = modelHit?.brand || ctx.lastBrand || lastMentionedBrand(history2) || null;
 
   let offer = modelHit?.offer || null;
 
-  // If no model, pick cheapest in that brand+size TV
   if (!offer && brand && size) {
     const pack = listOffersForBrand(brand, {
       cls: OFFERS_INDEX.classCanon.tv,
       size,
       limit: 1,
-      withOffers: true
+      withOffers: true,
     });
     offer = pack?.offers?.[0] || null;
   }
 
-  // If still not resolved: ask ONE question
   if (!offer) {
     const reply =
       lang === "ar"
@@ -2884,6 +2870,15 @@ if (supportModeStore.has(key)) {
     pushMemory(key, "assistant", reply);
     resetStrikes(key);
     return res.json({ ok: true, reply: shorten(reply, 420) });
+  }
+
+  // (Optional but good) Now it's safe to persist context from the resolved offer
+  if (brand) {
+    setCtx(key, {
+      lastBrand: brand,
+      lastClass: offer?.class || undefined,
+      lastCategory: offer?.category || undefined,
+    });
   }
 
   const tvPrice = Number(offer.price);
@@ -2903,7 +2898,6 @@ if (supportModeStore.has(key)) {
   resetStrikes(key);
   return res.json({ ok: true, reply: shorten(reply, 520) });
 }
-
     
     const direct = tryDirectOfferAnswer(userTextRaw, history, lang, key);
     if (direct) {
