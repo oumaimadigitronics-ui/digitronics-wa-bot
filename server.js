@@ -1545,42 +1545,23 @@ function detectCategory(text) {
   if (!s) return null;
 
   // 1) Manual category aliases (highest priority)
-  for (const [canonical, aliases] of Object.entries(CATEGORY_ALIASES)) {
-    const list = Array.isArray(aliases) ? aliases : [];
-    for (const alias of list) {
-      if (alias && includesToken(s, alias)) {
-        return canonical;
-      }
-    }
-  }
-
-  return null;
-}
-
-
-function detectCategory(text) {
-  const s = normMatch(text).trim();
-  if (!s) return null;
-
-  // 1) Manual category aliases (highest priority)
   for (const [canonical, aliases] of Object.entries(CATEGORY_ALIASES || {})) {
     const list = Array.isArray(aliases) ? aliases : [];
     for (const alias of list) {
       if (alias && includesToken(s, alias)) {
-        const cat = OFFERS_INDEX.categoryNorm.get(normMatch(canonical)) || canonical;
-        return cat;
+        // Normalize to existing category if possible
+        return OFFERS_INDEX.categoryNorm.get(normMatch(canonical)) || canonical;
       }
     }
   }
 
-  // 2) Learned aliases (from learning rules)
+  // 2) Learned aliases (optional learning rules)
   const learned = LEARNING_RULES?.category_aliases || {};
   for (const [canonical, list] of Object.entries(learned)) {
     const arr = Array.isArray(list) ? list : [];
     for (const a of arr) {
       if (a && includesToken(s, a)) {
-        const cat = OFFERS_INDEX.categoryNorm.get(normMatch(canonical)) || canonical;
-        return cat;
+        return OFFERS_INDEX.categoryNorm.get(normMatch(canonical)) || canonical;
       }
     }
   }
@@ -1610,7 +1591,6 @@ function lastMentionedBrand(historyMsgs = []) {
   }
   return null;
 }
-
 
 function lastMentionedClass(historyMsgs = []) {
   for (let i = historyMsgs.length - 1; i >= 0; i--) {
