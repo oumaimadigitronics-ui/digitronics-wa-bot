@@ -2548,71 +2548,74 @@ app.post("/wanotifier", async (req, res) => {
   try {
     const incoming = normalizeIncoming(req.body || {}, req);
     const key = incoming.key;
-    const phone = incoming.phone;
-    const userTextRaw = incoming.text.slice(0, 2000);
-
+    const phone = incoming.phone; // keep if you log it later
+    const userTextRaw = (incoming.text || "").slice(0, 2000);
     const lang = detectLang(userTextRaw);
-}
 
+    // Pre-checks (rate-limit + media/empty) before storing user message
+    if (!rateLimitOk(key)) {
+      return res.status(429).json({ ok: false, error: "Rate limit exceeded" });
+    }
 
-// Pre-checks (rate-limit + media/empty) before storing user message
-if (!rateLimitOk(key)) return res.status(429).json({ ok: false, error: "Rate limit exceeded" });
+    if (looksLikeMediaOrEmpty(req.body || {})) {
+      const reply = t(lang, "askTextInsteadMedia");
+      pushMemory(key, "assistant", reply);
+      resetStrikes(key);
+      return res.json({ ok: true, reply: shorten(reply, 420) });
+    }
 
-if (looksLikeMediaOrEmpty(req.body || {})) {
-  const reply = t(lang, "askTextInsteadMedia");
-  pushMemory(key, "assistant", reply);
-  return res.json({ ok: true, reply: shorten(reply, 420) });
-}
+    if (!userTextRaw) {
+      const reply = t(lang, "typeYourMessage");
+      pushMemory(key, "assistant", reply);
+      resetStrikes(key);
+      return res.json({ ok: true, reply: shorten(reply, 420) });
+    }
 
-if (!userTextRaw) {
-  const reply = t(lang, "typeYourMessage");
-  pushMemory(key, "assistant", reply);
-  return res.json({ ok: true, reply: shorten(reply, 420) });
-}
-
-// ✅ NOW save user message
-pushMemory(key, "user", userTextRaw);
-
-
-    
+    // ✅ NOW save user message
+    pushMemory(key, "user", userTextRaw);
 
     const history = getMemory(key);
 
-
-    // Update lightweight context on every user message (best-effort)
-    const b0 = detectBrand(userTextRaw);
-    const c0 = detectClass(userTextRaw);
-    const cat0 = detectCategory(userTextRaw);
-    if (b0) setCtx(key, { lastBrand: b0 });
-    if (c0) setCtx(key, { lastClass: c0 });
-    if (cat0) setCtx(key, { lastCategory: cat0 });
-
-    // If client sends contact info (phone/name/address) -> ask to fill the form (no details collection)
-if (detectContactInfo(userTextRaw) && isBuyIntent(userTextRaw) && !isOrderStatusIntent(userTextRaw)) {
-  const reply = t(lang, "thanksFillForm");
-  pushMemory(key, "assistant", reply);
-  resetStrikes(key);
-  return res.json({ ok: true, reply: shorten(reply, 900) });
-}
-
-
     // 0) Greeting (FORCED Darija Latin)
-if (isGreeting(userTextRaw) && userTextRaw.length <= 25) {
-  const bigLines = buildBigOffersForGreeting("DAIKO", OFFERS_INDEX.classCanon.tv || null);
+    if (isGreeting(userTextRaw) && userTextRaw.length <= 25) {
+      const bigLines = buildBigOffersForGreeting("DAIKO", OFFERS_INDEX.classCanon.tv || null);
 
-  const reply = t("dzl", "greeting", {
-    visioLines: bigLines,
-    extraLines:
-      "✅ TV DAIKO: Garantie 2 ans.\n" +
-      "✅ Kayjiw b 2 télécommandes.\n" +
-      "✅ Taman kaychmel support/bracket mural.\n" +
-      "✅ Livraison gratuite.",
-  });
+      const reply = t("dzl", "greeting", {
+        visioLines: bigLines,
+        extraLines:
+          "✅ TV DAIKO: Garantie 2 ans.\n" +
+          "✅ Kayjiw b 2 télécommandes.\n" +
+          "✅ Taman kaychmel support/bracket mural.\n" +
+          "✅ Livraison gratuite.",
+      });
 
-  pushMemory(key, "assistant", reply);
-  resetStrikes(key);
-  return res.json({ ok: true, reply: shorten(reply, 1000) });
-}
+      pushMemory(key, "assistant", reply);
+      resetStrikes(key);
+      return res.json({ ok: true, reply: shorten(reply, 1000) });
+    }
+
+    // ... continue your handler logic here ...
+    // e.g. location, photo, bank transfer, support mode, offers, LLM fallback, etc.
+
+    // Fallback example (remove if you already have one later)
+    const reply = t(lang, "needDetails");
+    pushMemory(key, "assistant", reply);
+    resetStrikes(key);
+    return res.json({ ok: true, reply: shorten(reply, 520) });
+  } catch (err) {
+    const ms = Date.now() - t0;
+    console.error(
+      JSON.stringify({
+        level: "error",
+        msg: "wanotifier_error",
+        reqId,
+        latencyMs: ms,
+        error: err?.message || String(err),
+      })
+    );
+    return res.status(500).json({ ok: false, error: "Server error" });
+  }
+});
 
 
     // 1) Location
@@ -2948,20 +2951,8 @@ if (isTotalPriceIntent(userTextRaw)) {
     );
 
     return res.json({ ok: true, reply });
-  } catch (err) {
-    const ms = Date.now() - t0;
-    console.error(
-      JSON.stringify({
-        level: "error",
-        msg: "wanotifier_error",
-        reqId,
-        latencyMs: ms,
-        error: err?.message || String(err),
-      })
-    );
-    return res.status(500).json({ ok: false, error: "Server error" });
-  }
-});
+
+
 
 app.listen(Number(PORT), () => {
   console.log("Server running on port", PORT);
