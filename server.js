@@ -252,18 +252,18 @@ function detectLang(text) {
   // Arabic script -> Arabic
   if (hasArabicScript(t0)) return "ar";
 
-  // French signals
-  if (
-    /[éèêàçùôî]/i.test(t0) ||
-    s.includes("bonjour") ||
-    s.includes("prix") ||
-    s.includes("livraison") ||
-    s.includes("commande") ||
-    s.includes("svp") ||
-    s.includes("s'il") ||
-    s.includes("merci")
-  )
-    return "fr";
+  // French signals (score-based to avoid flipping on "prix" alone)
+  let frScore = 0;
+  if (/[éèêàçùôî]/i.test(t0)) frScore += 2;
+  if (s.includes("bonjour")) frScore += 2;
+  if (s.includes("merci")) frScore += 2;
+  if (s.includes("livraison")) frScore += 1;
+  if (s.includes("commande")) frScore += 1;
+  if (s.includes("svp") || s.includes("s'il")) frScore += 1;
+  if (s.includes("prix")) frScore += 1;
+
+  if (frScore >= 2) return "fr";
+
 
   // Default: Darija Latin (main language)
   return "dzl";
@@ -408,8 +408,10 @@ function detectContactInfo(text) {
   ];
   if (addrTokens.some((k) => s.includes(normMatch(k)))) return true;
   // name-like
-  const nameTokens = ["smiya", "smiyti", "ismi", "nom", "name", "انا", "أنا", "اسمي", "سميتي"];
-  if (nameTokens.some((k) => s.includes(normMatch(k)))) return true;
+  // name-like (ONLY if they explicitly say "my name is")
+  const idTokens = ["smiya", "smiyti", "ismi", "nom", "اسمي", "سميتي"];
+  if (idTokens.some((k) => s.includes(normMatch(k)))) return true;
+
   return false;
 }
 
@@ -1909,8 +1911,10 @@ let category2 = category || null;
 // If customer didn't specify a brand, prefer the focus brand (preferred mode),
 // but keep context brand first if it exists (more natural).
 if (!brand2 && hasFocusBrand() && FOCUS.mode === "preferred") {
-  brand2 = ctx.lastBrand || lastMentionedBrand(historyMsgs) || FOCUS.brand;
+  const ctxBrand = ctx.lastBrand || lastMentionedBrand(historyMsgs) || null;
+  brand2 = ctxBrand ? ctxBrand : FOCUS.brand;
 }
+
 
 // Size-only already uses last brand; with the change above it will fall back to FOCUS.brand.
 if (sizeVal && !brand2) {
@@ -1955,7 +1959,7 @@ if (brand2 && category2) {
 if (brand2 && cls2) {
   const lines = listOffersForBrand(brand2, { cls: cls2, limit: 3 });
   if (lines.length) {
-    setCtx(key, { lastBrand: brand2, lastClass: cls2 || undefined });
+setCtx(key, { lastBrand: brand2, lastClass: cls2 || undefined, lastCategory: category2 || undefined });
     return `${offersHeader(lang, { brand: brand2, cls: cls2 })}\n${lines.join("\n\n")}`;
   }
 }
@@ -2584,12 +2588,13 @@ pushMemory(key, "user", userTextRaw);
     if (cat0) setCtx(key, { lastCategory: cat0 });
 
     // If client sends contact info (phone/name/address) -> ask to fill the form (no details collection)
-    if (detectContactInfo(userTextRaw) && !isOrderStatusIntent(userTextRaw)) {
-      const reply = t(lang, "thanksFillForm");
-      pushMemory(key, "assistant", reply);
-      resetStrikes(key);
-      return res.json({ ok: true, reply: shorten(reply, 900) });
-    }
+if (detectContactInfo(userTextRaw) && isBuyIntent(userTextRaw) && !isOrderStatusIntent(userTextRaw)) {
+  const reply = t(lang, "thanksFillForm");
+  pushMemory(key, "assistant", reply);
+  resetStrikes(key);
+  return res.json({ ok: true, reply: shorten(reply, 900) });
+}
+
 
     // 0) Greeting (FORCED Darija Latin)
 if (isGreeting(userTextRaw) && userTextRaw.length <= 25) {
@@ -2617,6 +2622,9 @@ if (isGreeting(userTextRaw) && userTextRaw.length <= 25) {
       resetStrikes(key);
       return res.json({ ok: true, reply: shorten(reply, 420) });
     }
+
+
+
 
 // Photo/picture/image request (ONLY IF NOT IN SUPPORT MODE)
 if (isPhotoRequestIntent(userTextRaw) && !supportModeStore.has(key)) {
@@ -2796,7 +2804,32 @@ const shoppingSignal =
 if (wasInSupportMode && shoppingSignal) {
   supportModeStore.delete(key);
 }
+function isTotalPriceIntent(text) {
+  const s = normMatch(text);
+  return (
+    s.includes("prix total") ||
+    s.includes("prix final") ||
+    s.includes("bghit prix total") ||
+    s.includes("taman total") ||
+    s.includes("total") && (s.includes("prix") || s.includes("taman") || s.includes("ثمن") || s.includes("ch7al")) ||
+    s.includes("ثمن شامل") ||
+    s.includes("السعر شامل") ||
+    s.includes("بالتركيب") ||
+    (s.includes("شامل") && (s.includes("تركيب") || s.includes("installation"))) ||
+    s.includes("avec installation")
+  );
+}
 
+// Keep shopping context stable
+if (brand) {
+  setCtx(key, {
+    lastBrand: brand,
+    lastClass: offer?.class || undefined,
+    lastCategory: offer?.category || undefined,
+  });
+}
+
+}
     // If we are in support mode, do NOT suggest offers (avoid sales responses)
 if (supportModeStore.has(key)) {
   const reply =
@@ -2814,6 +2847,64 @@ if (supportModeStore.has(key)) {
 
 
     // 4) Deterministic offer answer first
+    if (isTotalPriceIntent(userTextRaw)) {
+  const history = getMemory(key);
+  const combined = [userTextRaw, ...history.map(m => m.content)].join(" ");
+
+  // Resolve offer: model first
+  const modelHit = detectModel(combined);
+
+  // Resolve brand + size if no model
+  const size = extractSizeAny(combined) || extractSizeOnly(combined);
+  const ctx = getCtx(key);
+  const brand = modelHit?.brand || ctx.lastBrand || lastMentionedBrand(history) || null;
+
+  let offer = modelHit?.offer || null;
+
+  // If no model, pick cheapest in that brand+size TV
+  if (!offer && brand && size) {
+    const pack = listOffersForBrand(brand, {
+      cls: OFFERS_INDEX.classCanon.tv,
+      size,
+      limit: 1,
+      withOffers: true
+    });
+    offer = pack?.offers?.[0] || null;
+  }
+
+  // If still not resolved: ask ONE question
+  if (!offer) {
+    const reply =
+      lang === "ar"
+        ? "تمام. شنو الموديل بالضبط (مثلاً TCL 55P6K) باش نعطيك ثمن شامل بالتركيب؟"
+        : lang === "fr"
+        ? "D’accord. Quel est le modèle exact (ex: TCL 55P6K) pour vous donner le total avec installation ?"
+        : "Mzyan. Chno model bddabt (b7al: TCL 55P6K) bach n3tik taman total m3a t-tarkib?";
+
+    pushMemory(key, "assistant", reply);
+    resetStrikes(key);
+    return res.json({ ok: true, reply: shorten(reply, 420) });
+  }
+
+  const tvPrice = Number(offer.price);
+  const installMin = 150;
+  const installMax = 300;
+  const totalMin = tvPrice + installMin;
+  const totalMax = tvPrice + installMax;
+
+  const reply =
+    lang === "ar"
+      ? `ثمن التلفاز: ${tvPrice} درهم.\nالتركيب الحائطي فـالولفة كيدور بين ${installMin} و${installMax} درهم.\nالمجموع التقريبي: بين ${totalMin} و${totalMax} درهم.\nواش نبرمجو التوصيل والتركيب اليوم؟`
+      : lang === "fr"
+      ? `Prix TV : ${tvPrice} DH.\nInstallation murale à Oulfa : entre ${installMin} et ${installMax} DH.\nTotal estimatif : entre ${totalMin} et ${totalMax} DH.\nVous voulez planifier livraison + installation اليوم ?`
+      : `Taman TV: ${tvPrice} dh.\nTarkib 7ayti f Oulfa kaydor bin ${installMin} w ${installMax} dh.\nTotal ta9riban: bin ${totalMin} w ${totalMax} dh.\nBghiti nns9o livraison + tarkib lyoum?`;
+
+  pushMemory(key, "assistant", reply);
+  resetStrikes(key);
+  return res.json({ ok: true, reply: shorten(reply, 520) });
+}
+
+    
     const direct = tryDirectOfferAnswer(userTextRaw, history, lang, key);
     if (direct) {
       const reply = shorten(direct, 520);
