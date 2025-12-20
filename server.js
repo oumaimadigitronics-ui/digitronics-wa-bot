@@ -2588,6 +2588,14 @@ app.post("/wanotifier", async (req, res) => {
           "✅ Taman kaychmel support/bracket mural.\n" +
           "✅ Livraison gratuite.",
       });
+      
+    // 1) Location
+    if (isLocationIntent(userTextRaw)) {
+      const reply = t(lang, "address");
+      pushMemory(key, "assistant", reply);
+      resetStrikes(key);
+      return res.json({ ok: true, reply: shorten(reply, 420) });
+    }
 
       pushMemory(key, "assistant", reply);
       resetStrikes(key);
@@ -2618,13 +2626,6 @@ app.post("/wanotifier", async (req, res) => {
 });
 
 
-    // 1) Location
-    if (isLocationIntent(userTextRaw)) {
-      const reply = t(lang, "address");
-      pushMemory(key, "assistant", reply);
-      resetStrikes(key);
-      return res.json({ ok: true, reply: shorten(reply, 420) });
-    }
 
 
 
