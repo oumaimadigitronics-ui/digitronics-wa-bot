@@ -1614,16 +1614,99 @@ function formatOfferLine(brand, o) {
   const typePart = o.type ? ` — ${o.type}` : "";
   return `• ${brand} ${o.model}${sizePart}: ${o.price} dh${typePart}`;
 }
+function salesIntro(lang, ctx = {}) {
+  const { brand, size, cls, category } = ctx;
+
+  if (lang === "fr") {
+    if (brand && size) return `Très bon choix. Voici les meilleures options ${brand} en ${size}" :`;
+    if (brand && cls) return `Très bon choix. Voici les meilleures options ${brand} (${cls}) :`;
+    if (brand && category) return `Très bon choix. Voici les meilleures options ${brand} (${category}) :`;
+    return `Très bon choix. Voici les meilleures options :`;
+  }
+
+  if (lang === "ar") {
+    if (brand && size) return `اختيار موفق. هاهي أحسن الخيارات ديال ${brand} ${size} بوصة:`;
+    if (brand && cls) return `اختيار موفق. هاهي أحسن الخيارات ديال ${brand} (${cls}):`;
+    if (brand && category) return `اختيار موفق. هاهي أحسن الخيارات ديال ${brand} (${category}):`;
+    return `اختيار موفق. هاهي أحسن الخيارات:`;
+  }
+
+  // dzl
+  if (brand && size) return `Choix mzyan. Hna أحسن options dyal ${brand} ${size}" :`;
+  if (brand && cls) return `Choix mzyan. Hna أحسن options dyal ${brand} (${cls}) :`;
+  if (brand && category) return `Choix mzyan. Hna أحسن options dyal ${brand} (${category}) :`;
+  return `Choix mzyan. Hna أحسن options:`;
+}
+
+function benefitForOffer(lang, offer) {
+  const name = normMatch(offer?.name || "");
+  const type = normMatch(offer?.type || "");
+  const cls = normMatch(offer?.class || "");
+  const isTv = cls.includes("tv") || name.includes("tv");
+  if (!isTv) return "";
+
+  const isSmart =
+    name.includes("google") ||
+    type.includes("google") ||
+    name.includes("android") ||
+    type.includes("android") ||
+    name.includes("smart");
+
+  if (lang === "fr") return isSmart ? "Smart/Google TV: applis + interface fluide." : "Simple et pratique pour TV/YouTube.";
+  if (lang === "ar") return isSmart ? "Smart/Google TV: تطبيقات أكثر وواجهة سريعة." : "عملية ومناسبة للتلفزة/يوتيوب.";
+  return isSmart ? "Smart/Google TV: apps بزاف وكتخدم بسلاسة." : "عملية ومزيانة لTV/YouTube.";
+}
+
+function formatSalesOfferLines(lang, lines = [], offers = []) {
+  const L = lang || "dzl";
+
+  if (!Array.isArray(lines) || !lines.length) return "";
+
+  // If offers are missing (or you didn't request withOffers), just print lines
+  if (!Array.isArray(offers) || !offers.length) {
+    return lines.map((x) => String(x || "").trim()).filter(Boolean).join("\n\n");
+  }
+
+  const out = [];
+  const n = Math.min(lines.length, offers.length);
+
+  for (let i = 0; i < n; i++) {
+    const line = String(lines[i] || "").trim();
+    if (!line) continue;
+
+    const benefit = benefitForOffer(L, offers[i]);
+    if (benefit) {
+      // One benefit per option
+      if (L === "ar") out.push(`${line}\n   ← ${benefit}`);
+      else out.push(`${line}\n   → ${benefit}`);
+    } else {
+      out.push(line);
+    }
+  }
+
+  return out.join("\n\n");
+}
 
 
+function closingQuestion(lang) {
+  if (lang === "fr") return "Vous préférez le moins cher ou le meilleur choix ?";
+  if (lang === "ar") return "كتفضل الأرخص ولا الأفضل؟";
+  return "كتفضل الأرخص ولا الأحسن؟";
+}
 
 
 function listOffersForBrand(
   brand,
-  { cls = null, category = null, size = null, limit = 5, format = "normal" } = {}
+  { cls = null, category = null, size = null, limit = 5, format = "normal", withOffers = false } = {}
 ) {
   const arr0 = OFFERS.offers[brand] || [];
   let arr = arr0.filter((o) => Number(o.stock || 0) > 0);
+
+
+
+  if (withOffers) return { lines, offers: arr };
+  return lines;
+}
 
   // Safety: if size is specified, do not allow non-TV class filtering
   const tvCanon = OFFERS_INDEX.classCanon.tv;
@@ -1807,58 +1890,66 @@ if (sizeVal) {
 }
 
 
-  // Priority: Brand + size
-  if (brand2 && sizeVal) {
-    const lines = listOffersForBrand(brand2, { cls: cls2, category: category2, size: sizeVal, limit: 6 });
-    if (lines.length) {
-      setCtx(key, { lastBrand: brand2, lastClass: cls2 || undefined, lastCategory: category2 || undefined });
-      return `${offersHeader(lang, { brand: brand2, size: sizeVal })}\n${lines.join("\n\n")}`;
-    }
-    return null;
-  }
+// Priority: Brand + size
+if (brand2 && sizeVal) {
+  const pack = listOffersForBrand(brand2, {
+    cls: cls2,
+    category: category2,
+    size: sizeVal,
+    limit: 3,
+    withOffers: true,
+  });
 
-  // Priority: Brand + category
-  if (brand && category2) {
-    const lines = listOffersForBrand(brand, { category: category2, limit: 6 });
-    if (lines.length) {
-      setCtx(key, { lastBrand: brand, lastCategory: category2 || undefined });
-      return `${offersHeader(lang, { brand, category: category2 })}\n${lines.join("\n\n")}`;
-    }
+  if (pack?.lines?.length) {
+    const intro = salesIntro(lang, { brand: brand2, size: sizeVal, cls: cls2, category: category2 });
+    const body = formatSalesOfferLines(lang, pack.lines, pack.offers);
+    setCtx(key, { lastBrand: brand2, lastClass: cls2 || undefined, lastCategory: category2 || undefined });
+    return `${intro}\n\n${body}\n\n${closingQuestion(lang)}`;
   }
+}
 
-  // Brand + class
-  if (brand && cls2) {
-    const lines = listOffersForBrand(brand, { cls: cls2, limit: 6 });
-    if (lines.length) {
-      setCtx(key, { lastBrand: brand, lastClass: cls2 || undefined });
-      return `${offersHeader(lang, { brand, cls: cls2 })}\n${lines.join("\n\n")}`;
-    }
+// Priority: Brand + category
+if (brand2 && category2) {
+  const lines = listOffersForBrand(brand2, { category: category2, limit: 3 });
+  if (lines.length) {
+    setCtx(key, { lastBrand: brand2, lastCategory: category2 || undefined });
+    return `${offersHeader(lang, { brand: brand2, category: category2 })}\n${lines.join("\n\n")}`;
   }
+}
 
-  // Category only
-  if (!brand && category2) {
-    const lines = listOffersForCategory(category2, { limit: 6 });
-    if (lines.length) {
-      setCtx(key, { lastCategory: category2 || undefined });
-      return `${offersHeader(lang, { category: category2 })}\n${lines.join("\n\n")}`;
-    }
+// Brand + class
+if (brand2 && cls2) {
+  const lines = listOffersForBrand(brand2, { cls: cls2, limit: 3 });
+  if (lines.length) {
+    setCtx(key, { lastBrand: brand2, lastClass: cls2 || undefined });
+    return `${offersHeader(lang, { brand: brand2, cls: cls2 })}\n${lines.join("\n\n")}`;
   }
+}
 
-  // Class only
-  if (!brand && cls2) {
-    const lines = listOffersForClass(cls2, { limit: 6 });
-    if (lines.length) {
-      setCtx(key, { lastClass: cls2 || undefined });
-      return `${offersHeader(lang, { cls: cls2 })}\n${lines.join("\n\n")}`;
-    }
+// Category only
+if (!brand2 && category2) {
+  const lines = listOffersForCategory(category2, { limit: 3 });
+  if (lines.length) {
+    setCtx(key, { lastCategory: category2 || undefined });
+    return `${offersHeader(lang, { category: category2 })}\n${lines.join("\n\n")}`;
   }
+}
+
+// Class only
+if (!brand2 && cls2) {
+  const lines = listOffersForClass(cls2, { limit: 3 });
+  if (lines.length) {
+    setCtx(key, { lastClass: cls2 || undefined });
+    return `${offersHeader(lang, { cls: cls2 })}\n${lines.join("\n\n")}`;
+  }
+}
 
   // Just brand
   const justBrand = brand && s.replace(/\s+/g, "") === normMatch(brand).replace(/\s+/g, "");
   if (brand && (justBrand || s.length <= 8)) {
     const tvCanon2 = OFFERS_INDEX.classCanon.tv;
   if ((brand === "VISIO" || brand === "TCL" || brand === "DAIKO") && tvCanon2) {
-      const tvLines = listOffersForBrand(brand, { cls: tvCanon2, limit: 6 });
+      const tvLines = listOffersForBrand(brand, { cls: tvCanon2, limit: 3 });
       if (tvLines.length) {
         setCtx(key, { lastBrand: brand, lastClass: tvCanon2 || undefined });
         return `${offersHeader(lang, { brand, cls: tvCanon2 })}\n${tvLines.join("\n\n")}`;
@@ -1870,7 +1961,7 @@ if (sizeVal) {
     ).sort();
 
 
-    const lines = listOffersForBrand(brand, { limit: 6 });
+    const lines = listOffersForBrand(brand, { limit: 3 });
     if (lines.length) {
       setCtx(key, { lastBrand: brand });
       return `${offersHeader(lang, { brand })}\n${lines.join("\n\n")}`;
@@ -1890,9 +1981,18 @@ function buildOffersSubsetForPrompt(userText, historyMsgs, key) {
   const modelHit = detectModel(combined);
   if (modelHit) return { offers: { [modelHit.brand]: [modelHit.offer] } };
 
-  let brand = detectBrand(combined) || ctx.lastBrand || lastMentionedBrand(historyMsgs);
-  let cls = detectClass(combined) || ctx.lastClass || lastMentionedClass(historyMsgs);
-  let category = detectCategory(combined) || ctx.lastCategory || lastMentionedCategory(historyMsgs);
+let brand = detectBrand(combined) || ctx.lastBrand || lastMentionedBrand(historyMsgs);
+let cls = detectClass(combined) || ctx.lastClass || lastMentionedClass(historyMsgs);
+let category = detectCategory(combined) || ctx.lastCategory || lastMentionedCategory(historyMsgs);
+
+// Safety: brand must exist in offers
+if (brand && !OFFERS.offers?.[brand]) brand = null;
+
+// Size => force TV class
+const sizeVal = extractSizeOnly(combined) || extractSizeAny(combined);
+const tvCanon = OFFERS_INDEX.classCanon.tv;
+if (sizeVal && tvCanon) cls = tvCanon;
+
 
   if (brand && category) {
     const arr = (OFFERS.offers[brand] || [])
@@ -1971,6 +2071,10 @@ STRICT STYLE:
 - If client asks for photo/picture/image: ONLY provide the product link if present, otherwise ask for model/brand/size.
 - Ask at most ONE short clarification question ONLY if it is strictly required to answer correctly (e.g., missing size/model).
 - Otherwise, provide the closest direct answer using available offers.
+- Recommend at most 3 options
+- One benefit per option
+
+“End with one closing question”
 
 
 Company:
@@ -2027,7 +2131,7 @@ async function digibotLLMReply(userText, historyMsgs, lang, key) {
     const size = extractSizeOnly(userText) || extractSizeAny(userText) || 32;
     const tvCanon = OFFERS_INDEX.classCanon.tv || null;
 
-    const lines = listOffersForBrand(brand, { cls: tvCanon, size, limit: 6 });
+    const lines = listOffersForBrand(brand, { cls: tvCanon, size, limit: 3 });
     reply = lines.length ? `${offersHeader(lang, { brand, size })}\n${lines.join("\n\n")}` : t(lang, "needDetails");
   }
 
