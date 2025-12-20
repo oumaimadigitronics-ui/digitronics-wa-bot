@@ -1835,14 +1835,22 @@ function tryDirectOfferAnswer(userText, historyMsgs, lang, key) {
 
   if (!Object.keys(OFFERS.offers || {}).length) return null;
 
+  // 1) Exact model match (highest priority)
   const modelHit = detectModel(text);
   if (modelHit) {
     const { brand, offer } = modelHit;
     if (Number(offer.stock || 0) <= 0) return null;
-    setCtx(key, { lastBrand: brand, lastClass: offer.class || undefined, lastCategory: offer.category || undefined });
+
+    setCtx(key, {
+      lastBrand: brand,
+      lastClass: offer.class || undefined,
+      lastCategory: offer.category || undefined,
+    });
+
     return `${offersHeader(lang, { brand })}\n${formatOfferLine(brand, offer)}`;
   }
 
+  // 2) Extract intent signals
   const cls = detectClass(text);
   const category = detectCategory(text);
   const brand = detectBrand(text);
@@ -1853,56 +1861,80 @@ function tryDirectOfferAnswer(userText, historyMsgs, lang, key) {
 
   const ctx = getCtx(key);
 
+  // Context brand/class from conversation
+  const ctxBrand0 = ctx.lastBrand || lastMentionedBrand(historyMsgs) || null;
+  const lastCls = ctx.lastClass || lastMentionedClass(historyMsgs) || null;
+
+  // If user explicitly says TV + size (and no brand), ignore context brand
+  const tvWord = /tv|tele|télé|تلفاز|تلفزيون/i.test(String(userText || ""));
+  const ignoreCtxBrandForTvSize = Boolean(tvWord && sizeVal && !brand);
+
+  // 3) TV size request without brand => show across brands
+  if (sizeVal && !brand && (!ctxBrand0 || ignoreCtxBrandForTvSize)) {
+    const tvCanon = OFFERS_INDEX.classCanon.tv;
+
+    const picks = listOffersForSizeAcrossBrands(sizeVal, {
+      cls: tvCanon,
+      limit: 3,
+    });
+
+    if (picks.length) {
+      const lines = picks.map((it) => formatOfferLine(it.brand, it.offer));
+
+      // Keep class context (TV) but do NOT force a brand here
+      setCtx(key, { lastClass: tvCanon || undefined });
+
+      const intro = salesIntro(lang, { size: sizeVal, cls: tvCanon });
+      return `${intro}\n\n${lines.join("\n\n")}\n\n${closingQuestion(lang)}`;
+    }
+  }
+
+  // 4) Build working variables for the rest of the function
   let brand2 = brand || null;
   let cls2 = cls || null;
   let category2 = category || null;
 
-  // If customer didn't specify a brand, prefer the focus brand (preferred mode),
-  // but keep context brand first if it exists.
+  // If no brand, prefer focus brand (but keep context brand first if it exists)
   if (!brand2 && hasFocusBrand() && FOCUS.mode === "preferred") {
-    const ctxBrand = ctx.lastBrand || lastMentionedBrand(historyMsgs) || null;
-    brand2 = ctxBrand ? ctxBrand : FOCUS.brand;
+    brand2 = ctxBrand0 ? ctxBrand0 : FOCUS.brand;
   }
-// Size-only (no brand mentioned, no brand in context) => show across brands
-const ctxBrand0 = ctx.lastBrand || lastMentionedBrand(historyMsgs) || null;
-if (sizeVal && !brand && !ctxBrand0) {
-  const tvCanon = OFFERS_INDEX.classCanon.tv;
 
-  const picks = listOffersForSizeAcrossBrands(sizeVal, { cls: tvCanon, limit: 3 });
-
-  if (picks.length) {
-    const lines = picks.map((it) => formatOfferLine(it.brand, it.offer));
-    setCtx(key, { lastClass: tvCanon || undefined });
-
-    const intro = salesIntro(lang, { size: sizeVal, cls: tvCanon });
-    return `${intro}\n\n${lines.join("\n\n")}\n\n${closingQuestion(lang)}`;
+  // If size is present and we still don't have brand, fall back to context then focus
+  if (sizeVal && !brand2) {
+    brand2 = ctxBrand0 || (hasFocusBrand() ? FOCUS.brand : null);
   }
-}
 
-if (sizeVal && !brand2) {
-  brand2 = ctxBrand0 || (hasFocusBrand() ? FOCUS.brand : null);
-}
-
-
-  // For size questions, force TV class
+  // 5) For size questions, force TV class
   const tvCanon = OFFERS_INDEX.classCanon.tv;
-  const lastCls = ctx.lastClass || lastMentionedClass(historyMsgs);
   if (sizeVal) {
     cls2 = tvCanon || cls2 || lastCls || null;
   }
 
-  // Brand + size
+  // 6) Brand + size
   if (brand2 && sizeVal) {
-    const pack = listOffersForBrand(brand2, { cls: cls2, category: category2, size: sizeVal, limit: 3, withOffers: true });
+    const pack = listOffersForBrand(brand2, {
+      cls: cls2,
+      category: category2,
+      size: sizeVal,
+      limit: 3,
+      withOffers: true,
+    });
+
     if (pack?.lines?.length) {
       const intro = salesIntro(lang, { brand: brand2, size: sizeVal, cls: cls2, category: category2 });
       const body = formatSalesOfferLines(lang, pack.lines, pack.offers);
-      setCtx(key, { lastBrand: brand2, lastClass: cls2 || undefined, lastCategory: category2 || undefined });
+
+      setCtx(key, {
+        lastBrand: brand2,
+        lastClass: cls2 || undefined,
+        lastCategory: category2 || undefined,
+      });
+
       return `${intro}\n\n${body}\n\n${closingQuestion(lang)}`;
     }
   }
 
-  // Brand + category
+  // 7) Brand + category
   if (brand2 && category2) {
     const lines = listOffersForBrand(brand2, { category: category2, limit: 3 });
     if (lines.length) {
@@ -1911,16 +1943,20 @@ if (sizeVal && !brand2) {
     }
   }
 
-  // Brand + class
+  // 8) Brand + class
   if (brand2 && cls2) {
     const lines = listOffersForBrand(brand2, { cls: cls2, limit: 3 });
     if (lines.length) {
-      setCtx(key, { lastBrand: brand2, lastClass: cls2 || undefined, lastCategory: category2 || undefined });
+      setCtx(key, {
+        lastBrand: brand2,
+        lastClass: cls2 || undefined,
+        lastCategory: category2 || undefined,
+      });
       return `${offersHeader(lang, { brand: brand2, cls: cls2 })}\n${lines.join("\n\n")}`;
     }
   }
 
-  // Category only
+  // 9) Category only
   if (!brand2 && category2) {
     let lines = listOffersForCategory(category2, { limit: 3 });
 
@@ -1935,7 +1971,7 @@ if (sizeVal && !brand2) {
     }
   }
 
-  // Class only
+  // 10) Class only
   if (!brand2 && cls2) {
     let lines = listOffersForClass(cls2, { limit: 3 });
 
@@ -1950,10 +1986,11 @@ if (sizeVal && !brand2) {
     }
   }
 
-  // Just brand
+  // 11) Just brand
   const justBrand = brand && s.replace(/\s+/g, "") === normMatch(brand).replace(/\s+/g, "");
   if (brand && (justBrand || s.length <= 8)) {
     const tvCanon2 = OFFERS_INDEX.classCanon.tv;
+
     if ((brand === "VISIO" || brand === "TCL" || brand === "DAIKO") && tvCanon2) {
       const tvLines = listOffersForBrand(brand, { cls: tvCanon2, limit: 3 });
       if (tvLines.length) {
@@ -1971,6 +2008,7 @@ if (sizeVal && !brand2) {
 
   return null;
 }
+
 
 // =====================
 // LLM fallback
