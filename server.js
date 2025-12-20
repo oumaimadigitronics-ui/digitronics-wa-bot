@@ -1,4 +1,3 @@
-// server.js — DigiBot (Digitronics.ma)
 // ------------------------------------------------------------
 // Core features
 // - Loads offers from Google Sheet CSV (brand, model, name, category, size, type, price, class, stock, link)
@@ -63,6 +62,11 @@ const {
 
   // Debug logs
   LOG_DEBUG = "0",
+
+  // Focus brand (optional)
+  FOCUS_BRAND = "",
+  FOCUS_MODE = "preferred", // "preferred"
+  MAX_WA_REPLY_CHARS = "950",
 } = process.env;
 
 if (!OPENAI_API_KEY) {
@@ -78,6 +82,7 @@ const CFG = {
   memoryMaxMessages: Math.max(6, Number(MEMORY_MAX_MESSAGES) || 12),
   memoryPersist: MEMORY_PERSIST === "1",
   logDebug: LOG_DEBUG === "1",
+  maxReplyChars: Math.max(200, Number(MAX_WA_REPLY_CHARS) || 950),
 };
 
 const CONTACTS = {
@@ -91,27 +96,12 @@ const COMPANY = {
     "Ville de Casablanca – Quartier Oulfa (Haj Fateh) – Rue 9 – Rond-point Chahdiya – à côté de la boulangerie Pan Com",
 };
 
-const GREETING_DAIKO_MODELS = [
-  "GLED32H93DK",
-  "GLED43H94DK",
-  "GLED50AI95DK",
-  "GLED55AI96DK",
-];
-
-const {
-  // ...
-  FOCUS_BRAND = "",
-  FOCUS_MODE = "preferred",
-} = process.env;
+const GREETING_DAIKO_MODELS = ["GLED32H93DK", "GLED43H94DK", "GLED50AI95DK", "GLED55AI96DK"];
 
 const FOCUS = {
   brand: String(FOCUS_BRAND || "").trim().toUpperCase(),
   mode: String(FOCUS_MODE || "preferred").trim().toLowerCase(), // "preferred"
 };
-
-function hasFocusBrand() {
-  return Boolean(FOCUS.brand && OFFERS?.offers?.[FOCUS.brand]);
-}
 
 const openai = new OpenAI({ apiKey: OPENAI_API_KEY });
 
@@ -119,13 +109,12 @@ const openai = new OpenAI({ apiKey: OPENAI_API_KEY });
 // I18N STANDARD RULES (NO ENGLISH TO CUSTOMERS)
 // =====================
 const RULES_I18N = {
-dzl: {
-  delivery: "Livraison: 1–7 ayam.",
-  payment: "Paiement: cash 3nd ttsslim wla virement (zid note f formulaire).",
-  warranty: "Garantie: 1 an.",
-  wall_mount: "TV kayji m3ah support/bracket free.",
-},
-
+  dzl: {
+    delivery: "Livraison: 1–7 ayam.",
+    payment: "Paiement: cash 3nd ttsslim wla virement (zid note f formulaire).",
+    warranty: "Garantie: 1 an.",
+    wall_mount: "TV kayji m3ah support/bracket free.",
+  },
   fr: {
     delivery: "Livraison : entre 1 et 7 jours selon la ville.",
     payment: "Paiement: cash à la livraison ou virement (note à ajouter dans le formulaire).",
@@ -139,27 +128,25 @@ dzl: {
     wall_mount: "حامل/براكيط مجاني مع التلفاز.",
   },
 };
+
 function warrantyTextForBrand(lang, brand, cls) {
   const L = lang || "dzl";
   const b = String(brand || "").toUpperCase();
   const isTv = cls && normMatch(cls).includes("tv");
 
-// DAIKO TVs => 2 years warranty
-if (b === "DAIKO" && isTv) {
-  if (L === "fr") return "Garantie: 2 ans (TV DAIKO).";
-  if (L === "ar") return "الضمان: سنتين (تلفاز DAIKO).";
-  return "Daman: 2 snin (TV DAIKO).";
-}
-
-
-
+  // DAIKO TVs => 2 years warranty
+  if (b === "DAIKO" && isTv) {
+    if (L === "fr") return "Garantie: 2 ans (TV DAIKO).";
+    if (L === "ar") return "الضمان: سنتين (تلفاز DAIKO).";
+    return "Daman: 2 snin (TV DAIKO).";
+  }
 
   // default warranty (1 year)
   return (RULES_I18N[L] || RULES_I18N.dzl).warranty;
 }
 
 // =====================
-// DAIKO GREETING EXTRAS
+// Greeting extras
 // =====================
 const DAIKO_GREETING_EXTRAS = {
   dzl:
@@ -184,10 +171,7 @@ function stableReqId() {
   return crypto.randomBytes(8).toString("hex");
 }
 
-const MAX_WA_REPLY_CHARS = Number(process.env.MAX_WA_REPLY_CHARS || 950);
-
-function shorten(text, max = MAX_WA_REPLY_CHARS) {
-
+function shorten(text, max = CFG.maxReplyChars) {
   const t = String(text || "").trim();
   return t.length > max ? t.slice(0, max).trim() : t;
 }
@@ -237,6 +221,50 @@ function normMatch(text) {
 function hasArabicScript(text) {
   return /[\u0600-\u06FF]/.test(String(text || ""));
 }
+
+// =====================
+// OFFERS (in-memory)
+// =====================
+let OFFERS = {
+  // Keep internal rules/brand notes for LLM context only (never send directly to customers).
+  rules: {
+    brands: {
+      VISIO: "Google TV except model 32VB23E which is LED TV",
+      DAIKO: "Google TV models (internal note).",
+      TCL: "QLED",
+      MORSAT: "Android TV",
+    },
+  },
+  offers: {}, // { BRAND: [{model,name,category,size,type,price,class,stock,link}] }
+};
+
+let OFFERS_INDEX = {
+  brands: [],
+  classes: [],
+  categories: [],
+  modelLookup: new Map(),
+  brandNorm: new Map(),
+  classNorm: new Map(),
+  categoryNorm: new Map(),
+  classToOffers: new Map(),
+  categoryToOffers: new Map(),
+  classCanon: {
+    tv: null,
+    washing: null,
+    fridge: null,
+    waterHeater: null,
+    heating: null,
+    airConditioner: null,
+    dishwasher: null,
+  },
+};
+
+let lastOffersSync = { ok: false, at: null, error: null };
+
+function hasFocusBrand() {
+  return Boolean(FOCUS.brand && OFFERS?.offers?.[FOCUS.brand]);
+}
+
 function detectModel(text) {
   const s = normMatch(text);
   for (const [mLower, entry] of OFFERS_INDEX.modelLookup.entries()) {
@@ -245,6 +273,9 @@ function detectModel(text) {
   return null;
 }
 
+// =====================
+// Translations
+// =====================
 function detectLang(text) {
   const t0 = String(text || "").trim();
   const s = normMatch(t0);
@@ -252,7 +283,7 @@ function detectLang(text) {
   // Arabic script -> Arabic
   if (hasArabicScript(t0)) return "ar";
 
-  // French signals (score-based to avoid flipping on "prix" alone)
+  // French signals (score-based)
   let frScore = 0;
   if (/[éèêàçùôî]/i.test(t0)) frScore += 2;
   if (s.includes("bonjour")) frScore += 2;
@@ -264,8 +295,7 @@ function detectLang(text) {
 
   if (frScore >= 2) return "fr";
 
-
-  // Default: Darija Latin (main language)
+  // Default: Darija Latin
   return "dzl";
 }
 
@@ -275,15 +305,11 @@ function t(lang, key, vars = {}) {
   const dict = {
     dzl: {
       askTextInsteadMedia:
-        "Smah lia, ma nqdrch nfhem l-content mn image/voice. 3afak kteb l-message b text باش n3awnk.",
+        "Smah lia, ma nqdrch nfhem l-content mn image/voice. 3afak kteb l-message b text bach n3awnk.",
       typeYourMessage: "3afak kteb su2al dyalk.",
-
       greeting: ({ visioLines = [], extraLines = "" } = {}) => {
-        const offersPart = visioLines.length
-          ? `Big offers f DAIKO:\n${visioLines.join("\n")}`
-          : "Kaynin big offers f DAIKO.";
-
-        return `Wa 3alaykom salam 👋 marhba bik f Digitronics.
+        const offersPart = visioLines.length ? `Big offers f DAIKO:\n${visioLines.join("\n")}` : "Kaynin big offers f DAIKO.";
+        return `Wa 3alaykom salam, marhba bik f Digitronics.
 
 Ana Digitronics AI Bot.
 Ghadi n3awnk b as2ila l-basita, ila ma qdrtch ghadi ykml m3ak agent.
@@ -297,12 +323,11 @@ ${offersPart}
 📝 Ila bghiti tdir commande: ${ORDER_FORM_URL}
 
 ${extraLines}`.trim();
-},
-
+      },
       address: `L3nwan dyalna: ${COMPANY.address}`,
       orderForm: `Tfdal/ي: 3mmer had formulaire bach tdir commande: ${ORDER_FORM_URL}`,
       thanksFillForm: `Shokran 3la lma3lomat. 3afak 3mmer had formulaire bach tdir commande: ${ORDER_FORM_URL}`,
-      askOrderNo: "3afak sft رقم الطلب باش n9dro n7ssbo.",
+      askOrderNo: "3afak sft رقم الطلب bach n9dro n7ssbo.",
       gotOrderNo: "Shokran. Tsslna b رقم الطلب. Ghadi n3yto lik قريب.",
       callSoon: "Mzyan. Ghadi n3yto lik قريب.",
       callSoonNeedOrder: "Mzyan. Ghadi n3yto lik قريب. Ila 3ndk رقم الطلب sftih lina 3afak.",
@@ -317,19 +342,14 @@ ${extraLines}`.trim();
     fr: {
       askTextInsteadMedia: "Merci. Pour que je comprenne, envoyez un message écrit (sans audio/image).",
       typeYourMessage: "Merci d’écrire votre demande.",
-
       greeting: ({ visioLines = [] } = {}) => {
-        const offersPart = visioLines.length
-          ? `Grandes offres DAIKO:\n${visioLines.join("\n\n")}\n\n`
-          : "Grandes offres DAIKO disponibles.\n\n";
-
+        const offersPart = visioLines.length ? `Grandes offres DAIKO:\n${visioLines.join("\n\n")}\n\n` : "Grandes offres DAIKO disponibles.\n\n";
         return `${offersPart}Bonjour, je suis le bot IA de Digitronics. Je réponds aux questions simples; si besoin, un agent prendra la suite.
 Adresse: ${COMPANY.address}
 ${RULES_I18N.fr.payment}
 ${RULES_I18N.fr.delivery}
 Pour commander: ${ORDER_FORM_URL}`;
       },
-
       address: `Notre adresse: ${COMPANY.address}`,
       orderForm: `Veuillez remplir ce formulaire pour commander: ${ORDER_FORM_URL}`,
       thanksFillForm: `Merci pour les informations. Veuillez remplir ce formulaire pour passer la commande : ${ORDER_FORM_URL}`,
@@ -348,19 +368,14 @@ Pour commander: ${ORDER_FORM_URL}`;
     ar: {
       askTextInsteadMedia: "شكراً. من فضلك ارسل رسالة مكتوبة (بدون صوت/صورة) باش نقدر نفهمك.",
       typeYourMessage: "من فضلك اكتب رسالتك.",
-
       greeting: ({ visioLines = [] } = {}) => {
-        const offersPart = visioLines.length
-          ? `عروض كبيرة من DAIKO:\n${visioLines.join("\n\n")}\n\n`
-          : "عروض كبيرة من DAIKO متوفرة.\n\n";
-
+        const offersPart = visioLines.length ? `عروض كبيرة من DAIKO:\n${visioLines.join("\n\n")}\n\n` : "عروض كبيرة من DAIKO متوفرة.\n\n";
         return `${offersPart}مرحباً، أنا بوت ذكاء اصطناعي من Digitronics. أجيب عن الأسئلة البسيطة، وإذا لم أستطع فسيكمل معك أحد الفريق.
 العنوان: ${COMPANY.address}
 ${RULES_I18N.ar.payment}
 ${RULES_I18N.ar.delivery}
 للطلب: ${ORDER_FORM_URL}`;
       },
-
       address: `عنواننا: ${COMPANY.address}`,
       orderForm: `من فضلك عبّئ هذا الفورم للطلب: ${ORDER_FORM_URL}`,
       thanksFillForm: `شكرًا على المعلومات. من فضلك املأ هذه الاستمارة لإتمام الطلب: ${ORDER_FORM_URL}`,
@@ -382,7 +397,9 @@ ${RULES_I18N.ar.delivery}
   return String(val || "");
 }
 
-
+// =====================
+// Contact info heuristic
+// =====================
 function detectContactInfo(text) {
   const s0 = arabicIndicToAsciiDigits(String(text || ""));
   // phone-like
@@ -407,7 +424,6 @@ function detectContactInfo(text) {
     "العنوان",
   ];
   if (addrTokens.some((k) => s.includes(normMatch(k)))) return true;
-  // name-like
   // name-like (ONLY if they explicitly say "my name is")
   const idTokens = ["smiya", "smiyti", "ismi", "nom", "اسمي", "سميتي"];
   if (idTokens.some((k) => s.includes(normMatch(k)))) return true;
@@ -597,7 +613,6 @@ function normalizeIncoming(body = {}, req = null) {
     phone = normalizePhone(c);
     if (phone) break;
   }
-
   if (!phone) phone = findPhoneInObject(body);
 
   const convId = extractConversationId(body);
@@ -770,43 +785,18 @@ function addStrike(key) {
   return v.count;
 }
 
-// Cleanup loop
-setInterval(() => {
-  const now = Date.now();
-  for (const [k, v] of memoryStore.entries()) {
-    if (!v?.lastSeen || now - v.lastSeen > CFG.memoryTtlMs) memoryStore.delete(k);
-  }
-  for (const [k, v] of rateStore.entries()) {
-    if (!v?.windowStart || now - v.windowStart > CFG.rateWindowMs * 2) rateStore.delete(k);
-  }
-  for (const [k, v] of fallbackStrikeStore.entries()) {
-    if (!v?.at || now - v.at > FALLBACK_TTL_MS) fallbackStrikeStore.delete(k);
-  }
-  for (const [k, v] of ctxStore.entries()) {
-    if (!v?.at || now - v.at > CTX_TTL_MS) ctxStore.delete(k);
-  }
-    for (const [k, v] of supportModeStore.entries()) {
-    if (!v?.at || now - v.at > SUPPORT_TTL_MS) supportModeStore.delete(k);
-  }
-  for (const [k, v] of pendingOrderStore.entries()) {
-  if (!v?.at || now - v.at > PENDING_TTL_MS) pendingOrderStore.delete(k);
-}
+// =====================
+// Order status flow state
+// =====================
+const pendingOrderStore = new Map(); // key -> { waiting:boolean, at:number }
+const lastOrderAckStore = new Map(); // key -> { at:number, orderNo:string }
+const PENDING_TTL_MS = 30 * 60 * 1000; // 30 minutes
 
-for (const [k, v] of lastOrderAckStore.entries()) {
-  if (!v?.at || now - v.at > PENDING_TTL_MS) lastOrderAckStore.delete(k);
-}
-
-  flushMemoryToDiskSoon();
-}, 10 * 60 * 1000);
-
-process.on("SIGTERM", () => {
-  flushMemoryToDiskNow();
-  process.exit(0);
-});
-process.on("SIGINT", () => {
-  flushMemoryToDiskNow();
-  process.exit(0);
-});
+// =====================
+// Support mode (problem/after-sales)
+// =====================
+const supportModeStore = new Map(); // key -> { at:number }
+const SUPPORT_TTL_MS = 30 * 60 * 1000; // 30 minutes
 
 // =====================
 // Learning (conservative)
@@ -845,10 +835,6 @@ function loadLearningRules() {
   return LEARNING_RULES;
 }
 
-// =====================
-// Learning suggestions helpers (conservative)
-// =====================
-
 // Redact long numbers (order numbers, phones) from example texts
 function redactSensitive(text) {
   const s = String(text || "");
@@ -861,7 +847,6 @@ function tokenize(text) {
   const raw = s.split(/[^a-z0-9]+/g).filter(Boolean);
 
   const out = [];
-  // normal tokens >= 3
   for (const t of raw) {
     if (t.length >= 3) out.push(t);
   }
@@ -880,8 +865,7 @@ function tokenize(text) {
   return out;
 }
 
-
-// Simple Levenshtein distance (small strings, OK for this use)
+// Simple Levenshtein distance (small strings)
 function levenshtein(a, b) {
   a = String(a || "");
   b = String(b || "");
@@ -901,19 +885,13 @@ function levenshtein(a, b) {
     for (let j = 1; j <= n; j++) {
       const cb = b.charCodeAt(j - 1);
       const cost = ca === cb ? 0 : 1;
-      dp[i][j] = Math.min(
-        dp[i - 1][j] + 1,        // delete
-        dp[i][j - 1] + 1,        // insert
-        dp[i - 1][j - 1] + cost  // substitute
-      );
+      dp[i][j] = Math.min(dp[i - 1][j] + 1, dp[i][j - 1] + 1, dp[i - 1][j - 1] + cost);
     }
   }
   return dp[m][n];
 }
 
-// Conservative similarity check:
-// - Only for tokens length 3..20
-// - Accept if distance <= 1 for short words, <= 2 for longer
+// Conservative similarity check
 function isCloseAliasToken(token, target) {
   const t = normMatch(token);
   const x = normMatch(target);
@@ -924,15 +902,11 @@ function isCloseAliasToken(token, target) {
 
   const d = levenshtein(t, x);
 
-  // Very strict thresholds
   if (t.length <= 5) return d <= 1;
   if (t.length <= 10) return d <= 2;
-
-  // For longer tokens, still keep strict
   return d <= 2;
 }
 
-// Determine if token is already an alias somewhere
 function tokenAlreadyLearned(token, rules) {
   const t = normMatch(token);
   if (!t) return true;
@@ -970,6 +944,66 @@ function looksLikeFallback(reply) {
   );
 }
 
+// =====================
+// Learning rules management helpers (MUST be top-level)
+// =====================
+function atomicWriteJson(filePath, obj) {
+  const dir = path.dirname(filePath);
+  const tmp = path.join(dir, `.tmp_${path.basename(filePath)}_${Date.now()}_${crypto.randomBytes(4).toString("hex")}`);
+  fs.writeFileSync(tmp, JSON.stringify(obj, null, 2), "utf8");
+  fs.renameSync(tmp, filePath);
+}
+
+function normalizeAliasValue(v) {
+  const s = String(v || "").trim();
+  if (!s) return null;
+  if (s.length > 40) return null;
+  if (s.includes("\n") || s.includes("\r")) return null;
+  return s;
+}
+
+function canonicalExists(type, canonical) {
+  const c = String(canonical || "").trim();
+  if (!c) return false;
+
+  if (type === "brand_alias") {
+    const b = OFFERS_INDEX.brandNorm.get(normMatch(c)) || c.toUpperCase();
+    return Boolean(OFFERS.offers?.[b]);
+  }
+  if (type === "class_alias") return Boolean(OFFERS_INDEX.classNorm.get(normMatch(c)));
+  if (type === "category_alias") return Boolean(OFFERS_INDEX.categoryNorm.get(normMatch(c)));
+
+  return false;
+}
+
+function addAliasToRules(rules, type, canonical, alias) {
+  const groups = {
+    brand_alias: "brand_aliases",
+    class_alias: "class_aliases",
+    category_alias: "category_aliases",
+  };
+
+  const g = groups[type];
+  if (!g) return { ok: false, error: "Invalid type" };
+
+  const canon = String(canonical || "").trim();
+  const ali = normalizeAliasValue(alias);
+  if (!canon || !ali) return { ok: false, error: "Invalid canonical or alias" };
+
+  if (!canonicalExists(type, canon)) return { ok: false, error: "Canonical not found in offers index" };
+
+  rules[g] = rules[g] || {};
+  const arr0 = rules[g][canon];
+  const arr = Array.isArray(arr0) ? arr0.slice() : [];
+
+  const nAli = normMatch(ali);
+  const already = arr.some((x) => normMatch(x) === nAli);
+  if (!already) arr.push(ali);
+
+  rules[g][canon] = arr;
+  return { ok: true, changed: !already };
+}
+
 try {
   ensureLearningFiles();
   loadLearningRules();
@@ -978,44 +1012,8 @@ try {
 }
 
 // =====================
-// OFFERS (in-memory)
+// OFFERS parsing/indexing
 // =====================
-let OFFERS = {
-  // Keep internal rules/brand notes for LLM context only (never send directly to customers).
-  rules: {
-    brands: {
-      VISIO: "Google TV except model 32VB23E which is LED TV",
-      DAIKO: "Google TV models (internal note).",
-      TCL: "QLED",
-      MORSAT: "Android TV",
-    },
-  },
-  offers: {}, // { BRAND: [{model,name,category,size,type,price,class,stock,link}] }
-};
-
-let OFFERS_INDEX = {
-  brands: [],
-  classes: [],
-  categories: [],
-  modelLookup: new Map(),
-  brandNorm: new Map(),
-  classNorm: new Map(),
-  categoryNorm: new Map(),
-  classToOffers: new Map(),
-  categoryToOffers: new Map(),
-  classCanon: {
-    tv: null,
-    washing: null,
-    fridge: null,
-    waterHeater: null,
-    heating: null,
-    airConditioner: null,
-    dishwasher: null,
-  },
-};
-
-let lastOffersSync = { ok: false, at: null, error: null };
-
 function cacheBustUrl(url) {
   if (!url) return url;
   const sep = url.includes("?") ? "&" : "?";
@@ -1028,21 +1026,16 @@ function normalizeHeader(h) {
 
 function parsePrice(raw) {
   const s0 = arabicIndicToAsciiDigits(String(raw ?? "").trim());
-
-  // If it contains both '.' and ',', assume '.' is thousands separator and ',' is decimal
   let s = s0;
   if (s.includes(".") && s.includes(",")) {
     s = s.replace(/\./g, "").replace(/,/g, ".");
   } else {
-    // Otherwise, treat comma as thousands separator and remove it
     s = s.replace(/,/g, "");
   }
-
   const cleaned = s.replace(/[^\d.]/g, "");
   const n = Number(cleaned);
   return Number.isFinite(n) ? n : NaN;
 }
-
 
 function parseSize(raw) {
   const s = arabicIndicToAsciiDigits(String(raw ?? "0").trim());
@@ -1188,7 +1181,12 @@ async function syncOffersFromGoogleSheet() {
   OFFERS = { ...OFFERS, offers };
   rebuildOffersIndex();
 
-  return { kept, brands: OFFERS_INDEX.brands.length, classes: OFFERS_INDEX.classes.length, categories: OFFERS_INDEX.categories.length };
+  return {
+    kept,
+    brands: OFFERS_INDEX.brands.length,
+    classes: OFFERS_INDEX.classes.length,
+    categories: OFFERS_INDEX.categories.length,
+  };
 }
 
 async function refreshOffersSafe() {
@@ -1263,7 +1261,6 @@ function isCallMeIntent(text) {
   );
 }
 
-
 function isBuyIntent(text) {
   const s = normMatch(text);
   return (
@@ -1291,7 +1288,7 @@ function isSupportIntent(text) {
   const s = normMatch(raw);
 
   const arabicProblem =
-    hasArabicScript(raw) && (/(ما\s*كايناش\s*الصورة|ما\s*كيشعلش|ما\s*خدامش|ما\s*كيخدمش|ما\s*كايناش\s*الصوت)/.test(raw));
+    hasArabicScript(raw) && /(ما\s*كايناش\s*الصورة|ما\s*كيشعلش|ما\s*خدامش|ما\s*كيخدمش|ما\s*كايناش\s*الصوت)/.test(raw);
 
   return (
     arabicProblem ||
@@ -1329,13 +1326,11 @@ function isBankTransferIntent(text) {
   );
 }
 
-
 function includesToken(text, token) {
   const s = normMatch(text);
   const t = normMatch(token);
   if (!t) return false;
 
-  // For short tokens like "ac", "tv", require word boundary
   if (t.length <= 3) {
     const re = new RegExp(`\\b${t}\\b`, "i");
     return re.test(s);
@@ -1357,33 +1352,16 @@ function isNoOrderNumberIntent(text) {
   );
 }
 
-
 function isOrderStatusIntent(text) {
   const raw = String(text || "");
   const s = normMatch(raw);
 
-  // Strong tracking signals
   const trackingSignals = ["suivi", "tracking", "statut", "status", "où est", "ou est", "where", "fin"];
-
-  // Delay/problem signals
-  const problemSignals = [
-    "pas recu",
-    "pas reçu",
-    "late",
-    "delayed",
-    "retard",
-    "matwsl",
-    "ma wslatch",
-    "لم اتوصل",
-    "ما توصلتش",
-    "متأخر",
-    "تأخر",
-  ];
+  const problemSignals = ["pas recu", "pas reçu", "late", "delayed", "retard", "matwsl", "ma wslatch", "لم اتوصل", "ما توصلتش", "متأخر", "تأخر"];
 
   const hasTracking = trackingSignals.some((k) => s.includes(normMatch(k)));
   const hasProblem = problemSignals.some((k) => s.includes(normMatch(k)));
 
-  // explicit mention of order number
   const mentionsOrderNo =
     (s.includes("numero") && s.includes("commande")) ||
     (s.includes("num") && s.includes("commande")) ||
@@ -1391,7 +1369,6 @@ function isOrderStatusIntent(text) {
 
   return mentionsOrderNo || hasTracking || hasProblem;
 }
-
 
 function asksAboutDeliveryPaymentWarranty(text) {
   const s = normMatch(text);
@@ -1429,7 +1406,6 @@ function isPhotoRequestIntent(text) {
   );
 }
 
-
 function extractOrderNumber(text) {
   const s = arabicIndicToAsciiDigits(String(text || ""));
   const m = s.match(/\b\d{4,12}\b/);
@@ -1440,14 +1416,9 @@ function extractSizeOnly(text) {
   const s0 = arabicIndicToAsciiDigits(String(text || "")).trim();
   if (!s0) return null;
 
-  // Accept: "55", "55pouce", "55 pouce", '55"', "55 inch", Arabic بوصة
-const m = s0.match(
-  /(?:^|[^\d])\s*(24|32|40|43|50|55|65|75)\s*(?:p|inch|inches|pouce|pouces|["”″]|بوصة|بوصات)?\s*(?:$|[^\d])/i
-);
-
+  const m = s0.match(/(?:^|[^\d])\s*(24|32|40|43|50|55|65|75)\s*(?:p|inch|inches|pouce|pouces|["”″]|بوصة|بوصات)?\s*(?:$|[^\d])/i);
   if (m) return Number(m[1]);
 
-  // If message is only a number
   const s = normMatch(s0);
   const m2 = s.match(/^\s*(24|32|40|43|50|55|65|75)\s*$/i);
   return m2 ? Number(m2[1]) : null;
@@ -1457,15 +1428,12 @@ function extractSizeAny(text) {
   const s0 = arabicIndicToAsciiDigits(String(text || ""));
   const s = normMatch(s0);
 
-  const m = s.match(
-    /(?:^|[^\d])\s*(24|32|40|43|50|55|65|75)\s*(?:p|inch|inches|pouce|pouces|["”″]|بوصة|بوصات)?/i
-  );
-
+  const m = s.match(/(?:^|[^\d])\s*(24|32|40|43|50|55|65|75)\s*(?:p|inch|inches|pouce|pouces|["”″]|بوصة|بوصات)?/i);
   return m ? Number(m[1]) : null;
 }
 
 // =====================
-// Brand / class / category / model detection
+// Brand / class / category detection
 // =====================
 function detectBrand(text) {
   const s = normMatch(text);
@@ -1487,46 +1455,19 @@ function detectBrand(text) {
 
   return null;
 }
-function mentionsTV(text) {
-  const s = normMatch(text);
-  return (
-    s.includes("tv") ||
-    s.includes("television") ||
-    s.includes("télévision") ||
-    s.includes("tlfaz") ||
-    s.includes("tلفاز") || // optional, depends on your normalization
-    s.includes("تلفاز")
-  );
-}
-function hasInchMarker(text) {
-  const raw = arabicIndicToAsciiDigits(String(text || ""));
-  return /pouce|pouces|inch|inches|["”″]|بوصة|بوصات/i.test(raw);
-}
-
 
 function buildDefaultClassAliases() {
   const canon = OFFERS_INDEX.classCanon;
   const out = {};
 
-  if (canon.tv)
-      out[canon.tv] = ["tv", "television", "télévision", "تلفاز", "تلفزيون", "google tv", "smart tv"];
+  if (canon.tv) out[canon.tv] = ["tv", "television", "télévision", "تلفاز", "تلفزيون", "google tv", "smart tv"];
   if (canon.washing)
-    out[canon.washing] = [
-      "machine a laver",
-      "machine à laver",
-      "lave linge",
-      "washing machine",
-      "washer",
-      "غسالة",
-      "غسالة ملابس",
-    ];
+    out[canon.washing] = ["machine a laver", "machine à laver", "lave linge", "washing machine", "washer", "غسالة", "غسالة ملابس"];
   if (canon.fridge)
     out[canon.fridge] = ["refrigerateur", "réfrigérateur", "refregirateur", "frigo", "congelateur", "congélateur", "ثلاجة"];
-  if (canon.waterHeater)
-    out[canon.waterHeater] = ["chauffe eau", "chauffe-eau", "water heater", "سخان", "سخان الماء", "chauffe"];
+  if (canon.waterHeater) out[canon.waterHeater] = ["chauffe eau", "chauffe-eau", "water heater", "سخان", "سخان الماء", "chauffe"];
   if (canon.heating) out[canon.heating] = ["chauffage", "heater", "radiateur", "دفاية", "سخان كهربائي"];
-  if (canon.airConditioner)
-    out[canon.airConditioner] = ["clim", "climatiseur", "air conditioner", "ac", "مكيف", "مكيف هواء"];
+  if (canon.airConditioner) out[canon.airConditioner] = ["clim", "climatiseur", "air conditioner", "ac", "مكيف", "مكيف هواء"];
   if (canon.dishwasher)
     out[canon.dishwasher] = ["lave vaisselle", "lave-vaisselle", "dishwasher", "غسالة صحون", "غسالة المواعن", "غسالة مواعن", "مواعن", "صحون"];
 
@@ -1542,10 +1483,9 @@ function detectClass(text) {
     const arr = Array.isArray(list) ? list : [];
     for (const a of arr) {
       if (a && includesToken(s, a)) {
-  const cls = OFFERS_INDEX.classNorm.get(normMatch(canonical)) || canonical;
-  return cls;
-}
-
+        const cls = OFFERS_INDEX.classNorm.get(normMatch(canonical)) || canonical;
+        return cls;
+      }
     }
   }
 
@@ -1565,12 +1505,10 @@ function detectClass(text) {
 }
 
 function buildDefaultCategoryAliases() {
-  // Categories are often short; keep a small multi-lingual set that maps to existing category labels if present
   const out = {};
   for (const cat of OFFERS_INDEX.categories || []) {
     const n = normMatch(cat);
     if (!n) continue;
-    // If category name already contains tv/frigo/etc, we can match directly; otherwise leave it as-is.
     out[cat] = [cat];
   }
   return out;
@@ -1585,7 +1523,6 @@ function detectCategory(text) {
     const arr = Array.isArray(list) ? list : [];
     for (const a of arr) {
       if (a && includesToken(s, a)) {
-
         const cat = OFFERS_INDEX.categoryNorm.get(normMatch(canonical)) || canonical;
         return cat;
       }
@@ -1645,6 +1582,7 @@ function formatOfferLine(brand, o) {
   const typePart = o.type ? ` — ${o.type}` : "";
   return `• ${brand} ${o.model}${sizePart}: ${o.price} dh${typePart}`;
 }
+
 function salesIntro(lang, ctx = {}) {
   const { brand, size, cls, category } = ctx;
 
@@ -1662,7 +1600,6 @@ function salesIntro(lang, ctx = {}) {
     return `اختيار موفق. هاهي أحسن الخيارات:`;
   }
 
-  // dzl
   if (brand && size) return `Choix mzyan. Hna أحسن options dyal ${brand} ${size}" :`;
   if (brand && cls) return `Choix mzyan. Hna أحسن options dyal ${brand} (${cls}) :`;
   if (brand && category) return `Choix mzyan. Hna أحسن options dyal ${brand} (${category}) :`;
@@ -1676,12 +1613,7 @@ function benefitForOffer(lang, offer) {
   const isTv = cls.includes("tv") || name.includes("tv");
   if (!isTv) return "";
 
-  const isSmart =
-    name.includes("google") ||
-    type.includes("google") ||
-    name.includes("android") ||
-    type.includes("android") ||
-    name.includes("smart");
+  const isSmart = name.includes("google") || type.includes("google") || name.includes("android") || type.includes("android") || name.includes("smart");
 
   if (lang === "fr") return isSmart ? "Smart/Google TV: applis + interface fluide." : "Simple et pratique pour TV/YouTube.";
   if (lang === "ar") return isSmart ? "Smart/Google TV: تطبيقات أكثر وواجهة سريعة." : "عملية ومناسبة للتلفزة/يوتيوب.";
@@ -1690,10 +1622,8 @@ function benefitForOffer(lang, offer) {
 
 function formatSalesOfferLines(lang, lines = [], offers = []) {
   const L = lang || "dzl";
-
   if (!Array.isArray(lines) || !lines.length) return "";
 
-  // If offers are missing (or you didn't request withOffers), just print lines
   if (!Array.isArray(offers) || !offers.length) {
     return lines.map((x) => String(x || "").trim()).filter(Boolean).join("\n\n");
   }
@@ -1707,7 +1637,6 @@ function formatSalesOfferLines(lang, lines = [], offers = []) {
 
     const benefit = benefitForOffer(L, offers[i]);
     if (benefit) {
-      // One benefit per option
       if (L === "ar") out.push(`${line}\n   ← ${benefit}`);
       else out.push(`${line}\n   → ${benefit}`);
     } else {
@@ -1720,19 +1649,14 @@ function formatSalesOfferLines(lang, lines = [], offers = []) {
 
 function mergeFocusFirst(focusLines = [], otherLines = [], limit = 3) {
   const out = [];
-
-  // 1) Always push focus brand first
   for (const line of focusLines) {
     if (out.length >= limit) break;
     if (!out.includes(line)) out.push(line);
   }
-
-  // 2) Fill remaining slots with other brands
   for (const line of otherLines) {
     if (out.length >= limit) break;
     if (!out.includes(line)) out.push(line);
   }
-
   return out.slice(0, limit);
 }
 
@@ -1742,15 +1666,10 @@ function closingQuestion(lang) {
   return "كتفضل الأرخص ولا الأحسن؟";
 }
 
-
-function listOffersForBrand(
-  brand,
-  { cls = null, category = null, size = null, limit = 5, format = "normal", withOffers = false } = {}
-) {
+function listOffersForBrand(brand, { cls = null, category = null, size = null, limit = 5, format = "normal", withOffers = false } = {}) {
   const arr0 = OFFERS.offers[brand] || [];
   let arr = arr0.filter((o) => Number(o.stock || 0) > 0);
 
-  // Safety: if size is specified, do not allow non-TV class filtering
   const tvCanon = OFFERS_INDEX.classCanon.tv;
   if (Number(size) && tvCanon && cls && normMatch(cls) !== normMatch(tvCanon)) {
     return withOffers ? { lines: [], offers: [] } : [];
@@ -1775,39 +1694,29 @@ function listOffersForBrand(
     .sort((a, b) => Number(a.price) - Number(b.price))
     .slice(0, limit);
 
-  const lines = arr.map((o) =>
-    format === "greeting" ? formatOfferLineGreeting(brand, o) : formatOfferLine(brand, o)
-  );
-
+  const lines = arr.map((o) => (format === "greeting" ? formatOfferLineGreeting(brand, o) : formatOfferLine(brand, o)));
   return withOffers ? { lines, offers: arr } : lines;
 }
 
 function buildBigOffersForGreeting(brand, tvCanon) {
   const BRAND = String(brand || "").trim().toUpperCase();
   const wanted = BRAND === "DAIKO" ? GREETING_DAIKO_MODELS : [];
-
   const arr0 = (OFFERS.offers[BRAND] || []).filter((o) => Number(o.stock || 0) > 0);
 
-  // If DAIKO fixed list => only those models (in that order)
   if (wanted.length) {
     const lines = [];
     for (const model of wanted) {
       const o = arr0.find((x) => normMatch(x.model) === normMatch(model));
       if (!o) continue;
-
-      // TV-only if canonical TV class exists
       if (tvCanon && normMatch(o.class || "") !== normMatch(tvCanon)) continue;
-
       lines.push(formatOfferLineGreeting(BRAND, o));
     }
     return lines;
   }
 
-  // Fallback for other brands
   const tvLines = listOffersForBrand(BRAND, { cls: tvCanon, limit: 3, format: "greeting" });
   return tvLines.length ? tvLines : [];
 }
-
 
 function listOffersForClass(cls, { limit = 5 } = {}) {
   const k = normMatch(cls);
@@ -1855,7 +1764,6 @@ function offersHeader(lang, ctx) {
     if (brand) return `خيارات ${brand}:`;
     return "خيارات:";
   }
-  // Default: Darija Latin
   if (brand && size) return `Options dyal ${brand} ${size}" :`;
   if (brand && category) return `Options dyal ${brand} (${category}) :`;
   if (brand && cls) return `Options dyal ${brand} (${cls}) :`;
@@ -1869,11 +1777,9 @@ function resolveOfferForPhoto(userText, historyMsgs, key) {
   const text = String(userText || "");
   const combined = [text, ...historyMsgs.map((m) => m.content)].join(" ");
 
-  // 1) Exact model
   const modelHit = detectModel(combined);
   if (modelHit && Number(modelHit.offer?.stock || 0) > 0) return modelHit;
 
-  // 2) Brand + size (size-only allowed via context/last brand)
   const size = extractSizeOnly(text) || extractSizeAny(text);
   let brand = detectBrand(combined);
 
@@ -1899,7 +1805,6 @@ function tryDirectOfferAnswer(userText, historyMsgs, lang, key) {
 
   if (!Object.keys(OFFERS.offers || {}).length) return null;
 
-  // Model match
   const modelHit = detectModel(text);
   if (modelHit) {
     const { brand, offer } = modelHit;
@@ -1909,126 +1814,107 @@ function tryDirectOfferAnswer(userText, historyMsgs, lang, key) {
   }
 
   const cls = detectClass(text);
-const category = detectCategory(text);
-const brand = detectBrand(text);
+  const category = detectCategory(text);
+  const brand = detectBrand(text);
 
-const sizeOnly = extractSizeOnly(text);
-const sizeAny = extractSizeAny(text);
-const sizeVal = sizeOnly || sizeAny;
+  const sizeOnly = extractSizeOnly(text);
+  const sizeAny = extractSizeAny(text);
+  const sizeVal = sizeOnly || sizeAny;
 
-const ctx = getCtx(key);
+  const ctx = getCtx(key);
 
-// Working vars (will be adjusted below)
-let brand2 = brand || null;
-let cls2 = cls || null;
-let category2 = category || null;
+  let brand2 = brand || null;
+  let cls2 = cls || null;
+  let category2 = category || null;
 
-// If customer didn't specify a brand, prefer the focus brand (preferred mode),
-// but keep context brand first if it exists (more natural).
-if (!brand2 && hasFocusBrand() && FOCUS.mode === "preferred") {
-  const ctxBrand = ctx.lastBrand || lastMentionedBrand(historyMsgs) || null;
-  brand2 = ctxBrand ? ctxBrand : FOCUS.brand;
-}
-
-
-// Size-only already uses last brand; with the change above it will fall back to FOCUS.brand.
-if (sizeVal && !brand2) {
-  brand2 = ctx.lastBrand || lastMentionedBrand(historyMsgs) || (hasFocusBrand() ? FOCUS.brand : null);
-}
-
-// For size questions, force TV class
-const tvCanon = OFFERS_INDEX.classCanon.tv;
-const lastCls = ctx.lastClass || lastMentionedClass(historyMsgs);
-if (sizeVal) {
-  cls2 = tvCanon || cls2 || lastCls || null;
-}
-
-// Priority: Brand + size
-if (brand2 && sizeVal) {
-  const pack = listOffersForBrand(brand2, {
-    cls: cls2,
-    category: category2,
-    size: sizeVal,
-    limit: 3,
-    withOffers: true,
-  });
-
-  if (pack?.lines?.length) {
-    const intro = salesIntro(lang, { brand: brand2, size: sizeVal, cls: cls2, category: category2 });
-    const body = formatSalesOfferLines(lang, pack.lines, pack.offers);
-    setCtx(key, { lastBrand: brand2, lastClass: cls2 || undefined, lastCategory: category2 || undefined });
-    return `${intro}\n\n${body}\n\n${closingQuestion(lang)}`;
-  }
-}
-
-// Priority: Brand + category
-if (brand2 && category2) {
-  const lines = listOffersForBrand(brand2, { category: category2, limit: 3 });
-  if (lines.length) {
-    setCtx(key, { lastBrand: brand2, lastCategory: category2 || undefined });
-    return `${offersHeader(lang, { brand: brand2, category: category2 })}\n${lines.join("\n\n")}`;
-  }
-}
-
-// Brand + class
-if (brand2 && cls2) {
-  const lines = listOffersForBrand(brand2, { cls: cls2, limit: 3 });
-  if (lines.length) {
-setCtx(key, { lastBrand: brand2, lastClass: cls2 || undefined, lastCategory: category2 || undefined });
-    return `${offersHeader(lang, { brand: brand2, cls: cls2 })}\n${lines.join("\n\n")}`;
-  }
-}
-
-// Category only
-if (!brand2 && category2) {
-  let lines = listOffersForCategory(category2, { limit: 3 });
-
-  if (hasFocusBrand() && FOCUS.mode === "preferred") {
-    const focusLines = listOffersForBrand(FOCUS.brand, { category: category2, limit: 3 });
-    if (focusLines.length) lines = mergeFocusFirst(focusLines, lines, 3);
+  // If customer didn't specify a brand, prefer the focus brand (preferred mode),
+  // but keep context brand first if it exists.
+  if (!brand2 && hasFocusBrand() && FOCUS.mode === "preferred") {
+    const ctxBrand = ctx.lastBrand || lastMentionedBrand(historyMsgs) || null;
+    brand2 = ctxBrand ? ctxBrand : FOCUS.brand;
   }
 
-  if (lines.length) {
-    setCtx(key, { lastCategory: category2 || undefined });
-    return `${offersHeader(lang, { category: category2 })}\n${lines.join("\n\n")}`;
-  }
-}
-
-
-// Class only
-if (!brand2 && cls2) {
-  let lines = listOffersForClass(cls2, { limit: 3 });
-
-  if (hasFocusBrand() && FOCUS.mode === "preferred") {
-    const tvCanon = OFFERS_INDEX.classCanon.tv;
-    // Focus brand offers for this class
-    const focusLines = listOffersForBrand(FOCUS.brand, { cls: cls2, limit: 3 });
-    if (focusLines.length) lines = mergeFocusFirst(focusLines, lines, 3);
+  if (sizeVal && !brand2) {
+    brand2 = ctx.lastBrand || lastMentionedBrand(historyMsgs) || (hasFocusBrand() ? FOCUS.brand : null);
   }
 
-  if (lines.length) {
-    setCtx(key, { lastClass: cls2 || undefined });
-    return `${offersHeader(lang, { cls: cls2 })}\n${lines.join("\n\n")}`;
+  // For size questions, force TV class
+  const tvCanon = OFFERS_INDEX.classCanon.tv;
+  const lastCls = ctx.lastClass || lastMentionedClass(historyMsgs);
+  if (sizeVal) {
+    cls2 = tvCanon || cls2 || lastCls || null;
   }
-}
 
+  // Brand + size
+  if (brand2 && sizeVal) {
+    const pack = listOffersForBrand(brand2, { cls: cls2, category: category2, size: sizeVal, limit: 3, withOffers: true });
+    if (pack?.lines?.length) {
+      const intro = salesIntro(lang, { brand: brand2, size: sizeVal, cls: cls2, category: category2 });
+      const body = formatSalesOfferLines(lang, pack.lines, pack.offers);
+      setCtx(key, { lastBrand: brand2, lastClass: cls2 || undefined, lastCategory: category2 || undefined });
+      return `${intro}\n\n${body}\n\n${closingQuestion(lang)}`;
+    }
+  }
+
+  // Brand + category
+  if (brand2 && category2) {
+    const lines = listOffersForBrand(brand2, { category: category2, limit: 3 });
+    if (lines.length) {
+      setCtx(key, { lastBrand: brand2, lastCategory: category2 || undefined });
+      return `${offersHeader(lang, { brand: brand2, category: category2 })}\n${lines.join("\n\n")}`;
+    }
+  }
+
+  // Brand + class
+  if (brand2 && cls2) {
+    const lines = listOffersForBrand(brand2, { cls: cls2, limit: 3 });
+    if (lines.length) {
+      setCtx(key, { lastBrand: brand2, lastClass: cls2 || undefined, lastCategory: category2 || undefined });
+      return `${offersHeader(lang, { brand: brand2, cls: cls2 })}\n${lines.join("\n\n")}`;
+    }
+  }
+
+  // Category only
+  if (!brand2 && category2) {
+    let lines = listOffersForCategory(category2, { limit: 3 });
+
+    if (hasFocusBrand() && FOCUS.mode === "preferred") {
+      const focusLines = listOffersForBrand(FOCUS.brand, { category: category2, limit: 3 });
+      if (focusLines.length) lines = mergeFocusFirst(focusLines, lines, 3);
+    }
+
+    if (lines.length) {
+      setCtx(key, { lastCategory: category2 || undefined });
+      return `${offersHeader(lang, { category: category2 })}\n${lines.join("\n\n")}`;
+    }
+  }
+
+  // Class only
+  if (!brand2 && cls2) {
+    let lines = listOffersForClass(cls2, { limit: 3 });
+
+    if (hasFocusBrand() && FOCUS.mode === "preferred") {
+      const focusLines = listOffersForBrand(FOCUS.brand, { cls: cls2, limit: 3 });
+      if (focusLines.length) lines = mergeFocusFirst(focusLines, lines, 3);
+    }
+
+    if (lines.length) {
+      setCtx(key, { lastClass: cls2 || undefined });
+      return `${offersHeader(lang, { cls: cls2 })}\n${lines.join("\n\n")}`;
+    }
+  }
 
   // Just brand
   const justBrand = brand && s.replace(/\s+/g, "") === normMatch(brand).replace(/\s+/g, "");
   if (brand && (justBrand || s.length <= 8)) {
     const tvCanon2 = OFFERS_INDEX.classCanon.tv;
-  if ((brand === "VISIO" || brand === "TCL" || brand === "DAIKO") && tvCanon2) {
+    if ((brand === "VISIO" || brand === "TCL" || brand === "DAIKO") && tvCanon2) {
       const tvLines = listOffersForBrand(brand, { cls: tvCanon2, limit: 3 });
       if (tvLines.length) {
         setCtx(key, { lastBrand: brand, lastClass: tvCanon2 || undefined });
         return `${offersHeader(lang, { brand, cls: tvCanon2 })}\n${tvLines.join("\n\n")}`;
       }
     }
-
-    const categories = Array.from(
-      new Set((OFFERS.offers[brand] || []).map((o) => String(o.category || "").trim()).filter(Boolean))
-    ).sort();
-
 
     const lines = listOffersForBrand(brand, { limit: 3 });
     if (lines.length) {
@@ -2050,22 +1936,20 @@ function buildOffersSubsetForPrompt(userText, historyMsgs, key) {
   const modelHit = detectModel(combined);
   if (modelHit) return { offers: { [modelHit.brand]: [modelHit.offer] } };
 
-let brand = detectBrand(combined) || ctx.lastBrand || lastMentionedBrand(historyMsgs);
+  let brand = detectBrand(combined) || ctx.lastBrand || lastMentionedBrand(historyMsgs);
+  let cls = detectClass(combined) || ctx.lastClass || lastMentionedClass(historyMsgs);
+  let category = detectCategory(combined) || ctx.lastCategory || lastMentionedCategory(historyMsgs);
 
-let cls = detectClass(combined) || ctx.lastClass || lastMentionedClass(historyMsgs);
-let category = detectCategory(combined) || ctx.lastCategory || lastMentionedCategory(historyMsgs);
-if (!brand && hasFocusBrand() && FOCUS.mode === "preferred") {
-  brand = FOCUS.brand;
-}
+  if (!brand && hasFocusBrand() && FOCUS.mode === "preferred") {
+    brand = FOCUS.brand;
+  }
 
-// Safety: brand must exist in offers
-if (brand && !OFFERS.offers?.[brand]) brand = null;
+  if (brand && !OFFERS.offers?.[brand]) brand = null;
 
-// Size => force TV class
-const sizeVal = extractSizeOnly(combined) || extractSizeAny(combined);
-const tvCanon = OFFERS_INDEX.classCanon.tv;
-if (sizeVal && tvCanon) cls = tvCanon;
-
+  // Size => force TV class
+  const sizeVal = extractSizeOnly(combined) || extractSizeAny(combined);
+  const tvCanon = OFFERS_INDEX.classCanon.tv;
+  if (sizeVal && tvCanon) cls = tvCanon;
 
   if (brand && category) {
     const arr = (OFFERS.offers[brand] || [])
@@ -2134,7 +2018,6 @@ function buildSystemPrompt(offersSubset, lang) {
 You are DigiBot for Digitronics.ma.
 
 STRICT STYLE:
-- Be formal and only answer what the client asked.
 - Use ONLY one of these languages: Darija Latin, Arabic, or French.
 - Use ONLY this language for the full reply: ${lang} (dzl/ar/fr).
 - NEVER reply in English.
@@ -2142,13 +2025,11 @@ STRICT STYLE:
 - Do NOT mention stock quantity.
 - Mention delivery/payment/warranty ONLY if the client asks.
 - If client asks for photo/picture/image: ONLY provide the product link if present, otherwise ask for model/brand/size.
-- Ask at most ONE short clarification question ONLY if it is strictly required to answer correctly (e.g., missing size/model).
+- Ask at most ONE short clarification question ONLY if it is strictly required to answer correctly.
 - Otherwise, provide the closest direct answer using available offers.
-- Recommend at most 3 options
-- One benefit per option
-
-“End with one closing question”
-
+- Recommend at most 3 options.
+- One benefit per option.
+- End with one closing question.
 
 Company:
 - Address: ${COMPANY.address}
@@ -2199,11 +2080,9 @@ async function digibotLLMReply(userText, historyMsgs, lang, key) {
   let reply = r?.choices?.[0]?.message?.content?.trim() || "";
 
   if (!reply) {
-    // fallback: show default TV offers directly (no questions)
     const brand = detectBrand(userText) || "VISIO";
     const size = extractSizeOnly(userText) || extractSizeAny(userText) || 32;
     const tvCanon = OFFERS_INDEX.classCanon.tv || null;
-
     const lines = listOffersForBrand(brand, { cls: tvCanon, size, limit: 3 });
     reply = lines.length ? `${offersHeader(lang, { brand, size })}\n${lines.join("\n\n")}` : t(lang, "needDetails");
   }
@@ -2211,23 +2090,51 @@ async function digibotLLMReply(userText, historyMsgs, lang, key) {
   return reply;
 }
 
-
-
 // =====================
-// Order status flow state
+// Maintenance cleanup loop
 // =====================
-const pendingOrderStore = new Map();
-const lastOrderAckStore = new Map();
-const PENDING_TTL_MS = 30 * 60 * 1000; // 30 minutes
+setInterval(() => {
+  const now = Date.now();
 
+  for (const [k, v] of memoryStore.entries()) {
+    if (!v?.lastSeen || now - v.lastSeen > CFG.memoryTtlMs) memoryStore.delete(k);
+  }
 
+  for (const [k, v] of rateStore.entries()) {
+    if (!v?.windowStart || now - v.windowStart > CFG.rateWindowMs * 2) rateStore.delete(k);
+  }
 
-// =====================
-// Support mode (problem/after-sales)
-// =====================
-const supportModeStore = new Map(); // key -> { at:number }
-const SUPPORT_TTL_MS = 30 * 60 * 1000; // 30 minutes
+  for (const [k, v] of fallbackStrikeStore.entries()) {
+    if (!v?.at || now - v.at > FALLBACK_TTL_MS) fallbackStrikeStore.delete(k);
+  }
 
+  for (const [k, v] of ctxStore.entries()) {
+    if (!v?.at || now - v.at > CTX_TTL_MS) ctxStore.delete(k);
+  }
+
+  for (const [k, v] of supportModeStore.entries()) {
+    if (!v?.at || now - v.at > SUPPORT_TTL_MS) supportModeStore.delete(k);
+  }
+
+  for (const [k, v] of pendingOrderStore.entries()) {
+    if (!v?.at || now - v.at > PENDING_TTL_MS) pendingOrderStore.delete(k);
+  }
+
+  for (const [k, v] of lastOrderAckStore.entries()) {
+    if (!v?.at || now - v.at > PENDING_TTL_MS) lastOrderAckStore.delete(k);
+  }
+
+  flushMemoryToDiskSoon();
+}, 10 * 60 * 1000);
+
+process.on("SIGTERM", () => {
+  flushMemoryToDiskNow();
+  process.exit(0);
+});
+process.on("SIGINT", () => {
+  flushMemoryToDiskNow();
+  process.exit(0);
+});
 
 // =====================
 // Routes
