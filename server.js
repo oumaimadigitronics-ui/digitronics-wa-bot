@@ -1503,6 +1503,32 @@ function detectClass(text) {
   }
   return null;
 }
+// =====================
+// MANUAL CATEGORY ALIASES (user language → CSV category)
+// =====================
+const CATEGORY_ALIASES = {
+  "Air Fryer": ["air fryer", "airfryer", "قلاية هوائية", "اير فراير", "ايرفراير"],
+  "Barre De Son": ["barre de son", "soundbar", "ساندبار"],
+  "Blender": ["blender", "mixeur", "خلاط"],
+  "Bouilloire": ["bouilloire", "kettle", "غلاية"],
+  "Chauffage": ["chauffage", "heater", "دفاية", "شوفاج"],
+  "Chauffe-eau": ["chauffe-eau", "chauffe eau", "water heater", "سخان"],
+  "Climatiseur": ["clim", "climatiseur", "air conditioner", "ac", "مكيف"],
+  "Congelateur": ["congelateur", "congélateur", "freezer", "فريزر"],
+  "Cuisiniere": ["cuisiniere", "cuisinière", "gaziniere", "بوتاجاز"],
+  "Lave Vaisselle": ["lave vaisselle", "dishwasher", "غسالة صحون"],
+  "Machine A Café": ["machine a cafe", "machine à café", "coffee machine", "ماكينة قهوة"],
+  "Machine A Laver": ["machine a laver", "washing machine", "غسالة"],
+  "Micro-ondes": ["micro-ondes", "microwave", "ميكرو", "ميكرووند"],
+  "Panini": ["panini", "sandwich maker", "آلة بانيني"],
+  "Plaque": ["plaque", "plaque cuisson", "table de cuisson", "بلاكة"],
+  "Presse-agrumes": ["presse-agrumes", "juicer", "عصارة"],
+  "Receivers": ["receiver", "ampli", "av receiver", "ريسيفر"],
+  "Refrigerateur": ["refrigerateur", "réfrigérateur", "frigo", "ثلاجة"],
+  "Speaker": ["speaker", "enceinte", "سبيكر", "مكبر صوت"],
+  "Tv": ["tv", "tele", "télé", "television", "تلفاز", "تلفزيون"],
+  "Ventilateur": ["ventilateur", "fan", "مروحة"],
+};
 
 function buildDefaultCategoryAliases() {
   const out = {};
@@ -1518,8 +1544,38 @@ function detectCategory(text) {
   const s = normMatch(text).trim();
   if (!s) return null;
 
-  const aliases = LEARNING_RULES?.category_aliases || {};
-  for (const [canonical, list] of Object.entries(aliases)) {
+  // 1) Manual category aliases (highest priority)
+  for (const [canonical, aliases] of Object.entries(CATEGORY_ALIASES)) {
+    const list = Array.isArray(aliases) ? aliases : [];
+    for (const alias of list) {
+      if (alias && includesToken(s, alias)) {
+        return canonical;
+      }
+    }
+  }
+
+  return null;
+}
+
+
+function detectCategory(text) {
+  const s = normMatch(text).trim();
+  if (!s) return null;
+
+  // 1) Manual category aliases (highest priority)
+  for (const [canonical, aliases] of Object.entries(CATEGORY_ALIASES || {})) {
+    const list = Array.isArray(aliases) ? aliases : [];
+    for (const alias of list) {
+      if (alias && includesToken(s, alias)) {
+        const cat = OFFERS_INDEX.categoryNorm.get(normMatch(canonical)) || canonical;
+        return cat;
+      }
+    }
+  }
+
+  // 2) Learned aliases (from learning rules)
+  const learned = LEARNING_RULES?.category_aliases || {};
+  for (const [canonical, list] of Object.entries(learned)) {
     const arr = Array.isArray(list) ? list : [];
     for (const a of arr) {
       if (a && includesToken(s, a)) {
@@ -1529,6 +1585,7 @@ function detectCategory(text) {
     }
   }
 
+  // 3) Defaults from sheet categories (exact category names)
   const defaults = buildDefaultCategoryAliases();
   for (const [cat, arr] of Object.entries(defaults)) {
     for (const a of arr) {
@@ -1536,11 +1593,13 @@ function detectCategory(text) {
     }
   }
 
-  for (const cat of OFFERS_INDEX.categories) {
+  // 4) Direct match against known categories
+  for (const cat of OFFERS_INDEX.categories || []) {
     const ncat = normMatch(cat);
     if (!ncat) continue;
     if (s === ncat || s.includes(ncat)) return cat;
   }
+
   return null;
 }
 
@@ -1551,6 +1610,7 @@ function lastMentionedBrand(historyMsgs = []) {
   }
   return null;
 }
+
 
 function lastMentionedClass(historyMsgs = []) {
   for (let i = historyMsgs.length - 1; i >= 0; i--) {
