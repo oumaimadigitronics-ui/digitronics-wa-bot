@@ -1702,16 +1702,10 @@ function listOffersForBrand(
   const arr0 = OFFERS.offers[brand] || [];
   let arr = arr0.filter((o) => Number(o.stock || 0) > 0);
 
-
-
-  if (withOffers) return { lines, offers: arr };
-  return lines;
-}
-
   // Safety: if size is specified, do not allow non-TV class filtering
   const tvCanon = OFFERS_INDEX.classCanon.tv;
   if (Number(size) && tvCanon && cls && normMatch(cls) !== normMatch(tvCanon)) {
-    return [];
+    return withOffers ? { lines: [], offers: [] } : [];
   }
 
   if (cls) {
@@ -1733,9 +1727,11 @@ function listOffersForBrand(
     .sort((a, b) => Number(a.price) - Number(b.price))
     .slice(0, limit);
 
-  return arr.map((o) =>
+  const lines = arr.map((o) =>
     format === "greeting" ? formatOfferLineGreeting(brand, o) : formatOfferLine(brand, o)
   );
+
+  return withOffers ? { lines, offers: arr } : lines;
 }
 
 function buildBigOffersForGreeting(brand, tvCanon) {
