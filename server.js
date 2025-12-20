@@ -1425,7 +1425,10 @@ function extractSizeOnly(text) {
   if (!s0) return null;
 
   // Accept: "55", "55pouce", "55 pouce", '55"', "55 inch", Arabic بوصة
-  const m = s0.match(/(?:^|\s)(24|32|40|43|50|55|65|75)\s*(?:inch|inches|pouce|pouces|["”″]|بوصة|بوصات)?(?:\s|$)/i);
+const m = s0.match(
+  /(?:^|[^\d])\s*(24|32|40|43|50|55|65|75)\s*(?:p|inch|inches|pouce|pouces|["”″]|بوصة|بوصات)?\s*(?:$|[^\d])/i
+);
+
   if (m) return Number(m[1]);
 
   // If message is only a number
@@ -1437,8 +1440,11 @@ function extractSizeOnly(text) {
 function extractSizeAny(text) {
   const s0 = arabicIndicToAsciiDigits(String(text || ""));
   const s = normMatch(s0);
-  // capture common TV sizes anywhere in text
-  const m = s.match(/\b(24|32|40|43|50|55|65|75)\b\s*(?:inch|inches|pouce|pouces|"|”|″|بوصة|بوصات)?/i);
+
+  const m = s.match(
+    /(?:^|[^\d])\s*(24|32|40|43|50|55|65|75)\s*(?:p|inch|inches|pouce|pouces|["”″]|بوصة|بوصات)?/i
+  );
+
   return m ? Number(m[1]) : null;
 }
 
@@ -1619,15 +1625,23 @@ function listOffersForBrand(
   const arr0 = OFFERS.offers[brand] || [];
   let arr = arr0.filter((o) => Number(o.stock || 0) > 0);
 
+  // Safety: if size is specified, do not allow non-TV class filtering
+  const tvCanon = OFFERS_INDEX.classCanon.tv;
+  if (Number(size) && tvCanon && cls && normMatch(cls) !== normMatch(tvCanon)) {
+    return [];
+  }
+
   if (cls) {
     const ncls = normMatch(cls);
     arr = arr.filter((o) => normMatch(o.class || "") === ncls);
   }
+
   if (category) {
     const ncat = normMatch(category);
     arr = arr.filter((o) => normMatch(o.category || "") === ncat);
   }
-  if (Number.isFinite(size) && size) {
+
+  if (Number.isFinite(Number(size)) && Number(size) > 0) {
     arr = arr.filter((o) => Number(o.size || 0) === Number(size));
   }
 
@@ -1636,7 +1650,9 @@ function listOffersForBrand(
     .sort((a, b) => Number(a.price) - Number(b.price))
     .slice(0, limit);
 
-  return arr.map((o) => (format === "greeting" ? formatOfferLineGreeting(brand, o) : formatOfferLine(brand, o)));
+  return arr.map((o) =>
+    format === "greeting" ? formatOfferLineGreeting(brand, o) : formatOfferLine(brand, o)
+  );
 }
 
 function buildBigOffersForGreeting(brand, tvCanon) {
@@ -1785,10 +1801,11 @@ function tryDirectOfferAnswer(userText, historyMsgs, lang, key) {
   // For size questions, bias to TV class if available
   const tvCanon = OFFERS_INDEX.classCanon.tv;
   const lastCls = ctx.lastClass || lastMentionedClass(historyMsgs);
-  if (sizeVal) {
-    if (tvCanon) cls2 = tvCanon;
-    else if (!cls2) cls2 = lastCls || null;
-  }
+if (sizeVal) {
+  // Size ALWAYS implies TV
+  cls2 = tvCanon || cls2 || lastCls || null;
+}
+
 
   // Priority: Brand + size
   if (brand2 && sizeVal) {
