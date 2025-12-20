@@ -105,12 +105,13 @@ const openai = new OpenAI({ apiKey: OPENAI_API_KEY });
 // I18N STANDARD RULES (NO ENGLISH TO CUSTOMERS)
 // =====================
 const RULES_I18N = {
-  dzl: {
-    delivery: "Delivery: 1–7 ayam.",
-    payment: "Payment: cash 3nd ttsslim wla virement (zid note f formulaire).",
-    warranty: "Warranty: 1 an.",
-    wall_mount: "TV kayji m3ah support/bracket free.",
-  },
+dzl: {
+  delivery: "Livraison: 1–7 ayam.",
+  payment: "Paiement: cash 3nd ttsslim wla virement (zid note f formulaire).",
+  warranty: "Garantie: 1 an.",
+  wall_mount: "TV kayji m3ah support/bracket free.",
+},
+
   fr: {
     delivery: "Livraison : entre 1 et 7 jours selon la ville.",
     payment: "Paiement: cash à la livraison ou virement (note à ajouter dans le formulaire).",
@@ -129,12 +130,15 @@ function warrantyTextForBrand(lang, brand, cls) {
   const b = String(brand || "").toUpperCase();
   const isTv = cls && normMatch(cls).includes("tv");
 
-  // DAIKO TVs => 2 years warranty
-  if (b === "DAIKO" && isTv) {
-    if (L === "fr") return "Garantie: 2 ans (TV DAIKO).";
-    if (L === "ar") return "الضمان: سنتين (تلفاز DAIKO).";
-    return "Warranty: 2 ans (TV DAIKO).";
-  }
+// DAIKO TVs => 2 years warranty
+if (b === "DAIKO" && isTv) {
+  if (L === "fr") return "Garantie: 2 ans (TV DAIKO).";
+  if (L === "ar") return "الضمان: سنتين (تلفاز DAIKO).";
+  return "Daman: 2 snin (TV DAIKO).";
+}
+
+
+
 
   // default warranty (1 year)
   return (RULES_I18N[L] || RULES_I18N.dzl).warranty;
@@ -219,6 +223,13 @@ function normMatch(text) {
 function hasArabicScript(text) {
   return /[\u0600-\u06FF]/.test(String(text || ""));
 }
+function detectModel(text) {
+  const s = normMatch(text);
+  for (const [mLower, entry] of OFFERS_INDEX.modelLookup.entries()) {
+    if (mLower && s.includes(mLower)) return entry;
+  }
+  return null;
+}
 
 function detectLang(text) {
   const t0 = String(text || "").trim();
@@ -268,6 +279,8 @@ Ghadi n3awnk b as2ila l-basita, ila ma qdrtch ghadi ykml m3ak agent.
 🚚 ${RULES_I18N.dzl.delivery}
 
 ${offersPart}
+
+📝 Ila bghiti tdir commande: ${ORDER_FORM_URL}
 
 ${extraLines}`.trim();
 },
@@ -324,8 +337,8 @@ Pour commander: ${ORDER_FORM_URL}`;
 
       greeting: ({ visioLines = [] } = {}) => {
         const offersPart = visioLines.length
-          ? `عروض كبيرة من VISIO:\n${visioLines.join("\n\n")}\n\n`
-          : "عروض كبيرة من VISIO متوفرة.\n\n";
+          ? `عروض كبيرة من DAIKO:\n${visioLines.join("\n\n")}\n\n`
+          : "عروض كبيرة من DAIKO متوفرة.\n\n";
 
         return `${offersPart}مرحباً، أنا بوت ذكاء اصطناعي من Digitronics. أجيب عن الأسئلة البسيطة، وإذا لم أستطع فسيكمل معك أحد الفريق.
 العنوان: ${COMPANY.address}
@@ -816,6 +829,109 @@ function loadLearningRules() {
   return LEARNING_RULES;
 }
 
+// =====================
+// Learning suggestions helpers (conservative)
+// =====================
+
+// Redact long numbers (order numbers, phones) from example texts
+function redactSensitive(text) {
+  const s = String(text || "");
+  // Replace sequences of 4+ digits with ****
+  return s.replace(/\b\d{4,}\b/g, "****");
+}
+
+function tokenize(text) {
+  const s = normMatch(String(text || ""));
+  const raw = s.split(/[^a-z0-9]+/g).filter(Boolean);
+
+  const out = [];
+  // normal tokens >= 3
+  for (const t of raw) {
+    if (t.length >= 3) out.push(t);
+  }
+
+  // join short sequences like "t c l" => "tcl"
+  for (let i = 0; i < raw.length; i++) {
+    const a = raw[i];
+    const b = raw[i + 1];
+    const c = raw[i + 2];
+    if (a && b && c && a.length <= 2 && b.length <= 2 && c.length <= 2) {
+      const joined = `${a}${b}${c}`;
+      if (joined.length >= 3 && joined.length <= 8) out.push(joined);
+    }
+  }
+
+  return out;
+}
+
+
+// Simple Levenshtein distance (small strings, OK for this use)
+function levenshtein(a, b) {
+  a = String(a || "");
+  b = String(b || "");
+  if (a === b) return 0;
+  if (!a.length) return b.length;
+  if (!b.length) return a.length;
+
+  const m = a.length;
+  const n = b.length;
+  const dp = Array.from({ length: m + 1 }, () => new Array(n + 1).fill(0));
+
+  for (let i = 0; i <= m; i++) dp[i][0] = i;
+  for (let j = 0; j <= n; j++) dp[0][j] = j;
+
+  for (let i = 1; i <= m; i++) {
+    const ca = a.charCodeAt(i - 1);
+    for (let j = 1; j <= n; j++) {
+      const cb = b.charCodeAt(j - 1);
+      const cost = ca === cb ? 0 : 1;
+      dp[i][j] = Math.min(
+        dp[i - 1][j] + 1,        // delete
+        dp[i][j - 1] + 1,        // insert
+        dp[i - 1][j - 1] + cost  // substitute
+      );
+    }
+  }
+  return dp[m][n];
+}
+
+// Conservative similarity check:
+// - Only for tokens length 3..20
+// - Accept if distance <= 1 for short words, <= 2 for longer
+function isCloseAliasToken(token, target) {
+  const t = normMatch(token);
+  const x = normMatch(target);
+  if (!t || !x) return false;
+  if (t === x) return false;
+
+  if (t.length < 3 || t.length > 20) return false;
+
+  const d = levenshtein(t, x);
+
+  // Very strict thresholds
+  if (t.length <= 5) return d <= 1;
+  if (t.length <= 10) return d <= 2;
+
+  // For longer tokens, still keep strict
+  return d <= 2;
+}
+
+// Determine if token is already an alias somewhere
+function tokenAlreadyLearned(token, rules) {
+  const t = normMatch(token);
+  if (!t) return true;
+
+  const groups = ["brand_aliases", "class_aliases", "category_aliases"];
+  for (const g of groups) {
+    const obj = rules?.[g] || {};
+    for (const list of Object.values(obj)) {
+      const arr = Array.isArray(list) ? list : [];
+      if (arr.some((x) => normMatch(x) === t)) return true;
+    }
+  }
+  return false;
+}
+
 function appendNdjson(p, obj) {
   try {
     fs.appendFileSync(p, JSON.stringify(obj) + "\n", "utf8");
@@ -895,11 +1011,22 @@ function normalizeHeader(h) {
 }
 
 function parsePrice(raw) {
-  const s = arabicIndicToAsciiDigits(String(raw ?? "").trim());
-  const digits = s.replace(/[^\d.]/g, "");
-  const n = Number(digits);
+  const s0 = arabicIndicToAsciiDigits(String(raw ?? "").trim());
+
+  // If it contains both '.' and ',', assume '.' is thousands separator and ',' is decimal
+  let s = s0;
+  if (s.includes(".") && s.includes(",")) {
+    s = s.replace(/\./g, "").replace(/,/g, ".");
+  } else {
+    // Otherwise, treat comma as thousands separator and remove it
+    s = s.replace(/,/g, "");
+  }
+
+  const cleaned = s.replace(/[^\d.]/g, "");
+  const n = Number(cleaned);
   return Number.isFinite(n) ? n : NaN;
 }
+
 
 function parseSize(raw) {
   const s = arabicIndicToAsciiDigits(String(raw ?? "0").trim());
@@ -1111,7 +1238,7 @@ function isCallMeIntent(text) {
     s.includes("3ayet") ||
     s.includes("3ayt") ||
     s.includes("call me") ||
-    s.includes("call") ||
+    /\bcall\b/i.test(s) ||
     s.includes("warid") ||
     s.includes("t3ayet") ||
     s.includes("tsl") ||
@@ -1119,6 +1246,7 @@ function isCallMeIntent(text) {
     s.includes("عيط")
   );
 }
+
 
 function isBuyIntent(text) {
   const s = normMatch(text);
@@ -1129,6 +1257,9 @@ function isBuyIntent(text) {
     s.includes("bghit ncommander") ||
     s.includes("ncommandi") ||
     s.includes("commander") ||
+    s.includes("passer commande") ||
+    s.includes("passer la commande") ||
+    s.includes("finaliser la commande") ||
     s.includes("acheter") ||
     s.includes("buy") ||
     s.includes("purchase") ||
@@ -1138,6 +1269,7 @@ function isBuyIntent(text) {
     s.includes("بغيت نكموندي")
   );
 }
+
 function isSupportIntent(text) {
   const raw = String(text || "");
   const s = normMatch(raw);
@@ -1165,43 +1297,85 @@ function isSupportIntent(text) {
   );
 }
 
-
-function isOrderStatusIntent(text) {
-  const s = normMatch(text);
-const hard = ["commande", "order", "tracking", "suivi", "talab", "tlb", "statut", "status"];
-  const problem = [
-    "pas recu",
-    "late",
-    "delayed",
-    "retard",
-    "takhert",
-    "t2khret",
-    "matwsl",
-    "ma wslatch",
-    "لم اتوصل",
-    "ما توصلتش",
-    "ما وصلتش",
-    "متأخر",
-    "تأخر",
-  ];
-  const hasHard = hard.some((k) => s.includes(k));
-  const hasProblem = problem.some((p) => s.includes(normMatch(p)));
-  return hasHard || hasProblem;
-}
-
 function isBankTransferIntent(text) {
   const s = normMatch(text);
   return (
     s.includes("virement") ||
-    s.includes("virment") ||
+    s.includes("bank transfer") ||
     s.includes("transfer") ||
-    s.includes("bank") ||
     s.includes("rib") ||
+    s.includes("iban") ||
     s.includes("تحويل") ||
-    s.includes("بنكي") ||
-    s.includes("حوالة")
+    s.includes("تحويل بنكي") ||
+    s.includes("حوالة") ||
+    s.includes("virmnt") ||
+    s.includes("virment")
   );
 }
+
+
+function includesToken(text, token) {
+  const s = normMatch(text);
+  const t = normMatch(token);
+  if (!t) return false;
+
+  // For short tokens like "ac", "tv", require word boundary
+  if (t.length <= 3) {
+    const re = new RegExp(`\\b${t}\\b`, "i");
+    return re.test(s);
+  }
+  return s.includes(t);
+}
+
+function isNoOrderNumberIntent(text) {
+  const s = normMatch(arabicIndicToAsciiDigits(String(text || "")));
+  return (
+    s.includes("ma3ndich") ||
+    s.includes("m3ndich") ||
+    s.includes("ما عنديش") ||
+    s.includes("ماعنديش") ||
+    s.includes("pas de numero") ||
+    s.includes("pas de numéro") ||
+    s.includes("je n ai pas") ||
+    s.includes("j ai pas")
+  );
+}
+
+
+function isOrderStatusIntent(text) {
+  const raw = String(text || "");
+  const s = normMatch(raw);
+
+  // Strong tracking signals
+  const trackingSignals = ["suivi", "tracking", "statut", "status", "où est", "ou est", "where", "fin"];
+
+  // Delay/problem signals
+  const problemSignals = [
+    "pas recu",
+    "pas reçu",
+    "late",
+    "delayed",
+    "retard",
+    "matwsl",
+    "ma wslatch",
+    "لم اتوصل",
+    "ما توصلتش",
+    "متأخر",
+    "تأخر",
+  ];
+
+  const hasTracking = trackingSignals.some((k) => s.includes(normMatch(k)));
+  const hasProblem = problemSignals.some((k) => s.includes(normMatch(k)));
+
+  // explicit mention of order number
+  const mentionsOrderNo =
+    (s.includes("numero") && s.includes("commande")) ||
+    (s.includes("num") && s.includes("commande")) ||
+    (s.includes("رقم") && (s.includes("الطلب") || s.includes("طلب")));
+
+  return mentionsOrderNo || hasTracking || hasProblem;
+}
+
 
 function asksAboutDeliveryPaymentWarranty(text) {
   const s = normMatch(text);
@@ -1274,10 +1448,11 @@ function extractSizeAny(text) {
 function detectBrand(text) {
   const s = normMatch(text);
   const aliases = LEARNING_RULES?.brand_aliases || {};
+
   for (const [canonical, list] of Object.entries(aliases)) {
     const arr = Array.isArray(list) ? list : [];
     for (const a of arr) {
-      if (a && s.includes(normMatch(a))) {
+      if (a && includesToken(s, a)) {
         const b = OFFERS_INDEX.brandNorm.get(normMatch(canonical)) || canonical.toUpperCase();
         if (OFFERS.offers[b]) return b;
       }
@@ -1285,25 +1460,12 @@ function detectBrand(text) {
   }
 
   for (const b of OFFERS_INDEX.brands) {
-    const nb = normMatch(b);
-    if (!nb) continue;
-    if (nb.length <= 3) {
-      const re = new RegExp(`\\b${nb}\\b`, "i");
-      if (re.test(s)) return b;
-    } else if (s.includes(nb)) {
-      return b;
-    }
+    if (b && includesToken(s, b)) return b;
   }
+
   return null;
 }
 
-function detectModel(text) {
-  const s = normMatch(text);
-  for (const [mLower, entry] of OFFERS_INDEX.modelLookup.entries()) {
-    if (mLower && s.includes(mLower)) return entry;
-  }
-  return null;
-}
 
 function buildDefaultClassAliases() {
   const canon = OFFERS_INDEX.classCanon;
@@ -1342,17 +1504,18 @@ function detectClass(text) {
   for (const [canonical, list] of Object.entries(aliases)) {
     const arr = Array.isArray(list) ? list : [];
     for (const a of arr) {
-      if (a && s.includes(normMatch(a))) {
-        const cls = OFFERS_INDEX.classNorm.get(normMatch(canonical)) || canonical;
-        return cls;
-      }
+      if (a && includesToken(s, a)) {
+  const cls = OFFERS_INDEX.classNorm.get(normMatch(canonical)) || canonical;
+  return cls;
+}
+
     }
   }
 
   const defaults = buildDefaultClassAliases();
   for (const [cls, arr] of Object.entries(defaults)) {
     for (const a of arr) {
-      if (a && s.includes(normMatch(a))) return cls;
+      if (a && includesToken(s, a)) return cls;
     }
   }
 
@@ -1384,7 +1547,8 @@ function detectCategory(text) {
   for (const [canonical, list] of Object.entries(aliases)) {
     const arr = Array.isArray(list) ? list : [];
     for (const a of arr) {
-      if (a && s.includes(normMatch(a))) {
+      if (a && includesToken(s, a)) {
+
         const cat = OFFERS_INDEX.categoryNorm.get(normMatch(canonical)) || canonical;
         return cat;
       }
@@ -1394,7 +1558,7 @@ function detectCategory(text) {
   const defaults = buildDefaultCategoryAliases();
   for (const [cat, arr] of Object.entries(defaults)) {
     for (const a of arr) {
-      if (a && s.includes(normMatch(a))) return cat;
+      if (a && includesToken(s, a)) return cat;
     }
   }
 
@@ -1788,7 +1952,8 @@ STRICT STYLE:
 - Do NOT mention stock quantity.
 - Mention delivery/payment/warranty ONLY if the client asks.
 - If client asks for photo/picture/image: ONLY provide the product link if present, otherwise ask for model/brand/size.
-- Do NOT ask the client questions. If info is missing, give the closest direct answer using available offers.
+- Ask at most ONE short clarification question ONLY if it is strictly required to answer correctly (e.g., missing size/model).
+- Otherwise, provide the closest direct answer using available offers.
 
 
 Company:
@@ -1900,12 +2065,291 @@ app.post("/refresh-offers", async (req, res) => {
   return res.json({ ok: true, lastOffersSync });
 });
 
+function requireLearningToken(req, res) {
+  // Hide learning endpoints completely if feature is disabled
+  if (!learningEnabled) {
+    res.status(404).json({ ok: false, error: "Not found" });
+    return false;
+  }
+
+  // Fail-closed if enabled but token is missing
+  if (!LEARNING_TOKEN) {
+    res.status(503).json({ ok: false, error: "Learning token not configured" });
+    return false;
+  }
+
+  const token = req.headers["x-learning-token"];
+  if (token !== LEARNING_TOKEN) {
+    res.status(401).json({ ok: false, error: "Unauthorized" });
+    return false;
+  }
+  return true;
+}
+
+
+
 // Learning endpoints (status + logs)
-app.get("/learning-status", (_req, res) => {
-  if (!learningEnabled) return res.json({ ok: true, enabled: false });
+app.get("/learning-status", (req, res) => {
+  if (!requireLearningToken(req, res)) return;
+
   const rules = readJsonSafe(rulesPath, {});
-  return res.json({ ok: true, enabled: true, rulesVersion: rules.version || 0 });
+  return res.json({
+    ok: true,
+    enabled: true,
+    rulesVersion: rules.version || 0,
+  });
 });
+
+app.post("/learning-accept", (req, res) => {
+  if (!requireLearningToken(req, res)) return;
+
+  // Expect: { type, canonical, alias }
+  const { type, canonical, alias } = req.body || {};
+  const rules = loadLearningRules();
+
+  const result = addAliasToRules(rules, String(type || ""), canonical, alias);
+  if (!result.ok) return res.status(400).json({ ok: false, error: result.error });
+
+  if (result.changed) {
+    rules.version = Number(rules.version || 1) + 1;
+    // Persist + refresh in-memory global
+    atomicWriteJson(rulesPath, rules);
+    LEARNING_RULES = rules;
+  }
+
+  return res.json({
+    ok: true,
+    changed: result.changed,
+    rulesVersion: rules.version,
+  });
+});
+
+app.get("/learning-suggestions", (req, res) => {
+  if (!requireLearningToken(req, res)) return;
+
+  // Reload rules so suggestions reflect latest aliases
+  const rules = loadLearningRules();
+
+  // Guardrails
+  const minOcc = Number(rules?.guardrails?.min_occurrences_to_suggest || 2);
+
+  // Controls
+  const maxLines = Math.min(20000, Math.max(200, Number(req.query.maxLines || 4000)));
+  const limit = Math.min(50, Math.max(5, Number(req.query.limit || 20)));
+
+  if (!fs.existsSync(eventsPath)) {
+    return res.json({ ok: true, suggestions: [], meta: { reason: "no_events_file" } });
+  }
+
+  let raw = "";
+  try {
+    raw = fs.readFileSync(eventsPath, "utf8");
+  } catch (e) {
+    return res.status(500).json({ ok: false, error: "Failed to read events" });
+  }
+
+  const linesAll = raw.split("\n").filter(Boolean);
+  const lines = linesAll.slice(-maxLines);
+
+function atomicWriteJson(filePath, obj) {
+  const dir = path.dirname(filePath);
+  const tmp = path.join(dir, `.tmp_${path.basename(filePath)}_${Date.now()}_${crypto.randomBytes(4).toString("hex")}`);
+  fs.writeFileSync(tmp, JSON.stringify(obj, null, 2), "utf8");
+  fs.renameSync(tmp, filePath);
+}
+
+function normalizeAliasValue(v) {
+  const s = String(v || "").trim();
+  // Guard: no empty, no too long, no multi-line
+  if (!s) return null;
+  if (s.length > 40) return null;
+  if (s.includes("\n") || s.includes("\r")) return null;
+  return s;
+}
+
+function canonicalExists(type, canonical) {
+  const c = String(canonical || "").trim();
+  if (!c) return false;
+  if (type === "brand_alias") {
+    const b = OFFERS_INDEX.brandNorm.get(normMatch(c)) || c.toUpperCase();
+    return Boolean(OFFERS.offers[b]);
+  }
+  if (type === "class_alias") return Boolean(OFFERS_INDEX.classNorm.get(normMatch(c)));
+  if (type === "category_alias") return Boolean(OFFERS_INDEX.categoryNorm.get(normMatch(c)));
+  return false;
+}
+
+function addAliasToRules(rules, type, canonical, alias) {
+  const groups = {
+    brand_alias: "brand_aliases",
+    class_alias: "class_aliases",
+    category_alias: "category_aliases",
+  };
+  const g = groups[type];
+  if (!g) return { ok: false, error: "Invalid type" };
+
+  const canon = String(canonical || "").trim();
+  const ali = normalizeAliasValue(alias);
+  if (!canon || !ali) return { ok: false, error: "Invalid canonical or alias" };
+
+  // Ensure canonical exists in current offers index (prevents “poison rules”)
+  if (!canonicalExists(type, canon)) return { ok: false, error: "Canonical not found in offers index" };
+
+  rules[g] = rules[g] || {};
+  const arr0 = rules[g][canon];
+  const arr = Array.isArray(arr0) ? arr0.slice() : [];
+
+  const nAli = normMatch(ali);
+  const already = arr.some((x) => normMatch(x) === nAli);
+  if (!already) arr.push(ali);
+
+  rules[g][canon] = arr;
+  return { ok: true, changed: !already };
+}
+
+
+
+
+  // Only consider fallback events (you already log these)
+  const events = [];
+  for (const ln of lines) {
+    try {
+      const ev = JSON.parse(ln);
+      if (ev && ev.reason === "fallback_reply" && ev.text) events.push(ev);
+    } catch {
+      // ignore malformed lines
+    }
+  }
+
+  // No events => nothing to suggest
+  if (!events.length) {
+    return res.json({
+      ok: true,
+      suggestions: [],
+      meta: { scanned: lines.length, fallbackEvents: 0 },
+    });
+  }
+
+  // Build canonical targets from current offers index
+  const brandTargets = (OFFERS_INDEX?.brands || []).map((b) => String(b));
+  const classTargets = (OFFERS_INDEX?.classes || []).map((c) => String(c));
+  const categoryTargets = (OFFERS_INDEX?.categories || []).map((c) => String(c));
+
+  // Frequency maps: key = `${type}|${canonical}|${alias}`
+  const freq = new Map();
+  const examples = new Map(); // same key -> string[]
+  const lastSeen = new Map(); // same key -> iso
+
+  function bump(type, canonical, alias, exampleText, atIso) {
+    const k = `${type}|${canonical}|${alias}`;
+    freq.set(k, (freq.get(k) || 0) + 1);
+
+    if (!examples.has(k)) examples.set(k, []);
+    const arr = examples.get(k);
+    if (arr.length < 3) arr.push(redactSensitive(exampleText));
+
+    if (atIso) lastSeen.set(k, atIso);
+  }
+
+  // Create a fast “already known tokens” set (brands/classes/categories + existing aliases)
+  const knownTokens = new Set();
+  for (const b of brandTargets) knownTokens.add(normMatch(b));
+  for (const c of classTargets) knownTokens.add(normMatch(c));
+  for (const c of categoryTargets) knownTokens.add(normMatch(c));
+
+  // Existing aliases
+  for (const obj of [rules.brand_aliases, rules.class_aliases, rules.category_aliases]) {
+    for (const list of Object.values(obj || {})) {
+      const arr = Array.isArray(list) ? list : [];
+      for (const a of arr) knownTokens.add(normMatch(a));
+    }
+  }
+
+  // Main scan
+for (const ev of events) {
+  const txt = String(ev.text || "");
+  const at = String(ev.at || "");
+  const toks = tokenize(txt);
+
+  for (const tok of toks) {
+    const nt = normMatch(tok);
+    if (!nt) continue;
+
+    if (knownTokens.has(nt)) continue;
+    if (tokenAlreadyLearned(tok, rules)) continue;
+
+    // 1) brands
+    for (const canonical of brandTargets) {
+      if (isCloseAliasToken(tok, canonical)) {
+        bump("brand_alias", canonical, tok, txt, at);
+        break;
+      }
+    }
+
+    // 2) classes
+    if (nt.length >= 4) {
+      for (const canonical of classTargets) {
+        const words = tokenize(canonical);
+        if (words.some((w) => isCloseAliasToken(tok, w))) {
+          bump("class_alias", canonical, tok, txt, at);
+          break;
+        }
+      }
+    }
+
+    // 3) categories
+    if (nt.length >= 4) {
+      for (const canonical of categoryTargets) {
+        const words = tokenize(canonical);
+        if (words.some((w) => isCloseAliasToken(tok, w))) {
+          bump("category_alias", canonical, tok, txt, at);
+          break;
+        }
+      }
+    }
+  }
+}
+
+
+
+  // Convert to ranked suggestions
+  const out = [];
+  for (const [k, count] of freq.entries()) {
+    if (count < minOcc) continue;
+
+    const [type, canonical, alias] = k.split("|");
+    out.push({
+      type,
+      canonical,
+      alias,
+      count,
+      examples: examples.get(k) || [],
+      lastSeen: lastSeen.get(k) || null,
+      // Apply hint: where to put this if you accept it
+      applyTo:
+        type === "brand_alias"
+          ? "LEARNING_RULES.brand_aliases"
+          : type === "class_alias"
+          ? "LEARNING_RULES.class_aliases"
+          : "LEARNING_RULES.category_aliases",
+    });
+  }
+
+  out.sort((a, b) => b.count - a.count);
+
+  return res.json({
+    ok: true,
+    suggestions: out.slice(0, limit),
+    meta: {
+      scannedLines: lines.length,
+      fallbackEvents: events.length,
+      minOccurrencesToSuggest: minOcc,
+      limit,
+      maxLines,
+    },
+  });
+});
+
 
 // Main webhook
 app.post("/wanotifier", async (req, res) => {
@@ -1922,30 +2366,26 @@ app.post("/wanotifier", async (req, res) => {
 
 
 
-    // SAVE USER MESSAGE TO MEMORY
-if (userTextRaw) {
-  pushMemory(key, "user", userTextRaw);
+// Pre-checks (rate-limit + media/empty) before storing user message
+if (!rateLimitOk(key)) return res.status(429).json({ ok: false, error: "Rate limit exceeded" });
+
+if (looksLikeMediaOrEmpty(req.body || {})) {
+  const reply = t(lang, "askTextInsteadMedia");
+  pushMemory(key, "assistant", reply);
+  return res.json({ ok: true, reply: shorten(reply, 420) });
 }
 
+if (!userTextRaw) {
+  const reply = t(lang, "typeYourMessage");
+  pushMemory(key, "assistant", reply);
+  return res.json({ ok: true, reply: shorten(reply, 420) });
+}
 
-    if (!rateLimitOk(key)) return res.status(429).json({ ok: false, error: "Rate limit exceeded" });
+// ✅ NOW save user message
+pushMemory(key, "user", userTextRaw);
 
-    // Media/image/audio with no text
-    if (looksLikeMediaOrEmpty(req.body || {})) {
-      const reply = t(lang, "askTextInsteadMedia");
-      pushMemory(key, "assistant", reply);
-      return res.json({ ok: true, reply: shorten(reply, 420) });
-    }
 
     
-    // If empty message
-    if (!userTextRaw) {
-      const reply = t(lang, "typeYourMessage");
-      pushMemory(key, "assistant", reply);
-      return res.json({ ok: true, reply: shorten(reply, 420) });
-    }
-
-
 
     const history = getMemory(key);
 
@@ -1971,11 +2411,14 @@ if (isGreeting(userTextRaw) && userTextRaw.length <= 25) {
   const bigLines = buildBigOffersForGreeting("DAIKO", OFFERS_INDEX.classCanon.tv || null);
 const reply = t("dzl", "greeting", {
   visioLines: bigLines,
-  extraLines:
-    "✅ TV DAIKO: Garantie 2 ans.\n" +
-    "✅ Kayjiw b 2 télécommandes.\n" +
-    "✅ Taman kaychmel support/bracket mural.\n" +
-    "✅ Livraison gratuite.",
+extraLines:
+extraLines:
+  "✅ TV DAIKO: Daman 2 snin.\n" +
+  "✅ Kayjiw b joj télécommandes.\n" +
+  "✅ Taman kaychmel support/bracket mural.\n" +
+  "✅ Livraison free.",
+
+
 }); // keep var name to avoid refactor
   pushMemory(key, "assistant", reply);
   resetStrikes(key);
@@ -2060,9 +2503,25 @@ if (isBuyIntent(userTextRaw)) {
   return res.json({ ok: true, reply: shorten(reply, 520) });
 }
 
+
     // 3) Pending order flow (status)
 let pending = pendingOrderStore.get(key);
 const orderNo = extractOrderNumber(userTextRaw);
+
+if (pending?.waiting && isNoOrderNumberIntent(userTextRaw)) {
+  pendingOrderStore.delete(key);
+  const reply =
+    lang === "fr"
+      ? `D’accord. Sans numéro de commande, vous pouvez appeler: ${CONTACTS.calls.join(" / ")}.`
+      : lang === "ar"
+      ? `تمام. إلا ما كانش رقم الطلب، تقدر تعيط لينا: ${CONTACTS.calls.join(" / ")}.`
+      : `Mzyan. Ila ma3ndkch رقم الطلب، t9dr t3ayet lina: ${CONTACTS.calls.join(" / ")}.`;
+
+  pushMemory(key, "assistant", reply);
+  resetStrikes(key);
+  return res.json({ ok: true, reply: shorten(reply, 420) });
+}
+
 
 if (pending?.waiting && !orderNo) {
   const exitPending =
@@ -2101,6 +2560,9 @@ if (pending?.waiting) {
   return res.json({ ok: true, reply: shorten(reply, 420) });
 }
 
+
+
+
 // Call me intent
 if (isCallMeIntent(userTextRaw)) {
   const recent = lastOrderAckStore.get(key);
@@ -2137,6 +2599,20 @@ if (isSupportIntent(userTextRaw) && !isOrderStatusIntent(userTextRaw) && !isBuyI
   supportModeStore.set(key, { at: Date.now() });
 }
 
+// Optional: exit support mode if user is clearly shopping again
+const shoppingSignal =
+  detectBrand(userTextRaw) ||
+  detectModel(userTextRaw) ||
+  extractSizeOnly(userTextRaw) ||
+  extractSizeAny(userTextRaw) ||
+  detectClass(userTextRaw) ||
+  detectCategory(userTextRaw);
+
+
+if (wasInSupportMode && shoppingSignal) {
+  supportModeStore.delete(key);
+}
+
     // If we are in support mode, do NOT suggest offers (avoid sales responses)
 if (supportModeStore.has(key)) {
   const reply =
@@ -2151,17 +2627,7 @@ if (supportModeStore.has(key)) {
   return res.json({ ok: true, reply: shorten(reply, 520) });
 }
 
-// Optional: exit support mode if user is clearly shopping again
-const shoppingSignal =
-  detectBrand(userTextRaw) ||
-  detectModel(userTextRaw) ||
-  extractSizeOnly(userTextRaw) ||   // use size-only (stricter)
-  detectClass(userTextRaw) ||
-  detectCategory(userTextRaw);
 
-if (wasInSupportMode && shoppingSignal) {
-  supportModeStore.delete(key);
-}
 
     // 4) Deterministic offer answer first
     const direct = tryDirectOfferAnswer(userTextRaw, history, lang, key);
@@ -2179,14 +2645,15 @@ if (wasInSupportMode && shoppingSignal) {
     if (looksLikeFallback(reply)) {
       const n = addStrike(key);
       if (learningEnabled) {
-        appendNdjson(eventsPath, {
-          at: nowIso(),
-          key,
-          phone,
-          text: userTextRaw,
-          reason: "fallback_reply",
-          replyPreview: shorten(reply, 180),
-        });
+  appendNdjson(eventsPath, {
+  at: nowIso(),
+  key,
+  phone: null, // or omit
+  text: redactSensitive(userTextRaw),
+  reason: "fallback_reply",
+  replyPreview: shorten(reply, 180),
+});
+
       }
       if (n >= 3) {
         reply = `${reply}\n\n${t(lang, "cannot3")}`;
