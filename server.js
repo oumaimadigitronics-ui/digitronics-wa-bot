@@ -1900,7 +1900,11 @@ function listOffersForSizeAcrossBrands(size, { cls = null, limit = 3 } = {}) {
   for (const b of OFFERS_INDEX.brands) {
     let arr = (OFFERS.offers[b] || []).filter((o) => Number(o.stock || 0) > 0);
 
-    if (cls) arr = arr.filter((o) => normMatch(o.class || "") === normMatch(cls));
+    if (cls) arr = arr.filter((o) =>
+  normMatch(o.class || "").includes(normMatch(cls)) ||
+  normMatch(cls).includes(normMatch(o.class || ""))
+);
+
     if (Number(size)) arr = arr.filter((o) => Number(o.size || 0) === Number(size));
 
     // pick cheapest per brand
@@ -2251,7 +2255,7 @@ function tryDirectOfferAnswer(userText, historyMsgs, lang, key) {
 
   // 11) Just brand (no question)
   const justBrand = brand && s.replace(/\s+/g, "") === normMatch(brand).replace(/\s+/g, "");
-  if (brand && (justBrand || s.length <= 8)) {
+  if (brand && !sizeVal && (justBrand || s.length <= 8)) {
     const tvCanon2 = OFFERS_INDEX.classCanon.tv;
     if ((brand === "VISIO" || brand === "TCL" || brand === "DAIKO") && tvCanon2) {
       const tvLines = listOffersForBrand(brand, { cls: tvCanon2, limit: 3 });
