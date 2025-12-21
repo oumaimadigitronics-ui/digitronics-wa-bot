@@ -1634,25 +1634,31 @@ function extractOrderNumber(text) {
   return m ? m[0] : null;
 }
 
-function extractSizeOnly(text) {
-  const s0 = arabicIndicToAsciiDigits(String(text || "")).trim();
-  if (!s0) return null;
+function extractTvSize(text) {
+  const s0 = arabicIndicToAsciiDigits(String(text || ""));
 
-  const m = s0.match(/(?:^|[^\d])\s*(24|32|40|43|50|55|65|75)\s*(?:p|inch|inches|pouce|pouces|["”″]|بوصة|بوصات)?\s*(?:$|[^\d])/i);
+  // Match common TV sizes even if attached: "tv50", '50"', "50p", "50 pouce", "50بوصة"
+  const m = s0.match(/(?:^|[^\d])(24|32|40|43|50|55|65|75)(?=$|[^\d])/);
   if (m) return Number(m[1]);
 
-  const s = normMatch(s0);
-  const m2 = s.match(/^\s*(24|32|40|43|50|55|65|75)\s*$/i);
-  return m2 ? Number(m2[1]) : null;
+  // Fallback: if someone sends only digits with spaces/newlines
+  const digitsOnly = s0.replace(/[^\d]/g, "");
+  if (digitsOnly.length === 2) {
+    const n = Number(digitsOnly);
+    if ([24, 32, 40, 43, 50, 55, 65, 75].includes(n)) return n;
+  }
+
+  return null;
 }
 
+// Keep API-compatible names (so you don’t refactor the rest)
+function extractSizeOnly(text) {
+  return extractTvSize(text);
+}
 function extractSizeAny(text) {
-  const s0 = arabicIndicToAsciiDigits(String(text || ""));
-  const s = normMatch(s0);
-
-  const m = s.match(/(?:^|[^\d])\s*(24|32|40|43|50|55|65|75)\s*(?:p|inch|inches|pouce|pouces|["”″]|بوصة|بوصات)?/i);
-  return m ? Number(m[1]) : null;
+  return extractTvSize(text);
 }
+
 
 // =====================
 // Brand / class / category detection
@@ -2134,6 +2140,7 @@ function tryDirectOfferAnswer(userText, historyMsgs, lang, key) {
   const category = detectCategory(text);
   const brand = detectBrand(text);
   const sizeVal = extractSizeOnly(text) || extractSizeAny(text) || null;
+console.log("[DEBUG] sizeVal=", sizeVal, "text=", JSON.stringify(text));
 
   const ctx = getCtx(key) || {};
   const ctxBrand0 = ctx.lastBrand || lastMentionedBrand(historyMsgs) || null;
