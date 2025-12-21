@@ -1270,14 +1270,15 @@ function getTypeFromProduct(p) {
   const name = normMatch(p?.name || "");
   const brand = normMatch(getBrandFromWoo(p) || "");
 
-  // Explicit exceptions (brand+sku)
+  // 1️⃣ HARD EXCEPTIONS (never guess here)
   const EXCEPTIONS = {
     "visio|32vb23e": "LED TV",
   };
-  const k = `${brand}|${sku}`;
-  if (EXCEPTIONS[k]) return EXCEPTIONS[k];
 
-  // 1) Categories first
+  const key = `${brand}|${sku}`;
+  if (EXCEPTIONS[key]) return EXCEPTIONS[key];
+
+  // 2️⃣ CATEGORY-BASED DETECTION (most reliable)
   const cats = Array.isArray(p?.categories) ? p.categories : [];
   for (const c of cats) {
     const cn = normMatch(c?.name || "");
@@ -1291,7 +1292,7 @@ function getTypeFromProduct(p) {
     if (cn.includes("led")) return "LED TV";
   }
 
-  // 2) Name fallback
+  // 3️⃣ NAME FALLBACK (weakest, last)
   if (name.includes("google tv")) return "Google TV";
   if (name.includes("android")) return "Android TV";
   if (name.includes("mini led") || name.includes("mini-led")) return "Mini LED";
@@ -1300,6 +1301,7 @@ function getTypeFromProduct(p) {
   if (name.includes("smart")) return "Smart TV";
   if (name.includes("led")) return "LED TV";
 
+  // 4️⃣ Unknown → empty (do NOT guess)
   return "";
 }
 
@@ -2805,6 +2807,39 @@ app.get("/learning-suggestions", (req, res) => {
 
 // Main webhook
 // Helper should be OUTSIDE the route (top-level)
+
+function ensureMaxOneQuestion(text) {
+  const s = String(text || "").trim();
+  if (!s) return s;
+
+  // Split by question marks (Arabic + Latin)
+  const parts = s.split(/[؟?]/);
+
+  // If no question or only one → OK
+  if (parts.length <= 2) return s;
+
+  // Keep everything until first question mark
+  const firstQIndex = s.search(/[؟?]/);
+  return s.slice(0, firstQIndex + 1).trim();
+}
+
+function addClosingQuestionIfNone(text, lang) {
+  const s = String(text || "").trim();
+  if (!s) return s;
+
+  // Already has a question?
+  if (/[؟?]/.test(s)) return s;
+
+  const q =
+    lang === "fr"
+      ? "Vous préférez le moins cher ou le meilleur choix ?"
+      : lang === "ar"
+      ? "كتفضل الأرخص ولا الأفضل؟"
+      : "كتفضل الأرخص ولا الأحسن؟";
+
+  return `${s}\n\n${q}`;
+}
+
 function isTotalPriceIntent(text) {
   const s = normMatch(text);
   return (
