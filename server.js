@@ -2317,6 +2317,7 @@ function buildSystemPrompt(offersSubset, lang) {
     "- Mention delivery/payment/warranty ONLY if the client asks (except greeting handled outside).\n" +
     "- If client asks for photo/picture/image: ONLY provide product link if present, else write ONE short instruction sentence without question marks.\n" +
     "- Recommend at most 3 options.\n" +
+    "- Do NOT output any URL in normal replies. Only output a product link in the photo flow handled outside.\n" +
     "- Do NOT ask questions. Never output question marks.\n\n" +
     "Company:\n" +
     "- Address: " +
