@@ -1565,28 +1565,37 @@ function extractOrderNumber(text) {
 
 function extractTvSize(text) {
   const s0 = arabicIndicToAsciiDigits(String(text || ""));
-  const allowed = { "24": 1, "32": 1, "40": 1, "43": 1, "50": 1, "55": 1, "65": 1, "75": 1 };
+  const s = s0.toLowerCase();
 
-  let cur = "";
-  for (let i = 0; i < s0.length; i += 1) {
-    const ch = s0[i];
-    const code = s0.charCodeAt(i);
-    const isDigit = code >= 48 && code <= 57;
-    if (isDigit) {
-      cur += ch;
-      if (cur.length > 2) cur = cur.slice(-2);
-    } else {
-      if (cur.length === 2 && allowed[cur]) return Number(cur);
-      cur = "";
-    }
-  }
-  if (cur.length === 2 && allowed[cur]) return Number(cur);
+  const hasTvHint =
+    s.includes('"') ||
+    s.includes("inch") ||
+    s.includes("inches") ||
+    s.includes("tv") ||
+    s.includes("tele") ||
+    s.includes("télé") ||
+    s.includes("بوصة");
+
+  const looksLikeLiters =
+    /\b\d{2,4}\s*l\b/i.test(s0) ||
+    /\b\d{2,4}\s*litre\b/i.test(s) ||
+    /\b\d{2,4}\s*litres\b/i.test(s) ||
+    /\b\d{2,4}\s*litr\b/i.test(s) ||
+    /\b\d{2,4}\s*ltrs\b/i.test(s);
+
+  if (looksLikeLiters && !hasTvHint) return null;
+
+  const m = s0.match(/(?:^|[^\d])(24|32|40|43|50|55|65|75)(?=$|[^\d])/);
+  if (m) return Number(m[1]);
 
   const digitsOnly = s0.replace(/[^\d]/g, "");
-  if (digitsOnly.length === 2 && allowed[digitsOnly]) return Number(digitsOnly);
-
+  if (digitsOnly.length === 2) {
+    const n = Number(digitsOnly);
+    if ([24, 32, 40, 43, 50, 55, 65, 75].includes(n)) return n;
+  }
   return null;
 }
+
 
 function formatOfferLine(brand, o) {
   const sizePart = o && o.size ? " " + o.size + '"' : "";
@@ -1689,6 +1698,38 @@ function listOffersForBrand(brand, opts) {
   if (withOffers) return { lines, offers: arr };
   return lines;
 }
+
+function resolveSelectionFromLastShown(userText, key) {
+  const ctx = getCtx(key);
+  const shown = Array.isArray(ctx && ctx.lastOffersShown) ? ctx.lastOffersShown : [];
+  if (!shown.length) return null;
+
+  const u = normMatch(userText || "");
+  if (!u) return null;
+
+  for (const it of shown) {
+    const brand = String(it && it.brand ? it.brand : "").toUpperCase();
+    const model = String(it && it.model ? it.model : "").trim();
+    if (!brand || !model) continue;
+
+    const offer = findOfferByBrandModel(brand, model);
+    if (!offer) continue;
+    if (Number(offer.stock || 0) <= 0) continue;
+
+    const nameN = normMatch(offer.name || "");
+    const modelN = normMatch(offer.model || "");
+
+    const hit =
+      (modelN && u.includes(modelN)) ||
+      (nameN && u.includes(nameN)) ||
+      (u.includes(normMatch(brand)) && nameN && nameN.length > 4 && u.split(" ").some((tok) => tok.length >= 5 && nameN.includes(tok)));
+
+    if (hit) return { brand, offer };
+  }
+
+  return null;
+}
+
 
 function listOffersForSizeAcrossBrands(size, opts) {
   const o = opts || {};
@@ -2050,6 +2091,15 @@ function isOrderStatusIntent(text) {
 
   return Boolean(mentionsOrderNo || hasTracking || hasProblem);
 }
+
+const pickedBySelection = resolveSelectionFromLastShown(userTextRaw, key);
+if (pickedBySelection) {
+  const out = shortenNoQuestion(formatOfferLine(pickedBySelection.brand, pickedBySelection.offer), 520);
+  memory.push(key, "assistant", out);
+  resetStrikes(key);
+  return res.json({ ok: true, reply: out });
+}
+
 
 function tryDirectOfferAnswer(userText, historyMsgs, lang, key) {
   const text = String(userText || "").trim();
