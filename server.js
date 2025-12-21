@@ -1,14 +1,15 @@
 // digibot-server.js
 // ------------------------------------------------------------
-// Simplified DigiBot (learning removed)
+// DigiBot (WooCommerce ONLY)
 // Core features:
-// - Loads offers from Google Sheet CSV OR WooCommerce
+// - Loads offers ONLY from WooCommerce REST API
 // - Live refresh (timer + manual /refresh-offers endpoint)
 // - Conversation memory (stores BOTH user+assistant messages, last N msgs, TTL, optional disk persist)
-// - Size-only follow-up merge: "32" -> uses last brand in context, else shows best across brands
-// - Order status flow: ask order number, then confirm "we will call you soon"
+// - Size-only merge: "50" uses TV canon class and shows best across brands, stores context
+// - Follow-up: "الأفضل" / "الأرخص" uses lastOffersShown so bot does NOT forget size
+// - Order status flow: request order number, then confirm "we will call you soon"
 // - Buy intent: ONLY then send order form link
-// - Location intent: handled early (won’t trigger order flow)
+// - Location intent: handled early
 // - If client sends image/audio: ask politely to send text
 // - If client asks for photo/picture/image: return product link if product can be resolved
 //
@@ -18,6 +19,7 @@
 // - Do NOT show stock quantity; do NOT offer out-of-stock products (stock <= 0 filtered out).
 // - Mention delivery/payment/warranty ONLY if the client asks (except in greeting).
 // - If the bot cannot answer 3 times in a row in a conversation, show call options.
+// - NO QUESTIONS POLICY: bot never asks questions (no ? / ؟), only short instruction sentences when needed.
 // ------------------------------------------------------------
 
 import "dotenv/config";
@@ -26,7 +28,6 @@ import crypto from "crypto";
 import fs from "fs";
 import path from "path";
 import OpenAI from "openai";
-import { parse } from "csv-parse/sync";
 
 const app = express();
 
@@ -66,8 +67,6 @@ const {
   OPENAI_API_KEY,
   OPENAI_MODEL = "gpt-5.2",
 
-  OFFERS_PROVIDER = "sheet", // "sheet" | "woocommerce"
-  OFFERS_CSV_URL = "",
   OFFERS_REFRESH_MS = "300000",
   OFFERS_REFRESH_TOKEN = "",
 
@@ -102,9 +101,13 @@ if (!OPENAI_API_KEY) {
   process.exit(1);
 }
 
+if (!WC_BASE_URL || !WC_CONSUMER_KEY || !WC_CONSUMER_SECRET) {
+  console.error("Missing WooCommerce env vars: WC_BASE_URL, WC_CONSUMER_KEY, WC_CONSUMER_SECRET");
+  process.exit(1);
+}
+
 const CFG = {
   port: Number(PORT) || 3000,
-  offersProvider: String(OFFERS_PROVIDER || "sheet").toLowerCase(),
   refreshMs: Number(OFFERS_REFRESH_MS) || 300000,
   rateWindowMs: Number(RATE_LIMIT_WINDOW_MS) || 60000,
   rateMax: Number(RATE_LIMIT_MAX) || 25,
@@ -200,7 +203,7 @@ function t(lang, key, vars = {}) {
     dzl: {
       askTextInsteadMedia:
         "Smah lia, ma nqdrch nfhem l-content mn image/voice. 3afak kteb l-message b text bach n3awnk.",
-      typeYourMessage: "3afak kteb su2al dyalk.",
+      typeYourMessage: "3afak kteb l-message dyalk.",
       greeting: ({ daikoLines = [], extras = "" } = {}) => {
         const offersPart = daikoLines.length
           ? `Big offers f DAIKO:\n${daikoLines.join("\n")}`
@@ -227,12 +230,15 @@ ${extras}`.trim();
       callSoon: "Mzyan. Ghadi n3yto lik قريب.",
       callSoonNeedOrder: "Mzyan. Ghadi n3yto lik قريب. Ila 3ndk رقم الطلب sftih lina 3afak.",
       bankTransferHow: `Ila bghiti tخلص b virement: mlli tdir commande, zid note f formulaire: "paiement par virement bancaire".\nFormulaire: ${ORDER_FORM_URL}`,
-      needDetails: "3afak 3tini brand/model/size wla catégorie bach n3tik l-offres.",
+      needDetails: "3tini brand/model/size wla catégorie bach n3tik options.",
       cannot3: `Ma qdrtch n3tik jawab bd9a daba. T9dr t3yt lina: ${CONTACTS.calls.join(" / ")}.`,
       photoLink: ({ link }) => `Hna link dyal l-produit: ${link}`,
-      photoNoLink: "Had l-produit ma 3ndnach link dyal tswira daba. 3tini model wla brand+size.",
-      askBrandModelSize: "3afak 3tini brand wla model wla size bach n3tik link/option.",
-      notAvailableSize: ({ brand, size }) => `Smah lia, ma kaynach ${brand} ${size}" daba. Bghiti chi size okhra?`,
+      photoNoLink: "Ma 3ndnach link dyal tswira daba. 3tini model wla brand+size.",
+      askBrandModelSize: "3tini brand wla model wla size bach n3tik link/option.",
+      notAvailableSize: ({ brand, size }) => `Smah lia, ma kaynach ${brand} ${size}" daba.`,
+      preferBest: "L’a7san men had l-khtiyarat هو",
+      preferCheapest: "L’ar5as men had l-khtiyarat هو",
+      preferNeedContext: "Sift size (b7al tv 50) wla model bach nختar l’a7san wla l’ar5as.",
     },
     fr: {
       askTextInsteadMedia: "Merci. Pour que je comprenne, envoyez un message écrit (sans audio/image).",
@@ -252,12 +258,15 @@ Pour commander: ${ORDER_FORM_URL}`;
       callSoon: "D’accord. Nous vous appellerons bientôt.",
       callSoonNeedOrder: "D’accord. Nous vous appellerons bientôt. Si vous avez un numéro de commande, envoyez-le.",
       bankTransferHow: `Paiement par virement : lors de la commande, ajoutez une note dans le formulaire : "paiement par virement bancaire".\nFormulaire: ${ORDER_FORM_URL}`,
-      needDetails: "Merci de préciser la marque/le modèle/la taille ou la catégorie.",
+      needDetails: "Merci de préciser la marque, le modèle, la taille ou la catégorie.",
       cannot3: `Je ne peux pas répondre avec certitude pour le moment. Vous pouvez appeler: ${CONTACTS.calls.join(" / ")}.`,
       photoLink: ({ link }) => `Voici le lien du produit: ${link}`,
-      photoNoLink: "Je n’ai pas de lien photo pour ce produit. Merci de préciser le modèle ou marque+taille.",
-      askBrandModelSize: "Merci de préciser la marque ou le modèle ou la taille.",
-      notAvailableSize: ({ brand, size }) => `Désolé, je n’ai pas ${brand} ${size}" pour le moment. Vous voulez une autre taille ?`,
+      photoNoLink: "Je n’ai pas de lien photo pour ce produit. Précisez le modèle ou marque+taille.",
+      askBrandModelSize: "Précisez la marque, le modèle ou la taille.",
+      notAvailableSize: ({ brand, size }) => `Désolé, je n’ai pas ${brand} ${size}" pour le moment.`,
+      preferBest: "Le meilleur parmi ces options est",
+      preferCheapest: "Le moins cher parmi ces options est",
+      preferNeedContext: "Envoyez la taille (ex tv 50) ou le modèle pour choisir le meilleur ou le moins cher.",
     },
     ar: {
       askTextInsteadMedia: "شكراً. من فضلك ارسل رسالة مكتوبة (بدون صوت/صورة) باش نقدر نفهمك.",
@@ -277,12 +286,15 @@ ${RULES_I18N.ar.delivery}
       callSoon: "حسناً. غادي نعيطو ليك قريب.",
       callSoonNeedOrder: "حسناً. غادي نعيطو ليك قريب. إلا كان عندك رقم الطلب صيفطو من فضلك.",
       bankTransferHow: `باش تخلص بالتحويل البنكي: منين دير الطلب زيد ملاحظة فالفورم: "الدفع بتحويل بنكي".\nالفورم: ${ORDER_FORM_URL}`,
-      needDetails: "من فضلك عطيني الماركة/الموديل/الحجم أو الفئة باش نعاونك.",
+      needDetails: "عطيني الماركة أو الموديل أو الحجم أو الفئة باش نعاونك.",
       cannot3: `ماقدرتش نعطيك جواب مؤكد دابا. تقدر تعيط لينا: ${CONTACTS.calls.join(" / ")}.`,
       photoLink: ({ link }) => `هاهو رابط المنتج: ${link}`,
-      photoNoLink: "ما كاينش رابط صورة لهاد المنتج دابا. عافاك عطيني الموديل ولا الماركة+الحجم.",
-      askBrandModelSize: "من فضلك عطيني الماركة ولا الموديل ولا الحجم.",
-      notAvailableSize: ({ brand, size }) => `سمح ليا، ما كايناش ${brand} ${size}" دابا. بغيتي شي قياس آخر؟`,
+      photoNoLink: "ما كاينش رابط صورة لهاد المنتج دابا. عطيني الموديل ولا الماركة+الحجم.",
+      askBrandModelSize: "عطيني الماركة ولا الموديل ولا الحجم.",
+      notAvailableSize: ({ brand, size }) => `سمح ليا، ما كايناش ${brand} ${size}" دابا.`,
+      preferBest: "الأفضل من هاد الخيارات هو",
+      preferCheapest: "الأرخص من هاد الخيارات هو",
+      preferNeedContext: "صيفط الحجم (مثلاً tv 50) ولا الموديل باش نختار الأفضل ولا الأرخص.",
     },
   };
 
@@ -364,28 +376,17 @@ function includesToken(text, token) {
   return s.includes(t0);
 }
 
-function ensureMaxOneQuestion(text) {
-  const s = String(text || "").trim();
-  if (!s) return s;
-  const parts = s.split(/[؟?]/);
-  if (parts.length <= 2) return s;
-  const firstQIndex = s.search(/[؟?]/);
-  return s.slice(0, firstQIndex + 1).trim();
+// =====================
+// NO QUESTIONS POLICY
+// =====================
+function ensureNoQuestion(text) {
+  return String(text || "")
+    .replace(/[؟?]+/g, "")
+    .trim();
 }
 
-function addClosingQuestionIfNone(text, lang) {
-  const s = String(text || "").trim();
-  if (!s) return s;
-  if (/[؟?]/.test(s)) return s;
-
-  const q =
-    lang === "fr"
-      ? "Vous préférez le moins cher ou le meilleur choix ?"
-      : lang === "ar"
-      ? "كتفضل الأرخص ولا الأفضل؟"
-      : "كتفضل الأرخص ولا الأحسن؟";
-
-  return `${s}\n\n${q}`;
+function shortenNoQuestion(text, max = 520) {
+  return shorten(ensureNoQuestion(text), max);
 }
 
 function looksLikeFallback(reply) {
@@ -398,7 +399,6 @@ function looksLikeFallback(reply) {
     r.includes("désolé") ||
     r.includes("desole") ||
     r.includes("je ne peux") ||
-    r.includes("i can't") ||
     r.includes("cannot")
   );
 }
@@ -723,8 +723,8 @@ const memory = new Memory({
   dir: CFG.memoryDir,
 });
 
-// Light context store (brand/class/category)
-const ctxStore = new Map(); // key -> { lastBrand, lastClass, lastCategory, at }
+// Light context store
+const ctxStore = new Map(); // key -> { lastBrand,lastClass,lastCategory,lastSize,lastOffersShown,at }
 const CTX_TTL_MS = 24 * 60 * 60 * 1000;
 
 function setCtx(key, patch = {}) {
@@ -795,10 +795,6 @@ function hasFocusBrand() {
   return Boolean(FOCUS.brand && OFFERS?.offers?.[FOCUS.brand]);
 }
 
-function normalizeHeader(h) {
-  return stripDiacritics(String(h || "").trim().toLowerCase()).replace(/[^a-z0-9]+/g, "_");
-}
-
 function parsePrice(raw) {
   const s0 = arabicIndicToAsciiDigits(String(raw ?? "").trim());
   let s = s0;
@@ -810,54 +806,6 @@ function parsePrice(raw) {
   const cleaned = s.replace(/[^\d.]/g, "");
   const n = Number(cleaned);
   return Number.isFinite(n) ? n : NaN;
-}
-
-function parseSize(raw) {
-  const s = arabicIndicToAsciiDigits(String(raw ?? "0").trim());
-  const n = Number(s.replace(/[^\d]/g, ""));
-  return Number.isFinite(n) ? n : 0;
-}
-
-function parseStock(raw) {
-  const s = arabicIndicToAsciiDigits(String(raw ?? "").trim());
-  const n = Number(s.replace(/[^\d]/g, ""));
-  return Number.isFinite(n) ? n : 0;
-}
-
-function cacheBustUrl(url) {
-  if (!url) return url;
-  const sep = url.includes("?") ? "&" : "?";
-  return `${url}${sep}ts=${Date.now()}`;
-}
-
-function buildOffersFromCsv(csvText) {
-  const rowsRaw = parse(csvText, { columns: true, skip_empty_lines: true, trim: true });
-  const offers = {};
-  let kept = 0;
-
-  for (const row of rowsRaw) {
-    const r = {};
-    for (const [k, v] of Object.entries(row)) r[normalizeHeader(k)] = v;
-
-    const brand = String(r.brand ?? r.marque ?? r.brand_marque ?? "").trim().toUpperCase();
-    const model = String(r.model ?? r.sku ?? r.product_sku ?? "").trim();
-    const name = String(r.name ?? r.product_name ?? r.designation ?? "").trim();
-    const category = String(r.category ?? r.categorie ?? r.cat ?? "").trim();
-    const size = parseSize(r.size ?? r.inch ?? r.taille ?? 0);
-    const type = String(r.type ?? "").trim();
-    const price = parsePrice(r.price ?? "");
-    const cls = String(r.class ?? r.classe ?? "").trim();
-    const stock = parseStock(r.stock ?? r.qty ?? r.quantity ?? r.qte ?? 0);
-    const link = String(r.link ?? r.url ?? r.product_link ?? r.lien ?? "").trim();
-
-    if (!brand || !model || !Number.isFinite(price)) continue;
-
-    if (!offers[brand]) offers[brand] = [];
-    offers[brand].push({ model, name, category, size, type, price, class: cls, stock, link });
-    kept += 1;
-  }
-
-  return { offers, kept };
 }
 
 function pickCanonicalClass(classes, tokens = []) {
@@ -931,25 +879,7 @@ function rebuildOffersIndex() {
   };
 }
 
-async function syncOffersFromGoogleSheet() {
-  if (!OFFERS_CSV_URL) throw new Error("Missing OFFERS_CSV_URL in env");
-  const res = await fetch(cacheBustUrl(OFFERS_CSV_URL));
-  if (!res.ok) throw new Error(`Sheet fetch failed: ${res.status}`);
-  const csvText = await res.text();
-
-  const { offers, kept } = buildOffersFromCsv(csvText);
-  OFFERS = { offers };
-  rebuildOffersIndex();
-
-  return {
-    kept,
-    brands: OFFERS_INDEX.brands.length,
-    classes: OFFERS_INDEX.classes.length,
-    categories: OFFERS_INDEX.categories.length,
-  };
-}
-
-// ---- WooCommerce (simplified) ----
+// ---- WooCommerce ----
 function buildWooUrl(pth, params = {}) {
   const base = String(WC_BASE_URL || "").replace(/\/$/, "");
   const u = new URL(base + pth);
@@ -984,6 +914,21 @@ function wcInStock(product) {
   return Number.isFinite(qty) && qty > 0 ? 1 : 0;
 }
 
+function getAttr(p, nameOrSlug) {
+  const attrs = Array.isArray(p?.attributes) ? p.attributes : [];
+  const target = normMatch(nameOrSlug || "");
+  for (const a of attrs) {
+    const n1 = normMatch(a?.name || "");
+    const n2 = normMatch(a?.slug || "");
+    if (n1 === target || n2 === target) {
+      const opts = Array.isArray(a?.options) ? a.options : [];
+      const v = opts[0] ? String(opts[0]).trim() : "";
+      if (v) return v;
+    }
+  }
+  return "";
+}
+
 function getBrandFromWoo(p) {
   // 1) Preferred: brands[] taxonomy (your JSON has it)
   if (Array.isArray(p?.brands) && p.brands.length) {
@@ -992,20 +937,8 @@ function getBrandFromWoo(p) {
   }
 
   // 2) Fallback: attribute "Brand" / pa_brand
-  const brandAttr =
-    getAttr(p, "Brand") || getAttr(p, "Marque") || getAttr(p, "pa_brand");
+  const brandAttr = getAttr(p, "Brand") || getAttr(p, "Marque") || getAttr(p, "pa_brand");
   if (brandAttr) return String(brandAttr).trim().toUpperCase();
-
-  // 3) Fallback: categories that look like brand
-  const cats = Array.isArray(p?.categories) ? p.categories : [];
-  for (const c of cats) {
-    const n = normMatch(c?.name || "");
-    // adapt this to your exact taxonomy patterns
-    if (n === "daiko" || n.startsWith("daiko-") || n.includes("marque")) {
-      const name = String(c?.name || "").trim();
-      if (name && !n.includes("marque")) return name.toUpperCase();
-    }
-  }
 
   return "UNKNOWN";
 }
@@ -1013,7 +946,7 @@ function getBrandFromWoo(p) {
 function getSizeFromCategories(p) {
   const cats = Array.isArray(p?.categories) ? p.categories : [];
   for (const c of cats) {
-    const m = String(c.name || "").match(/\b(24|32|40|43|50|55|65|75)\b/);
+    const m = String(c?.name || "").match(/\b(24|32|40|43|50|55|65|75)\b/);
     if (m) return Number(m[1]);
   }
   return 0;
@@ -1079,7 +1012,6 @@ function offerFromWooProduct(p) {
   if (!Number.isFinite(price)) return null;
 
   return {
-    brand,
     model,
     name: String(p?.name || "").trim(),
     category: firstCategoryName(p),
@@ -1093,10 +1025,6 @@ function offerFromWooProduct(p) {
 }
 
 async function syncOffersFromWoo() {
-  if (!WC_BASE_URL) throw new Error("Missing WC_BASE_URL");
-  if (!WC_CONSUMER_KEY) throw new Error("Missing WC_CONSUMER_KEY");
-  if (!WC_CONSUMER_SECRET) throw new Error("Missing WC_CONSUMER_SECRET");
-
   const perPage = Number(WC_PER_PAGE || 100);
   const status = String(WC_STATUS || "publish");
 
@@ -1112,14 +1040,16 @@ async function syncOffersFromWoo() {
     for (const p of items) {
       const o = offerFromWooProduct(p);
       if (!o) continue;
-      if (!offers[o.brand]) offers[o.brand] = [];
-      offers[o.brand].push(o);
+
+      const brand = getBrandFromWoo(p);
+      if (!offers[brand]) offers[brand] = [];
+      offers[brand].push({ brand, ...o });
       kept += 1;
     }
 
     if (items.length < perPage) break;
     page += 1;
-    if (page > 50) break;
+    if (page > 80) break;
   }
 
   OFFERS = { offers };
@@ -1133,14 +1063,9 @@ async function syncOffersFromWoo() {
   };
 }
 
-async function syncOffers() {
-  if (CFG.offersProvider === "woocommerce") return syncOffersFromWoo();
-  return syncOffersFromGoogleSheet();
-}
-
 async function refreshOffersSafe() {
   try {
-    const info = await syncOffers();
+    const info = await syncOffersFromWoo();
     lastOffersSync = { ok: true, at: nowIso(), error: null };
     console.log("Offers refreshed OK", info);
   } catch (e) {
@@ -1150,7 +1075,7 @@ async function refreshOffersSafe() {
 }
 
 // =====================
-// Product detection helpers (no learning)
+// Product detection helpers
 // =====================
 function detectModel(text) {
   const s = normMatch(text);
@@ -1172,7 +1097,6 @@ function buildDefaultClassAliases() {
   const tvCanon = OFFERS_INDEX.classCanon.tv;
   const out = {};
   if (tvCanon) out[tvCanon] = ["tv", "tele", "télé", "television", "télévision", "تلفاز", "تلفزيون", "google tv", "smart tv"];
-  // You can add more classes here if needed, but keep it simple.
   return out;
 }
 
@@ -1196,7 +1120,7 @@ function detectClass(text) {
   return null;
 }
 
-// Manual category aliases (keep practical, not exhaustive)
+// Manual category aliases (keep practical)
 const CATEGORY_ALIASES = Object.freeze({
   Tv: ["tv", "tele", "télé", "television", "تلفاز", "تلفزيون"],
   Climatiseur: ["clim", "climatiseur", "air conditioner", "ac", "مكيف"],
@@ -1214,17 +1138,14 @@ function detectCategory(text) {
   const s = normMatch(text);
   if (!s) return null;
 
-  const normalizeCanonical = (canonical) =>
-    OFFERS_INDEX?.categoryNorm?.get(normMatch(canonical)) || canonical;
+  const normalizeCanonical = (canonical) => OFFERS_INDEX?.categoryNorm?.get(normMatch(canonical)) || canonical;
 
-  // manual aliases first
   for (const [canonical, aliases] of Object.entries(CATEGORY_ALIASES)) {
     for (const a of aliases) {
       if (a && includesToken(s, a)) return normalizeCanonical(canonical);
     }
   }
 
-  // direct match against known categories
   for (const cat of OFFERS_INDEX?.categories || []) {
     const ncat = normMatch(cat);
     if (!ncat) continue;
@@ -1289,6 +1210,12 @@ function offersHeader(lang, ctx) {
   if (cls) return `Options (${cls}) :`;
   if (brand) return `Options dyal ${brand} :`;
   return "Options:";
+}
+
+function salesIntro(lang, { size, cls } = {}) {
+  if (lang === "fr") return `Voici des options ${cls ? `(${cls}) ` : ""}${size ? `${size}" ` : ""}`.trim();
+  if (lang === "ar") return `هادي بعض الخيارات ${cls ? `(${cls}) ` : ""}${size ? `${size} بوصة ` : ""}`.trim();
+  return `Hna chi options ${cls ? `(${cls}) ` : ""}${size ? `${size}" ` : ""}`.trim();
 }
 
 function listOffersForBrand(brand, { cls = null, category = null, size = null, limit = 3, withOffers = false } = {}) {
@@ -1388,6 +1315,65 @@ function resolveOfferForPhoto(userText, historyMsgs, key) {
   }
 
   return null;
+}
+
+// =====================
+// Follow-up preference: الأفضل / الأرخص (no forgetting)
+// =====================
+function isPreferBest(text) {
+  const s = normMatch(text || "");
+  return s.includes("الأفضل") || s.includes("افضل") || s.includes("أحسن") || s.includes("احسن") || s.includes("best") || s.includes("meilleur");
+}
+function isPreferCheapest(text) {
+  const s = normMatch(text || "");
+  return s.includes("الأرخص") || s.includes("ارخص") || s.includes("cheapest") || s.includes("moins cher") || s.includes("rkhis");
+}
+
+function tvTypeScore(typeStr) {
+  const t = normMatch(typeStr || "");
+  if (t.includes("oled")) return 60;
+  if (t.includes("mini led") || t.includes("mini-led")) return 50;
+  if (t.includes("qled")) return 40;
+  if (t.includes("google")) return 30;
+  if (t.includes("android")) return 20;
+  if (t.includes("smart")) return 10;
+  if (t.includes("led")) return 0;
+  return 0;
+}
+
+function findOfferByBrandModel(brand, model) {
+  const b = String(brand || "").toUpperCase();
+  const m = normMatch(model || "");
+  const arr = OFFERS.offers?.[b] || [];
+  return arr.find((o) => normMatch(o.model || "") === m) || null;
+}
+
+function pickFromLastShown(key, prefer = "best") {
+  const ctx = getCtx(key);
+  const shown = Array.isArray(ctx?.lastOffersShown) ? ctx.lastOffersShown : [];
+  if (!shown.length) return null;
+
+  const resolved = [];
+  for (const it of shown) {
+    const o = findOfferByBrandModel(it.brand, it.model);
+    if (o && Number(o.stock || 0) > 0) resolved.push({ brand: it.brand, offer: o });
+  }
+  if (!resolved.length) return null;
+
+  const isTvContext = normMatch(ctx?.lastClass || "") === normMatch(OFFERS_INDEX.classCanon.tv || "");
+
+  if (prefer === "cheapest") {
+    resolved.sort((a, b) => Number(a.offer.price) - Number(b.offer.price));
+    return resolved[0];
+  }
+
+  resolved.sort((a, b) => {
+    const sa = isTvContext ? tvTypeScore(a.offer.type) : 0;
+    const sb = isTvContext ? tvTypeScore(b.offer.type) : 0;
+    if (sb !== sa) return sb - sa;
+    return Number(b.offer.price) - Number(a.offer.price);
+  });
+  return resolved[0];
 }
 
 // =====================
@@ -1568,7 +1554,7 @@ function isOrderStatusIntent(text) {
 }
 
 // =====================
-// Deterministic offer answer (logic checked & simplified)
+// Deterministic offer answer (fixed + context saved + NO questions)
 // =====================
 function tryDirectOfferAnswer(userText, historyMsgs, lang, key) {
   const text = String(userText || "").trim();
@@ -1582,9 +1568,11 @@ function tryDirectOfferAnswer(userText, historyMsgs, lang, key) {
       lastBrand: modelHit.brand,
       lastClass: modelHit.offer.class || undefined,
       lastCategory: modelHit.offer.category || undefined,
+      lastSize: modelHit.offer.size || undefined,
+      lastOffersShown: [{ brand: modelHit.brand, model: modelHit.offer?.model }],
     });
     const reply = `${offersHeader(lang, { brand: modelHit.brand })}\n${formatOfferLine(modelHit.brand, modelHit.offer)}`;
-    return ensureMaxOneQuestion(reply);
+    return ensureNoQuestion(reply);
   }
 
   // 2) Signals
@@ -1596,18 +1584,26 @@ function tryDirectOfferAnswer(userText, historyMsgs, lang, key) {
   const ctx = getCtx(key);
   const tvCanon = OFFERS_INDEX.classCanon.tv;
 
-  // 3) If size exists => treat as TV sizing, force TV class and ignore category (prevents appliance mismatches)
+  // 3) If size exists => treat as TV sizing, force TV class and ignore category
   const cls2 = sizeVal ? (tvCanon || cls) : cls;
   const category2 = sizeVal ? null : category;
 
-  // 4) Size-only (or size without explicit brand): show best across brands
+  // 4) Size-only (no explicit brand): show best across brands
   if (sizeVal && !brand) {
-    const picks = listOffersForSizeAcrossBrands(sizeVal, { cls: tvCanon, limit: 3 });
+    const picks = listOffersForSizeAcrossBrands(sizeVal, { cls: tvCanon, limit: 3 }) || [];
     if (picks.length) {
-      setCtx(key, { lastClass: tvCanon || undefined });
-      const lines = picks.map((it) => formatOfferLine(it.brand, it.offer)).join("\n\n");
-      const base = `${offersHeader(lang, { size: sizeVal, cls: tvCanon })}\n${lines}`;
-      return ensureMaxOneQuestion(addClosingQuestionIfNone(base, lang));
+      const lines = picks.map((it) => formatOfferLine(it.brand, it.offer));
+
+      setCtx(key, {
+        lastBrand: undefined,
+        lastClass: tvCanon || undefined,
+        lastCategory: undefined,
+        lastSize: sizeVal,
+        lastOffersShown: picks.map((it) => ({ brand: it.brand, model: it.offer?.model })),
+      });
+
+      const base = `${salesIntro(lang, { size: sizeVal, cls: tvCanon })}\n\n${lines.join("\n\n")}`;
+      return ensureNoQuestion(base);
     }
 
     // If user previously had a brand in context, try that brand strictly
@@ -1615,11 +1611,17 @@ function tryDirectOfferAnswer(userText, historyMsgs, lang, key) {
     if (bctx) {
       const pack = listOffersForBrand(bctx, { cls: tvCanon, size: sizeVal, limit: 3, withOffers: true });
       if (pack.lines.length) {
-        setCtx(key, { lastBrand: bctx, lastClass: tvCanon || undefined, lastCategory: undefined });
+        setCtx(key, {
+          lastBrand: bctx,
+          lastClass: tvCanon || undefined,
+          lastCategory: undefined,
+          lastSize: sizeVal,
+          lastOffersShown: (pack.offers || []).map((o) => ({ brand: bctx, model: o.model })),
+        });
         const base = `${offersHeader(lang, { brand: bctx, size: sizeVal })}\n${pack.lines.join("\n\n")}`;
-        return ensureMaxOneQuestion(addClosingQuestionIfNone(base, lang));
+        return ensureNoQuestion(base);
       }
-      return ensureMaxOneQuestion(t(lang, "notAvailableSize", { brand: bctx, size: sizeVal }));
+      return ensureNoQuestion(t(lang, "notAvailableSize", { brand: bctx, size: sizeVal }));
     }
 
     return null;
@@ -1629,30 +1631,48 @@ function tryDirectOfferAnswer(userText, historyMsgs, lang, key) {
   if (brand && sizeVal) {
     const pack = listOffersForBrand(brand, { cls: tvCanon || cls2, size: sizeVal, limit: 3, withOffers: true });
     if (pack.lines.length) {
-      setCtx(key, { lastBrand: brand, lastClass: tvCanon || cls2 || undefined, lastCategory: undefined });
+      setCtx(key, {
+        lastBrand: brand,
+        lastClass: tvCanon || cls2 || undefined,
+        lastCategory: undefined,
+        lastSize: sizeVal,
+        lastOffersShown: (pack.offers || []).map((o) => ({ brand, model: o.model })),
+      });
       const base = `${offersHeader(lang, { brand, size: sizeVal })}\n${pack.lines.join("\n\n")}`;
-      return ensureMaxOneQuestion(addClosingQuestionIfNone(base, lang));
+      return ensureNoQuestion(base);
     }
-    return ensureMaxOneQuestion(t(lang, "notAvailableSize", { brand, size: sizeVal }));
+    return ensureNoQuestion(t(lang, "notAvailableSize", { brand, size: sizeVal }));
   }
 
   // 6) Brand + category
   if (brand && category2) {
-    const lines = listOffersForBrand(brand, { category: category2, limit: 3 });
-    if (lines.length) {
-      setCtx(key, { lastBrand: brand, lastCategory: category2 || undefined });
-      const base = `${offersHeader(lang, { brand, category: category2 })}\n${lines.join("\n\n")}`;
-      return ensureMaxOneQuestion(addClosingQuestionIfNone(base, lang));
+    const pack = listOffersForBrand(brand, { category: category2, limit: 3, withOffers: true });
+    if (pack.lines.length) {
+      setCtx(key, {
+        lastBrand: brand,
+        lastCategory: category2 || undefined,
+        lastClass: undefined,
+        lastSize: undefined,
+        lastOffersShown: (pack.offers || []).map((o) => ({ brand, model: o.model })),
+      });
+      const base = `${offersHeader(lang, { brand, category: category2 })}\n${pack.lines.join("\n\n")}`;
+      return ensureNoQuestion(base);
     }
   }
 
   // 7) Brand + class
   if (brand && cls2) {
-    const lines = listOffersForBrand(brand, { cls: cls2, limit: 3 });
-    if (lines.length) {
-      setCtx(key, { lastBrand: brand, lastClass: cls2 || undefined });
-      const base = `${offersHeader(lang, { brand, cls: cls2 })}\n${lines.join("\n\n")}`;
-      return ensureMaxOneQuestion(addClosingQuestionIfNone(base, lang));
+    const pack = listOffersForBrand(brand, { cls: cls2, limit: 3, withOffers: true });
+    if (pack.lines.length) {
+      setCtx(key, {
+        lastBrand: brand,
+        lastClass: cls2 || undefined,
+        lastCategory: undefined,
+        lastSize: undefined,
+        lastOffersShown: (pack.offers || []).map((o) => ({ brand, model: o.model })),
+      });
+      const base = `${offersHeader(lang, { brand, cls: cls2 })}\n${pack.lines.join("\n\n")}`;
+      return ensureNoQuestion(base);
     }
   }
 
@@ -1665,11 +1685,18 @@ function tryDirectOfferAnswer(userText, historyMsgs, lang, key) {
       .filter((it) => Number.isFinite(Number(it.offer?.price)))
       .sort((a, b) => Number(a.offer.price) - Number(b.offer.price))
       .slice(0, 3);
+
     if (sorted.length) {
-      setCtx(key, { lastCategory: category2 || undefined });
+      setCtx(key, {
+        lastBrand: undefined,
+        lastCategory: category2 || undefined,
+        lastClass: undefined,
+        lastSize: undefined,
+        lastOffersShown: sorted.map((it) => ({ brand: it.brand, model: it.offer?.model })),
+      });
       const lines = sorted.map((it) => formatOfferLine(it.brand, it.offer)).join("\n\n");
       const base = `${offersHeader(lang, { category: category2 })}\n${lines}`;
-      return ensureMaxOneQuestion(addClosingQuestionIfNone(base, lang));
+      return ensureNoQuestion(base);
     }
   }
 
@@ -1682,31 +1709,46 @@ function tryDirectOfferAnswer(userText, historyMsgs, lang, key) {
       .filter((it) => Number.isFinite(Number(it.offer?.price)))
       .sort((a, b) => Number(a.offer.price) - Number(b.offer.price))
       .slice(0, 3);
+
     if (sorted.length) {
-      setCtx(key, { lastClass: cls2 || undefined });
+      setCtx(key, {
+        lastBrand: undefined,
+        lastClass: cls2 || undefined,
+        lastCategory: undefined,
+        lastSize: undefined,
+        lastOffersShown: sorted.map((it) => ({ brand: it.brand, model: it.offer?.model })),
+      });
       const lines = sorted.map((it) => formatOfferLine(it.brand, it.offer)).join("\n\n");
       const base = `${offersHeader(lang, { cls: cls2 })}\n${lines}`;
-      return ensureMaxOneQuestion(addClosingQuestionIfNone(base, lang));
+      return ensureNoQuestion(base);
     }
   }
 
-  // 10) Just brand (show top TVs first if it looks like a TV brand)
+  // 10) Just brand (brand-only message)
   if (brand && !sizeVal && normMatch(text).replace(/\s+/g, "") === normMatch(brand).replace(/\s+/g, "")) {
-    const tvLines = tvCanon ? listOffersForBrand(brand, { cls: tvCanon, limit: 3 }) : [];
-    const lines = tvLines.length ? tvLines : listOffersForBrand(brand, { limit: 3 });
-    if (lines.length) {
-      setCtx(key, { lastBrand: brand, lastClass: tvLines.length ? tvCanon : undefined });
-      const base = `${offersHeader(lang, { brand })}\n${lines.join("\n\n")}`;
-      return ensureMaxOneQuestion(addClosingQuestionIfNone(base, lang));
+    const tvPack = OFFERS_INDEX.classCanon.tv
+      ? listOffersForBrand(brand, { cls: OFFERS_INDEX.classCanon.tv, limit: 3, withOffers: true })
+      : { lines: [], offers: [] };
+
+    const pack = tvPack.lines.length ? tvPack : listOffersForBrand(brand, { limit: 3, withOffers: true });
+    if (pack.lines.length) {
+      setCtx(key, {
+        lastBrand: brand,
+        lastClass: tvPack.lines.length ? OFFERS_INDEX.classCanon.tv : undefined,
+        lastCategory: undefined,
+        lastSize: undefined,
+        lastOffersShown: (pack.offers || []).map((o) => ({ brand, model: o.model })),
+      });
+      const base = `${offersHeader(lang, { brand })}\n${pack.lines.join("\n\n")}`;
+      return ensureNoQuestion(base);
     }
   }
 
-  // Nothing deterministic
   return null;
 }
 
 // =====================
-// LLM fallback (kept, but simplified and bounded)
+// LLM fallback (bounded + NO questions)
 // =====================
 function buildOffersSubsetForPrompt(userText, historyMsgs, key) {
   const combined = [userText, ...historyMsgs.map((m) => m.content)].join(" ");
@@ -1729,7 +1771,6 @@ function buildOffersSubsetForPrompt(userText, historyMsgs, key) {
     category = null;
   }
 
-  // limit subset hard
   const cap = (arr, n) => arr.slice(0, n);
 
   if (brand && cls) {
@@ -1751,7 +1792,6 @@ function buildOffersSubsetForPrompt(userText, historyMsgs, key) {
     return { offers: { [brand]: cap(arr, 60) }, meta: { brand, size: sizeVal || null } };
   }
 
-  // no brand: send small catalog map
   return {
     offers: {
       AVAILABLE_CATEGORIES: OFFERS_INDEX.categories.slice(0, 40).map((c) => ({ category: c })),
@@ -1774,10 +1814,9 @@ STRICT STYLE:
 - Do NOT suggest out-of-stock products (stock <= 0).
 - Do NOT mention stock quantity.
 - Mention delivery/payment/warranty ONLY if the client asks (except greeting handled outside).
-- If client asks for photo/picture/image: ONLY provide product link if present, else ask for model/brand/size.
+- If client asks for photo/picture/image: ONLY provide product link if present, else write ONE short instruction sentence without any question mark.
 - Recommend at most 3 options.
-- Ask at most ONE short clarification question only if strictly required.
-- End with at most ONE question.
+- DO NOT ask questions. Never output ? or ؟.
 
 Company:
 - Address: ${COMPANY.address}
@@ -1800,8 +1839,7 @@ async function callOpenAIChat(messages, maxOut = 380) {
       temperature: 0.3,
       max_completion_tokens: maxOut,
     });
-  } catch (e) {
-    // compatibility fallback
+  } catch (_e) {
     return await openai.chat.completions.create({
       model: OPENAI_MODEL,
       messages,
@@ -1822,10 +1860,9 @@ async function digibotLLMReply(userText, historyMsgs, lang, key) {
 
   const r = await callOpenAIChat(messages, 380);
   let reply = r?.choices?.[0]?.message?.content?.trim() || "";
-  reply = ensureMaxOneQuestion(reply);
+  reply = ensureNoQuestion(reply);
 
-  // Safety fallback if model returns empty
-  if (!reply) reply = t(lang, "needDetails");
+  if (!reply) reply = ensureNoQuestion(t(lang, "needDetails"));
   return reply;
 }
 
@@ -1926,19 +1963,19 @@ app.post("/wanotifier", async (req, res) => {
       return res.status(429).json({ ok: false, error: "Rate limit exceeded" });
     }
 
-    // Media-only: ask for text (do not store fake user message)
+    // Media-only
     if (looksLikeMediaOrEmpty(req.body || {})) {
-      const reply = t(lang, "askTextInsteadMedia");
+      const reply = shortenNoQuestion(t(lang, "askTextInsteadMedia"), 420);
       memory.push(key, "assistant", reply);
       resetStrikes(key);
-      return res.json({ ok: true, reply: shorten(reply, 420) });
+      return res.json({ ok: true, reply });
     }
 
     if (!userTextRaw) {
-      const reply = t(lang, "typeYourMessage");
+      const reply = shortenNoQuestion(t(lang, "typeYourMessage"), 420);
       memory.push(key, "assistant", reply);
       resetStrikes(key);
-      return res.json({ ok: true, reply: shorten(reply, 420) });
+      return res.json({ ok: true, reply });
     }
 
     // Store user message
@@ -1954,18 +1991,18 @@ app.post("/wanotifier", async (req, res) => {
         "✅ Taman kaychmel support/bracket mural.\n" +
         "✅ Livraison gratuite.";
 
-      const reply = t("dzl", "greeting", { daikoLines, extras });
+      const reply = shortenNoQuestion(t("dzl", "greeting", { daikoLines, extras }), 1000);
       memory.push(key, "assistant", reply);
       resetStrikes(key);
-      return res.json({ ok: true, reply: shorten(reply, 1000) });
+      return res.json({ ok: true, reply });
     }
 
     // 1) Location (early)
     if (isLocationIntent(userTextRaw)) {
-      const reply = t(lang, "address");
+      const reply = shortenNoQuestion(t(lang, "address"), 420);
       memory.push(key, "assistant", reply);
       resetStrikes(key);
-      return res.json({ ok: true, reply: shorten(reply, 420) });
+      return res.json({ ok: true, reply });
     }
 
     // Photo request (ONLY if not in support mode)
@@ -1973,25 +2010,25 @@ app.post("/wanotifier", async (req, res) => {
       const resolved = resolveOfferForPhoto(userTextRaw, history, key);
 
       if (!resolved) {
-        const reply = t(lang, "askBrandModelSize");
+        const reply = shortenNoQuestion(t(lang, "askBrandModelSize"), 420);
         memory.push(key, "assistant", reply);
         resetStrikes(key);
-        return res.json({ ok: true, reply: shorten(reply, 420) });
+        return res.json({ ok: true, reply });
       }
 
       const link = String(resolved.offer?.link || "").trim();
-      const reply = link ? t(lang, "photoLink", { link }) : t(lang, "photoNoLink");
+      const reply = shortenNoQuestion(link ? t(lang, "photoLink", { link }) : t(lang, "photoNoLink"), 520);
       memory.push(key, "assistant", reply);
       resetStrikes(key);
-      return res.json({ ok: true, reply: shorten(reply, 520) });
+      return res.json({ ok: true, reply });
     }
 
     // Bank transfer question
     if (isBankTransferIntent(userTextRaw)) {
-      const reply = t(lang, "bankTransferHow");
+      const reply = shortenNoQuestion(t(lang, "bankTransferHow"), 520);
       memory.push(key, "assistant", reply);
       resetStrikes(key);
-      return res.json({ ok: true, reply: shorten(reply, 520) });
+      return res.json({ ok: true, reply });
     }
 
     // Delivery/payment/warranty only if asked
@@ -2000,43 +2037,30 @@ app.post("/wanotifier", async (req, res) => {
       const parts = [];
       const r = RULES_I18N[lang] || RULES_I18N.dzl;
 
-      if (s.includes("delivery") || s.includes("livraison") || s.includes("توصيل") || s.includes("التوصيل")) {
-        parts.push(r.delivery);
-      }
-      if (
-        s.includes("payment") ||
-        s.includes("paiement") ||
-        s.includes("الدفع") ||
-        s.includes("cash") ||
-        s.includes("virement") ||
-        s.includes("bank") ||
-        s.includes("rib")
-      ) {
+      if (s.includes("delivery") || s.includes("livraison") || s.includes("توصيل") || s.includes("التوصيل")) parts.push(r.delivery);
+      if (s.includes("payment") || s.includes("paiement") || s.includes("الدفع") || s.includes("cash") || s.includes("virement") || s.includes("bank") || s.includes("rib"))
         parts.push(r.payment);
-      }
       if (s.includes("warranty") || s.includes("garantie") || s.includes("الضمان") || s.includes("ضمان")) {
         const ctx = getCtx(key);
         const brandGuess = ctx.lastBrand || detectBrand(history.map((m) => m.content).join(" ")) || null;
         const clsGuess = ctx.lastClass || null;
         parts.push(warrantyTextForBrand(lang, brandGuess, clsGuess));
       }
-      if (s.includes("wall mount") || s.includes("support") || s.includes("حامل") || s.includes("براكي")) {
-        parts.push(r.wall_mount);
-      }
+      if (s.includes("wall mount") || s.includes("support") || s.includes("حامل") || s.includes("براكي")) parts.push(r.wall_mount);
 
-      const reply = parts.length ? parts.join("\n") : t(lang, "needDetails");
+      const reply = shortenNoQuestion(parts.length ? parts.join("\n") : t(lang, "needDetails"), 520);
       memory.push(key, "assistant", reply);
       resetStrikes(key);
-      return res.json({ ok: true, reply: shorten(reply, 520) });
+      return res.json({ ok: true, reply });
     }
 
     // 2) Buy intent -> send order form only
     if (isBuyIntent(userTextRaw)) {
       supportModeStore.delete(key);
-      const reply = t(lang, "orderForm");
+      const reply = shortenNoQuestion(t(lang, "orderForm"), 520);
       memory.push(key, "assistant", reply);
       resetStrikes(key);
-      return res.json({ ok: true, reply: shorten(reply, 520) });
+      return res.json({ ok: true, reply });
     }
 
     // 3) Pending order status flow
@@ -2051,33 +2075,36 @@ app.post("/wanotifier", async (req, res) => {
           : lang === "ar"
           ? `تمام. إلا ما كانش رقم الطلب، تقدر تعيط لينا: ${CONTACTS.calls.join(" / ")}.`
           : `Mzyan. Ila ma3ndkch رقم الطلب، t9dr t3ayet lina: ${CONTACTS.calls.join(" / ")}.`;
-      memory.push(key, "assistant", reply);
+      const out = shortenNoQuestion(reply, 420);
+      memory.push(key, "assistant", out);
       resetStrikes(key);
-      return res.json({ ok: true, reply: shorten(reply, 420) });
+      return res.json({ ok: true, reply: out });
     }
 
     if (pending?.waiting) {
       if (orderNo) {
         pendingOrderStore.delete(key);
         lastOrderAckStore.set(key, { at: Date.now(), orderNo });
-        const reply = t(lang, "gotOrderNo");
-        memory.push(key, "assistant", reply);
+        const out = shortenNoQuestion(t(lang, "gotOrderNo"), 520);
+        memory.push(key, "assistant", out);
         resetStrikes(key);
-        return res.json({ ok: true, reply: shorten(reply, 520) });
+        return res.json({ ok: true, reply: out });
       }
-      const reply = t(lang, "askOrderNo");
-      memory.push(key, "assistant", reply);
-      return res.json({ ok: true, reply: shorten(reply, 420) });
+      const out = shortenNoQuestion(t(lang, "askOrderNo"), 420);
+      memory.push(key, "assistant", out);
+      return res.json({ ok: true, reply: out });
     }
 
     // Call me intent
     if (isCallMeIntent(userTextRaw)) {
       const recent = lastOrderAckStore.get(key);
-      const reply =
-        recent?.at && Date.now() - recent.at < PENDING_TTL_MS ? t(lang, "callSoon") : t(lang, "callSoonNeedOrder");
-      memory.push(key, "assistant", reply);
+      const out = shortenNoQuestion(
+        recent?.at && Date.now() - recent.at < PENDING_TTL_MS ? t(lang, "callSoon") : t(lang, "callSoonNeedOrder"),
+        420
+      );
+      memory.push(key, "assistant", out);
       resetStrikes(key);
-      return res.json({ ok: true, reply: shorten(reply, 420) });
+      return res.json({ ok: true, reply: out });
     }
 
     // Start order status flow with strong intent
@@ -2085,15 +2112,15 @@ app.post("/wanotifier", async (req, res) => {
       supportModeStore.delete(key);
       if (orderNo) {
         lastOrderAckStore.set(key, { at: Date.now(), orderNo });
-        const reply = t(lang, "gotOrderNo");
-        memory.push(key, "assistant", reply);
+        const out = shortenNoQuestion(t(lang, "gotOrderNo"), 520);
+        memory.push(key, "assistant", out);
         resetStrikes(key);
-        return res.json({ ok: true, reply: shorten(reply, 520) });
+        return res.json({ ok: true, reply: out });
       }
       pendingOrderStore.set(key, { waiting: true, at: Date.now() });
-      const reply = t(lang, "askOrderNo");
-      memory.push(key, "assistant", reply);
-      return res.json({ ok: true, reply: shorten(reply, 420) });
+      const out = shortenNoQuestion(t(lang, "askOrderNo"), 420);
+      memory.push(key, "assistant", out);
+      return res.json({ ok: true, reply: out });
     }
 
     // 4) Support mode (blocks offers)
@@ -2101,25 +2128,47 @@ app.post("/wanotifier", async (req, res) => {
     if (isSupportIntent(userTextRaw)) supportModeStore.set(key, { at: Date.now() });
 
     // Exit support mode if user is clearly shopping again
-    const shoppingSignal = detectBrand(userTextRaw) || detectModel(userTextRaw) || extractTvSize(userTextRaw) || detectClass(userTextRaw) || detectCategory(userTextRaw);
+    const shoppingSignal =
+      detectBrand(userTextRaw) || detectModel(userTextRaw) || extractTvSize(userTextRaw) || detectClass(userTextRaw) || detectCategory(userTextRaw);
     if (wasInSupport && shoppingSignal) supportModeStore.delete(key);
 
     if (supportModeStore.has(key)) {
       const reply =
         lang === "ar"
-          ? "تمام. شنو موديل الجهاز؟ وشنو المشكل بالضبط: ما كيشعلش، ما كايناش الصورة، ما كايناش الصوت، ولا كايبان كود خطأ؟"
+          ? "تمام. صيفط ليا موديل الجهاز وشرح المشكل بالضبط: ما كيشعلش، ما كايناش الصورة، ما كايناش الصوت، ولا كايبان كود خطأ"
           : lang === "fr"
-          ? "D’accord. Quel est le modèle de l’appareil et quel est le problème exact (ne s’allume pas, pas d’image, pas de son, code erreur) ?"
-          : "Mzyan. 3afak 3tini modèle dyal l-appareil w achno l-mochkil bddabt (ma kaych3elch / ma kaynach tswira / ma kaynach s-sout / code d’erreur).";
-      memory.push(key, "assistant", reply);
+          ? "D’accord. Envoyez le modèle de l’appareil et décrivez le problème: ne s’allume pas, pas d’image, pas de son, ou code erreur"
+          : "Mzyan. Sift modèle dyal l-appareil w chrah l-mochkil: ma kaych3elch / ma kaynach tswira / ma kaynach s-sout / code d’erreur";
+      const out = shortenNoQuestion(reply, 520);
+      memory.push(key, "assistant", out);
       resetStrikes(key);
-      return res.json({ ok: true, reply: shorten(reply, 520) });
+      return res.json({ ok: true, reply: out });
+    }
+
+    // 4.5) Follow-up preference handler (الأفضل / الأرخص) before offers logic
+    if (isPreferBest(userTextRaw) || isPreferCheapest(userTextRaw)) {
+      const prefer = isPreferCheapest(userTextRaw) ? "cheapest" : "best";
+      const picked = pickFromLastShown(key, prefer);
+
+      if (picked) {
+        const line = formatOfferLine(picked.brand, picked.offer);
+        const msg = prefer === "cheapest" ? t(lang, "preferCheapest") : t(lang, "preferBest");
+        const out = shortenNoQuestion(`${msg}\n${line}`, 520);
+        memory.push(key, "assistant", out);
+        resetStrikes(key);
+        return res.json({ ok: true, reply: out });
+      }
+
+      const out = shortenNoQuestion(t(lang, "preferNeedContext"), 420);
+      memory.push(key, "assistant", out);
+      resetStrikes(key);
+      return res.json({ ok: true, reply: out });
     }
 
     // 5) Deterministic offer answer first
     const direct = tryDirectOfferAnswer(userTextRaw, history, lang, key);
     if (direct) {
-      const reply = shorten(direct, 520);
+      const reply = shortenNoQuestion(direct, 520);
       memory.push(key, "assistant", reply);
       resetStrikes(key);
       return res.json({ ok: true, reply });
@@ -2135,7 +2184,7 @@ app.post("/wanotifier", async (req, res) => {
       resetStrikes(key);
     }
 
-    reply = shorten(reply, 520);
+    reply = shortenNoQuestion(reply, 520);
     memory.push(key, "assistant", reply);
 
     const ms = Date.now() - t0;
