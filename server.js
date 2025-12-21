@@ -30,6 +30,33 @@ import path from "path";
 const app = express();
 app.use(express.json({ limit: "5mb" }));
 
+// JSON parser + raw body capture
+app.use(
+  express.json({
+    limit: "5mb",
+    verify: (req, _res, buf) => {
+      req.rawBody = buf.toString("utf8");
+    },
+  })
+);
+
+// Raw-body log (debug)
+app.use((req, _res, next) => {
+  if (req.rawBody) {
+    console.log(
+      "[RAW BODY]",
+      req.method,
+      req.url,
+      "CT=",
+      req.headers["content-type"],
+      "BODY=",
+      req.rawBody.slice(0, 400)
+    );
+  }
+  next();
+});
+
+
 // =====================
 // ENV
 // =====================
@@ -2535,6 +2562,23 @@ app.get("/offers-status", (_req, res) => {
     sampleCategories: OFFERS_INDEX.categories.slice(0, 12),
   });
 });
+app.get("/debug-offers/tcl-50", (_req, res) => {
+  const list = (OFFERS.offers?.TCL || []).filter(
+    (o) => Number(o.size) === 50 && Number(o.stock || 0) > 0
+  );
+
+  res.json({
+    ok: true,
+    count: list.length,
+    items: list.map((o) => ({
+      model: o.model,
+      size: o.size,
+      price: o.price,
+      stock: o.stock,
+    })),
+  });
+});
+
 
 app.post("/refresh-offers", async (req, res) => {
   if (OFFERS_REFRESH_TOKEN) {
@@ -3264,6 +3308,27 @@ app.post("/wanotifier", async (req, res) => {
     );
     return res.status(500).json({ ok: false, error: "Server error" });
   }
+});
+app.get("/debug-offers/:brand-:size", (req, res) => {
+  const brand = String(req.params.brand || "").toUpperCase();
+  const size = Number(req.params.size);
+
+  const list = (OFFERS.offers?.[brand] || []).filter(
+    (o) => Number(o.size) === size && Number(o.stock || 0) > 0
+  );
+
+  res.json({
+    ok: true,
+    brand,
+    size,
+    count: list.length,
+    items: list.map((o) => ({
+      model: o.model,
+      size: o.size,
+      price: o.price,
+      stock: o.stock,
+    })),
+  });
 });
 
 // Keep app.listen OUTSIDE the route
