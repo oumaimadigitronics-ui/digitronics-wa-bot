@@ -2177,9 +2177,8 @@ function tryDirectOfferAnswer(userText, historyMsgs, lang, key) {
 
   // 5) If size exists, force TV class
   if (sizeVal) {
-    const tvCanon = OFFERS_INDEX.classCanon.tv;
-    cls2 = tvCanon || cls2 || lastCls || null;
-  }
+  cls2 = OFFERS_INDEX.classCanon.tv;
+}
 
   // 6) Brand + size
   if (brand2 && sizeVal) {
@@ -2253,9 +2252,14 @@ function tryDirectOfferAnswer(userText, historyMsgs, lang, key) {
     }
   }
 
-  // 11) Just brand (no question)
-  const justBrand = brand && s.replace(/\s+/g, "") === normMatch(brand).replace(/\s+/g, "");
-  if (brand && !sizeVal && (justBrand || s.length <= 8)) {
+// 11) Just brand (ONLY if NO size was requested)
+const justBrand =
+  brand &&
+  !sizeVal &&
+  s.replace(/\s+/g, "") === normMatch(brand).replace(/\s+/g, "");
+
+if (brand && !sizeVal && (justBrand || s.length <= 8)) {
+
     const tvCanon2 = OFFERS_INDEX.classCanon.tv;
     if ((brand === "VISIO" || brand === "TCL" || brand === "DAIKO") && tvCanon2) {
       const tvLines = listOffersForBrand(brand, { cls: tvCanon2, limit: 3 });
