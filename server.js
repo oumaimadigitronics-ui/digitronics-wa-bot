@@ -1189,9 +1189,228 @@ async function syncOffersFromGoogleSheet() {
   };
 }
 
+// =====================
+// WooCommerce provider
+// =====================
+function buildWooUrl(path, params = {}) {
+  const base = String(process.env.WC_BASE_URL || "").replace(/\/$/, "");
+  const u = new URL(base + path);
+
+  // auth via query-string (simple & common)
+  u.searchParams.set("consumer_key", process.env.WC_CONSUMER_KEY || "");
+  u.searchParams.set("consumer_secret", process.env.WC_CONSUMER_SECRET || "");
+
+  for (const [k, v] of Object.entries(params)) {
+    if (v !== undefined && v !== null && String(v) !== "") u.searchParams.set(k, String(v));
+  }
+  return u.toString();
+}
+
+async function wcFetchJson(url) {
+  const res = await fetch(url, { headers: { Accept: "application/json" } });
+  if (!res.ok) throw new Error(`Woo fetch failed: ${res.status}`);
+  return res.json();
+}
+
+function getAttr(product, attrName) {
+  const want = normMatch(attrName);
+  const attrs = Array.isArray(product?.attributes) ? product.attributes : [];
+  const hit = attrs.find((a) => normMatch(a?.name) === want);
+  if (!hit) return null;
+  const opt = Array.isArray(hit.options) ? hit.options[0] : null;
+  return opt ? String(opt).trim() : null;
+}
+
+function getMeta(product, metaKey) {
+  const want = normMatch(metaKey);
+  const metas = Array.isArray(product?.meta_data) ? product.meta_data : [];
+  const hit = metas.find((m) => normMatch(m?.key) === want);
+  return hit?.value != null ? String(hit.value).trim() : null;
+}
+
+function firstCategoryName(product) {
+  const cats = Array.isArray(product?.categories) ? product.categories : [];
+  return cats[0]?.name ? String(cats[0].name).trim() : "";
+}
+
+function wcPrice(product) {
+  const p = product?.sale_price || product?.regular_price || product?.price || "";
+  return parsePrice(p);
+}
+
+function wcStockAsNumber(product) {
+  // We only need in-stock vs out-of-stock (never show quantity)
+  const status = String(product?.stock_status || "").toLowerCase();
+  if (status === "instock") return 1;
+
+  const qty = Number(product?.stock_quantity ?? NaN);
+  if (Number.isFinite(qty) && qty > 0) return 1;
+
+  return 0;
+}
+
+function getBrandFromWoo(p) {
+  if (Array.isArray(p?.brands) && p.brands.length) {
+    return String(p.brands[0].name || "").trim().toUpperCase();
+  }
+  return "UNKNOWN";
+}
+
+function getSizeFromCategories(p) {
+  const cats = Array.isArray(p?.categories) ? p.categories : [];
+  for (const c of cats) {
+    const m = String(c.name || "").match(/\b(24|32|40|43|50|55|65|75)\b/);
+    if (m) return Number(m[1]);
+  }
+  return 0;
+}
+
+function getTypeFromProduct(p) {
+  const sku = normMatch(p?.sku || "");
+  const name = normMatch(p?.name || "");
+  const brand = normMatch(getBrandFromWoo(p) || "");
+
+  // Explicit exceptions (brand+sku)
+  const EXCEPTIONS = {
+    "visio|32vb23e": "LED TV",
+  };
+  const k = `${brand}|${sku}`;
+  if (EXCEPTIONS[k]) return EXCEPTIONS[k];
+
+  // 1) Categories first
+  const cats = Array.isArray(p?.categories) ? p.categories : [];
+  for (const c of cats) {
+    const cn = normMatch(c?.name || "");
+
+    if (cn.includes("google tv")) return "Google TV";
+    if (cn.includes("android")) return "Android TV";
+    if (cn.includes("mini led") || cn.includes("mini-led")) return "Mini LED";
+    if (cn.includes("qled")) return "QLED";
+    if (cn.includes("oled")) return "OLED";
+    if (cn.includes("smart tv")) return "Smart TV";
+    if (cn.includes("led")) return "LED TV";
+  }
+
+  // 2) Name fallback
+  if (name.includes("google tv")) return "Google TV";
+  if (name.includes("android")) return "Android TV";
+  if (name.includes("mini led") || name.includes("mini-led")) return "Mini LED";
+  if (name.includes("qled")) return "QLED";
+  if (name.includes("oled")) return "OLED";
+  if (name.includes("smart")) return "Smart TV";
+  if (name.includes("led")) return "LED TV";
+
+  return "";
+}
+
+
+
+function getClassFromCategories(p) {
+  const cats = Array.isArray(p?.categories) ? p.categories : [];
+  const names = cats.map((c) => normMatch(c?.name || ""));
+
+  const hit = (arr) => names.some((n) => arr.some((k) => n.includes(k)));
+
+  if (hit(["tv", "tele", "télé", "google tv", "smart tv"])) return "Tv";
+  if (hit(["machine a laver", "lave linge", "washing"])) return "Machine A Laver";
+  if (hit(["frigo", "refrigerateur", "réfrigérateur", "refrigerateur"])) return "Refrigerateur";
+  if (hit(["clim", "climatiseur", "air conditioner"])) return "Climatiseur";
+  if (hit(["chauffe", "chauffe-eau", "chauffe eau", "water heater"])) return "Chauffe-eau";
+  if (hit(["congelateur", "congélateur", "freezer"])) return "Congelateur";
+  if (hit(["micro", "micro-ondes", "microwave"])) return "Micro-ondes";
+  if (hit(["lave vaisselle", "dishwasher"])) return "Lave Vaisselle";
+
+  return ""; // unknown
+}
+
+
+function offerFromWooProduct(p) {
+  const model = String(p?.sku || "").trim();
+  if (!model) return null;
+
+  const brand = getBrandFromWoo(p);
+  if (!brand || brand === "UNKNOWN") return null;
+
+  const price = wcPrice(p);
+  if (!Number.isFinite(price)) return null;
+
+  const cls = getClassFromCategories(p);
+  const size = getSizeFromCategories(p);
+
+  return {
+    brand,
+    model,
+    name: String(p?.name || "").trim(),
+    category: firstCategoryName(p),
+    size,
+    type: getTypeFromProduct(p),
+    price,
+    class: cls,
+    stock: wcStockAsNumber(p),
+    link: String(p?.permalink || "").trim(),
+  };
+}
+
+
+
+async function syncOffersFromWoo() {
+  if (!process.env.WC_BASE_URL) throw new Error("Missing WC_BASE_URL");
+  if (!process.env.WC_CONSUMER_KEY) throw new Error("Missing WC_CONSUMER_KEY");
+  if (!process.env.WC_CONSUMER_SECRET) throw new Error("Missing WC_CONSUMER_SECRET");
+
+  const perPage = Number(process.env.WC_PER_PAGE || 100);
+  const status = String(process.env.WC_STATUS || "publish");
+
+  let page = 1;
+  const offers = {};
+  let kept = 0;
+
+  for (;;) {
+    const url = buildWooUrl("/wp-json/wc/v3/products", {
+      per_page: perPage,
+      page,
+      status,
+    });
+
+    const items = await wcFetchJson(url);
+    if (!Array.isArray(items) || items.length === 0) break;
+
+    for (const p of items) {
+      const o = offerFromWooProduct(p);
+      if (!o) continue;
+
+      if (!offers[o.brand]) offers[o.brand] = [];
+      offers[o.brand].push(o);
+      kept += 1;
+    }
+
+    if (items.length < perPage) break;
+    page += 1;
+    if (page > 50) break; // safety
+  }
+
+  OFFERS = { ...OFFERS, offers };
+  rebuildOffersIndex();
+
+  return {
+    kept,
+    brands: OFFERS_INDEX.brands.length,
+    classes: OFFERS_INDEX.classes.length,
+    categories: OFFERS_INDEX.categories.length,
+  };
+}
+
+
+
+async function syncOffers() {
+  const provider = String(process.env.OFFERS_PROVIDER || "sheet").toLowerCase();
+  if (provider === "woocommerce") return syncOffersFromWoo();
+  return syncOffersFromGoogleSheet();
+}
+
 async function refreshOffersSafe() {
   try {
-    const info = await syncOffersFromGoogleSheet();
+    const info = await syncOffers();
     lastOffersSync = { ok: true, at: nowIso(), error: null };
     console.log("Offers refreshed OK", info);
   } catch (e) {
@@ -1199,6 +1418,7 @@ async function refreshOffersSafe() {
     console.log("Offers refresh failed:", lastOffersSync.error);
   }
 }
+
 
 // Startup
 loadMemoryFromDisk();
@@ -1478,35 +1698,46 @@ function detectClass(text) {
   const s = normMatch(text).trim();
   if (!s) return null;
 
-  const aliases = LEARNING_RULES?.class_aliases || {};
-  for (const [canonical, list] of Object.entries(aliases)) {
-    const arr = Array.isArray(list) ? list : [];
+  const normalize = (canonical) =>
+    OFFERS_INDEX.classNorm?.get(normMatch(canonical)) || canonical;
+
+  // 1) Learned aliases first (if you want learned to override defaults)
+  const learned = LEARNING_RULES?.class_aliases || {};
+  for (const [canonical, aliases] of Object.entries(learned)) {
+    const arr = Array.isArray(aliases) ? aliases : [];
     for (const a of arr) {
-      if (a && includesToken(s, a)) {
-        const cls = OFFERS_INDEX.classNorm.get(normMatch(canonical)) || canonical;
-        return cls;
-      }
+      if (a && includesToken(s, a)) return normalize(canonical);
     }
   }
 
+  // 2) Defaults based on sheet class names
   const defaults = buildDefaultClassAliases();
-  for (const [cls, arr] of Object.entries(defaults)) {
+  for (const [cls, aliases] of Object.entries(defaults || {})) {
+    const arr = Array.isArray(aliases) ? aliases : [];
     for (const a of arr) {
       if (a && includesToken(s, a)) return cls;
     }
   }
 
-  for (const cls of OFFERS_INDEX.classes) {
+  // 3) Direct match
+  for (const cls of OFFERS_INDEX.classes || []) {
     const ncls = normMatch(cls);
     if (!ncls) continue;
     if (s === ncls || s.includes(ncls)) return cls;
   }
+
   return null;
 }
+
 // =====================
 // MANUAL CATEGORY ALIASES (user language → CSV category)
 // =====================
-const CATEGORY_ALIASES = {
+// =====================
+// CATEGORY ALIASES (manual → canonical)
+// - Keep canonical names exactly as in your OFFERS sheet/categories
+// - Aliases are user words (fr/ar/darija/english)
+// =====================
+const CATEGORY_ALIASES = Object.freeze({
   "Air Fryer": ["air fryer", "airfryer", "قلاية هوائية", "اير فراير", "ايرفراير"],
   "Barre De Son": ["barre de son", "soundbar", "ساندبار"],
   "Blender": ["blender", "mixeur", "خلاط"],
@@ -1528,11 +1759,12 @@ const CATEGORY_ALIASES = {
   "Speaker": ["speaker", "enceinte", "سبيكر", "مكبر صوت"],
   "Tv": ["tv", "tele", "télé", "television", "تلفاز", "تلفزيون"],
   "Ventilateur": ["ventilateur", "fan", "مروحة"],
-};
+});
 
+// Defaults: treat each known category name as its own alias
 function buildDefaultCategoryAliases() {
   const out = {};
-  for (const cat of OFFERS_INDEX.categories || []) {
+  for (const cat of OFFERS_INDEX?.categories || []) {
     const n = normMatch(cat);
     if (!n) continue;
     out[cat] = [cat];
@@ -1544,38 +1776,38 @@ function detectCategory(text) {
   const s = normMatch(text).trim();
   if (!s) return null;
 
-  // 1) Manual category aliases (highest priority)
-  for (const [canonical, aliases] of Object.entries(CATEGORY_ALIASES || {})) {
-    const list = Array.isArray(aliases) ? aliases : [];
-    for (const alias of list) {
-      if (alias && includesToken(s, alias)) {
-        // Normalize to existing category if possible
-        return OFFERS_INDEX.categoryNorm.get(normMatch(canonical)) || canonical;
+  const normalizeCanonical = (canonical) =>
+    OFFERS_INDEX?.categoryNorm?.get(normMatch(canonical)) || canonical;
+
+  const matchAliasesMap = (map) => {
+    for (const [canonical, aliases] of Object.entries(map || {})) {
+      const list = Array.isArray(aliases) ? aliases : [];
+      for (const a of list) {
+        if (a && includesToken(s, a)) return normalizeCanonical(canonical);
       }
     }
-  }
+    return null;
+  };
 
-  // 2) Learned aliases (optional learning rules)
-  const learned = LEARNING_RULES?.category_aliases || {};
-  for (const [canonical, list] of Object.entries(learned)) {
-    const arr = Array.isArray(list) ? list : [];
-    for (const a of arr) {
-      if (a && includesToken(s, a)) {
-        return OFFERS_INDEX.categoryNorm.get(normMatch(canonical)) || canonical;
-      }
-    }
-  }
+  // 1) Manual aliases
+  const hitManual = matchAliasesMap(CATEGORY_ALIASES);
+  if (hitManual) return hitManual;
 
-  // 3) Defaults from sheet categories (exact category names)
+  // 2) Learned aliases
+  const hitLearned = matchAliasesMap(LEARNING_RULES?.category_aliases || {});
+  if (hitLearned) return hitLearned;
+
+  // 3) Defaults from sheet categories
   const defaults = buildDefaultCategoryAliases();
-  for (const [cat, arr] of Object.entries(defaults)) {
-    for (const a of arr) {
+  for (const [cat, aliases] of Object.entries(defaults)) {
+    const list = Array.isArray(aliases) ? aliases : [];
+    for (const a of list) {
       if (a && includesToken(s, a)) return cat;
     }
   }
 
   // 4) Direct match against known categories
-  for (const cat of OFFERS_INDEX.categories || []) {
+  for (const cat of OFFERS_INDEX?.categories || []) {
     const ncat = normMatch(cat);
     if (!ncat) continue;
     if (s === ncat || s.includes(ncat)) return cat;
@@ -1887,99 +2119,86 @@ function tryDirectOfferAnswer(userText, historyMsgs, lang, key) {
       lastCategory: offer.category || undefined,
     });
 
-    return `${offersHeader(lang, { brand })}\n${formatOfferLine(brand, offer)}`;
+    const reply = `${offersHeader(lang, { brand })}\n${formatOfferLine(brand, offer)}`;
+    return ensureMaxOneQuestion(reply);
   }
 
-  // 2) Extract intent signals
+  // 2) Extract signals
   const cls = detectClass(text);
   const category = detectCategory(text);
   const brand = detectBrand(text);
+  const sizeVal = extractSizeOnly(text) || extractSizeAny(text) || null;
 
-  const sizeOnly = extractSizeOnly(text);
-  const sizeAny = extractSizeAny(text);
-  const sizeVal = sizeOnly || sizeAny;
-
-  const ctx = getCtx(key);
-
-  // Context brand/class from conversation
+  const ctx = getCtx(key) || {};
   const ctxBrand0 = ctx.lastBrand || lastMentionedBrand(historyMsgs) || null;
   const lastCls = ctx.lastClass || lastMentionedClass(historyMsgs) || null;
 
   // If user explicitly says TV + size (and no brand), ignore context brand
-  const tvWord = /tv|tele|télé|تلفاز|تلفزيون/i.test(String(userText || ""));
+  const tvWord = /tv|tele|télé|تلفاز|تلفزيون/i.test(text);
   const ignoreCtxBrandForTvSize = Boolean(tvWord && sizeVal && !brand);
 
   // 3) TV size request without brand => show across brands
   if (sizeVal && !brand && (!ctxBrand0 || ignoreCtxBrandForTvSize)) {
     const tvCanon = OFFERS_INDEX.classCanon.tv;
 
-    const picks = listOffersForSizeAcrossBrands(sizeVal, {
-      cls: tvCanon,
-      limit: 3,
-    });
-
+    const picks = listOffersForSizeAcrossBrands(sizeVal, { cls: tvCanon, limit: 3 });
     if (picks.length) {
       const lines = picks.map((it) => formatOfferLine(it.brand, it.offer));
 
-      // Keep class context (TV) but do NOT force a brand here
+      // Keep class context, do not force brand
       setCtx(key, { lastClass: tvCanon || undefined });
 
-      const intro = salesIntro(lang, { size: sizeVal, cls: tvCanon });
-      return `${intro}\n\n${lines.join("\n\n")}\n\n${closingQuestion(lang)}`;
+      const base = `${salesIntro(lang, { size: sizeVal, cls: tvCanon })}\n\n${lines.join("\n\n")}`;
+      const reply = addClosingQuestionIfNone(base, lang);
+      return ensureMaxOneQuestion(reply);
     }
   }
 
-  // 4) Build working variables for the rest of the function
+  // 4) Build working vars (with context/focus fallbacks)
   let brand2 = brand || null;
   let cls2 = cls || null;
   let category2 = category || null;
 
-  // If no brand, prefer focus brand (but keep context brand first if it exists)
+  // Prefer focus brand if enabled, but keep context brand first
   if (!brand2 && hasFocusBrand() && FOCUS.mode === "preferred") {
-    brand2 = ctxBrand0 ? ctxBrand0 : FOCUS.brand;
+    brand2 = ctxBrand0 || FOCUS.brand;
   }
 
-  // If size is present and we still don't have brand, fall back to context then focus
+  // If size is present and still no brand, fall back to context then focus
   if (sizeVal && !brand2) {
     brand2 = ctxBrand0 || (hasFocusBrand() ? FOCUS.brand : null);
   }
 
-  // 5) For size questions, force TV class
-  const tvCanon = OFFERS_INDEX.classCanon.tv;
+  // 5) If size exists, force TV class
   if (sizeVal) {
+    const tvCanon = OFFERS_INDEX.classCanon.tv;
     cls2 = tvCanon || cls2 || lastCls || null;
   }
 
   // 6) Brand + size
   if (brand2 && sizeVal) {
-    const pack = listOffersForBrand(brand2, {
-      cls: cls2,
-      category: category2,
-      size: sizeVal,
-      limit: 3,
-      withOffers: true,
-    });
-
+    const pack = listOffersForBrand(brand2, { cls: cls2, category: category2, size: sizeVal, limit: 3, withOffers: true });
     if (pack?.lines?.length) {
       const intro = salesIntro(lang, { brand: brand2, size: sizeVal, cls: cls2, category: category2 });
       const body = formatSalesOfferLines(lang, pack.lines, pack.offers);
 
-      setCtx(key, {
-        lastBrand: brand2,
-        lastClass: cls2 || undefined,
-        lastCategory: category2 || undefined,
-      });
+      setCtx(key, { lastBrand: brand2, lastClass: cls2 || undefined, lastCategory: category2 || undefined });
 
-      return `${intro}\n\n${body}\n\n${closingQuestion(lang)}`;
+      const base = `${intro}\n\n${body}`;
+      const reply = addClosingQuestionIfNone(base, lang);
+      return ensureMaxOneQuestion(reply);
     }
   }
 
-  // 7) Brand + category
+  // 7) Brand + category (appliances)
   if (brand2 && category2) {
     const lines = listOffersForBrand(brand2, { category: category2, limit: 3 });
     if (lines.length) {
       setCtx(key, { lastBrand: brand2, lastCategory: category2 || undefined });
-      return `${offersHeader(lang, { brand: brand2, category: category2 })}\n${lines.join("\n\n")}`;
+
+      // No extra question necessary
+      const reply = `${offersHeader(lang, { brand: brand2, category: category2 })}\n${lines.join("\n\n")}`;
+      return ensureMaxOneQuestion(reply);
     }
   }
 
@@ -1987,16 +2206,14 @@ function tryDirectOfferAnswer(userText, historyMsgs, lang, key) {
   if (brand2 && cls2) {
     const lines = listOffersForBrand(brand2, { cls: cls2, limit: 3 });
     if (lines.length) {
-      setCtx(key, {
-        lastBrand: brand2,
-        lastClass: cls2 || undefined,
-        lastCategory: category2 || undefined,
-      });
-      return `${offersHeader(lang, { brand: brand2, cls: cls2 })}\n${lines.join("\n\n")}`;
+      setCtx(key, { lastBrand: brand2, lastClass: cls2 || undefined, lastCategory: category2 || undefined });
+
+      const reply = `${offersHeader(lang, { brand: brand2, cls: cls2 })}\n${lines.join("\n\n")}`;
+      return ensureMaxOneQuestion(reply);
     }
   }
 
-  // 9) Category only
+  // 9) Category only (appliances) => show across brands
   if (!brand2 && category2) {
     let lines = listOffersForCategory(category2, { limit: 3 });
 
@@ -2007,7 +2224,9 @@ function tryDirectOfferAnswer(userText, historyMsgs, lang, key) {
 
     if (lines.length) {
       setCtx(key, { lastCategory: category2 || undefined });
-      return `${offersHeader(lang, { category: category2 })}\n${lines.join("\n\n")}`;
+
+      const reply = `${offersHeader(lang, { category: category2 })}\n${lines.join("\n\n")}`;
+      return ensureMaxOneQuestion(reply);
     }
   }
 
@@ -2022,33 +2241,52 @@ function tryDirectOfferAnswer(userText, historyMsgs, lang, key) {
 
     if (lines.length) {
       setCtx(key, { lastClass: cls2 || undefined });
-      return `${offersHeader(lang, { cls: cls2 })}\n${lines.join("\n\n")}`;
+
+      const reply = `${offersHeader(lang, { cls: cls2 })}\n${lines.join("\n\n")}`;
+      return ensureMaxOneQuestion(reply);
     }
   }
 
-  // 11) Just brand
+  // 11) Just brand (no question)
   const justBrand = brand && s.replace(/\s+/g, "") === normMatch(brand).replace(/\s+/g, "");
   if (brand && (justBrand || s.length <= 8)) {
     const tvCanon2 = OFFERS_INDEX.classCanon.tv;
-
     if ((brand === "VISIO" || brand === "TCL" || brand === "DAIKO") && tvCanon2) {
       const tvLines = listOffersForBrand(brand, { cls: tvCanon2, limit: 3 });
       if (tvLines.length) {
         setCtx(key, { lastBrand: brand, lastClass: tvCanon2 || undefined });
-        return `${offersHeader(lang, { brand, cls: tvCanon2 })}\n${tvLines.join("\n\n")}`;
+
+        const reply = `${offersHeader(lang, { brand, cls: tvCanon2 })}\n${tvLines.join("\n\n")}`;
+        return ensureMaxOneQuestion(reply);
       }
     }
 
     const lines = listOffersForBrand(brand, { limit: 3 });
     if (lines.length) {
       setCtx(key, { lastBrand: brand });
-      return `${offersHeader(lang, { brand })}\n${lines.join("\n\n")}`;
+
+      const reply = `${offersHeader(lang, { brand })}\n${lines.join("\n\n")}`;
+      return ensureMaxOneQuestion(reply);
     }
   }
 
+  // 12) If nothing matched, ask ONE simple question (not multiple)
+  // Show categories (short) if available, otherwise ask for model
+  const cats = (OFFERS_INDEX.categories || []).slice(0, 10);
+  if (cats.length) {
+    const base =
+      lang === "fr"
+        ? `Je peux aider. Vous cherchez quelle catégorie ?\n${cats.map((c) => `• ${c}`).join("\n")}`
+        : lang === "ar"
+        ? `نقدر نعاونك. شنو الفئة اللي باغي؟\n${cats.map((c) => `• ${c}`).join("\n")}`
+        : `N9dr n3awnk. Chno catégorie bghiti?\n${cats.map((c) => `• ${c}`).join("\n")}`;
+
+    return ensureMaxOneQuestion(base); // already contains 1 question
+  }
+
+  // fallback
   return null;
 }
-
 
 // =====================
 // LLM fallback
@@ -2313,7 +2551,11 @@ function requireLearningToken(req, res) {
 
 
 
-// Learning endpoints (status + logs)
+// =====================
+// Learning endpoints (status + accept + suggestions)
+// =====================
+
+// Status
 app.get("/learning-status", (req, res) => {
   if (!requireLearningToken(req, res)) return;
 
@@ -2321,39 +2563,42 @@ app.get("/learning-status", (req, res) => {
   return res.json({
     ok: true,
     enabled: true,
-    rulesVersion: rules.version || 0,
+    rulesVersion: Number(rules?.version || 0),
   });
 });
 
+// Accept a suggestion (or manual add)
 app.post("/learning-accept", (req, res) => {
   if (!requireLearningToken(req, res)) return;
 
-  // Expect: { type, canonical, alias }
-  const { type, canonical, alias } = req.body || {};
-  const rules = loadLearningRules();
+  const body = req.body || {};
+  const type = String(body.type || "").trim();
+  const canonical = String(body.canonical || "").trim();
+  const alias = String(body.alias || "").trim();
 
-const result = addAliasToRules(
-  rules,
-  String(type || ""),
-  String(canonical || ""),
-  String(alias || "")
-);
+  if (!type || !canonical || !alias) {
+    return res.status(400).json({ ok: false, error: "Missing fields: type, canonical, alias" });
+  }
+
+  const rules = loadLearningRules();
+  const result = addAliasToRules(rules, type, canonical, alias);
+
   if (!result.ok) return res.status(400).json({ ok: false, error: result.error });
 
   if (result.changed) {
     rules.version = Number(rules.version || 1) + 1;
-    // Persist + refresh in-memory global
     atomicWriteJson(rulesPath, rules);
     LEARNING_RULES = rules;
   }
 
   return res.json({
     ok: true,
-    changed: result.changed,
-    rulesVersion: rules.version,
+    changed: Boolean(result.changed),
+    rulesVersion: Number(rules.version || 0),
   });
 });
 
+// Suggestions from fallback logs
 app.get("/learning-suggestions", (req, res) => {
   if (!requireLearningToken(req, res)) return;
 
@@ -2374,78 +2619,14 @@ app.get("/learning-suggestions", (req, res) => {
   let raw = "";
   try {
     raw = fs.readFileSync(eventsPath, "utf8");
-  } catch (e) {
+  } catch {
     return res.status(500).json({ ok: false, error: "Failed to read events" });
   }
 
   const linesAll = raw.split("\n").filter(Boolean);
   const lines = linesAll.slice(-maxLines);
 
-function atomicWriteJson(filePath, obj) {
-  const dir = path.dirname(filePath);
-  const tmp = path.join(
-    dir,
-    `.tmp_${path.basename(filePath)}_${Date.now()}_${crypto.randomBytes(4).toString("hex")}`
-  );
-  fs.writeFileSync(tmp, JSON.stringify(obj, null, 2), "utf8");
-  fs.renameSync(tmp, filePath);
-}
-
-function normalizeAliasValue(v) {
-  const s = String(v || "").trim();
-  // Guard: no empty, no too long, no multi-line
-  if (!s) return null;
-  if (s.length > 40) return null;
-  if (s.includes("\n") || s.includes("\r")) return null;
-  return s;
-}
-
-function canonicalExists(type, canonical) {
-  const c = String(canonical || "").trim();
-  if (!c) return false;
-
-  if (type === "brand_alias") {
-    const b = OFFERS_INDEX.brandNorm.get(normMatch(c)) || c.toUpperCase();
-    return Boolean(OFFERS.offers?.[b]);
-  }
-  if (type === "class_alias") return Boolean(OFFERS_INDEX.classNorm.get(normMatch(c)));
-  if (type === "category_alias") return Boolean(OFFERS_INDEX.categoryNorm.get(normMatch(c)));
-
-  return false;
-}
-
-function addAliasToRules(rules, type, canonical, alias) {
-  const groups = {
-    brand_alias: "brand_aliases",
-    class_alias: "class_aliases",
-    category_alias: "category_aliases",
-  };
-
-  const g = groups[type];
-  if (!g) return { ok: false, error: "Invalid type" };
-
-  const canon = String(canonical || "").trim();
-  const ali = normalizeAliasValue(alias);
-  if (!canon || !ali) return { ok: false, error: "Invalid canonical or alias" };
-
-  // Ensure canonical exists in current offers index (prevents “poison rules”)
-  if (!canonicalExists(type, canon)) return { ok: false, error: "Canonical not found in offers index" };
-
-  rules[g] = rules[g] || {};
-  const arr0 = rules[g][canon];
-  const arr = Array.isArray(arr0) ? arr0.slice() : [];
-
-  const nAli = normMatch(ali);
-  const already = arr.some((x) => normMatch(x) === nAli);
-  if (!already) arr.push(ali);
-
-  rules[g][canon] = arr;
-  return { ok: true, changed: !already };
-}
-
-
-
-  // Only consider fallback events (you already log these)
+  // Only consider fallback events
   const events = [];
   for (const ln of lines) {
     try {
@@ -2456,111 +2637,146 @@ function addAliasToRules(rules, type, canonical, alias) {
     }
   }
 
-  // No events => nothing to suggest
   if (!events.length) {
     return res.json({
       ok: true,
       suggestions: [],
-      meta: { scanned: lines.length, fallbackEvents: 0 },
+      meta: {
+        scannedLines: lines.length,
+        fallbackEvents: 0,
+        minOccurrencesToSuggest: minOcc,
+        limit,
+        maxLines,
+      },
     });
   }
 
-  // Build canonical targets from current offers index
-  const brandTargets = (OFFERS_INDEX?.brands || []).map((b) => String(b));
-  const classTargets = (OFFERS_INDEX?.classes || []).map((c) => String(c));
-  const categoryTargets = (OFFERS_INDEX?.categories || []).map((c) => String(c));
+  // ---- Suggestion engine (normalized, de-duped, faster) ----
 
-  // Frequency maps: key = `${type}|${canonical}|${alias}`
+  // Canonical targets from current offers index
+  const brandTargets = Array.from(
+    new Set((OFFERS_INDEX?.brands || []).map((b) => String(b).trim()).filter(Boolean))
+  );
+  const classTargets = Array.from(
+    new Set((OFFERS_INDEX?.classes || []).map((c) => String(c).trim()).filter(Boolean))
+  );
+  const categoryTargets = Array.from(
+    new Set((OFFERS_INDEX?.categories || []).map((c) => String(c).trim()).filter(Boolean))
+  );
+
+  // key = `${type}|${canonical}|${aliasNorm}`
   const freq = new Map();
-  const examples = new Map(); // same key -> string[]
-  const lastSeen = new Map(); // same key -> iso
+  const examples = new Map(); // key -> string[]
+  const lastSeen = new Map(); // key -> iso
+  const rawAliasFirstSeen = new Map(); // key -> original token (for nicer output)
 
-  function bump(type, canonical, alias, exampleText, atIso) {
-    const k = `${type}|${canonical}|${alias}`;
-    freq.set(k, (freq.get(k) || 0) + 1);
-
-    if (!examples.has(k)) examples.set(k, []);
-    const arr = examples.get(k);
-    if (arr.length < 3) arr.push(redactSensitive(exampleText));
-
-    if (atIso) lastSeen.set(k, atIso);
+  function makeKey(type, canonical, alias) {
+    return `${type}|${canonical}|${normMatch(alias)}`;
   }
 
-  // Create a fast “already known tokens” set (brands/classes/categories + existing aliases)
+  function bump(type, canonical, alias, exampleText, atIso) {
+    const key = makeKey(type, canonical, alias);
+
+    freq.set(key, (freq.get(key) || 0) + 1);
+
+    if (!rawAliasFirstSeen.has(key)) rawAliasFirstSeen.set(key, String(alias || "").trim());
+
+    if (!examples.has(key)) examples.set(key, []);
+    const arr = examples.get(key);
+    if (arr.length < 3) arr.push(redactSensitive(exampleText));
+
+    // keep most recent timestamp
+    if (atIso) {
+      const prev = lastSeen.get(key);
+      const cur = String(atIso);
+      if (!prev || cur > String(prev)) lastSeen.set(key, cur);
+    }
+  }
+
+  // Known tokens = canonicals + existing aliases
   const knownTokens = new Set();
   for (const b of brandTargets) knownTokens.add(normMatch(b));
   for (const c of classTargets) knownTokens.add(normMatch(c));
   for (const c of categoryTargets) knownTokens.add(normMatch(c));
 
-  // Existing aliases
-  for (const obj of [rules.brand_aliases, rules.class_aliases, rules.category_aliases]) {
+  for (const obj of [rules?.brand_aliases, rules?.class_aliases, rules?.category_aliases]) {
     for (const list of Object.values(obj || {})) {
       const arr = Array.isArray(list) ? list : [];
-      for (const a of arr) knownTokens.add(normMatch(a));
+      for (const a of arr) {
+        const na = normMatch(a);
+        if (na) knownTokens.add(na);
+      }
     }
   }
+
+  // Pre-tokenize canonicals once (performance)
+  const classCanonWords = new Map();
+  for (const canonical of classTargets) classCanonWords.set(canonical, tokenize(canonical));
+
+  const categoryCanonWords = new Map();
+  for (const canonical of categoryTargets) categoryCanonWords.set(canonical, tokenize(canonical));
 
   // Main scan
-for (const ev of events) {
-  const txt = String(ev.text || "");
-  const at = String(ev.at || "");
-  const toks = tokenize(txt);
+  for (const ev of events) {
+    const txt = String(ev?.text || "");
+    if (!txt) continue;
 
-  for (const tok of toks) {
-    const nt = normMatch(tok);
-    if (!nt) continue;
+    const atIso = String(ev?.at || "");
+    const toks = tokenize(txt);
 
-    if (knownTokens.has(nt)) continue;
-    if (tokenAlreadyLearned(tok, rules)) continue;
+    for (const tok of toks) {
+      const nt = normMatch(tok);
+      if (!nt) continue;
 
-    // 1) brands
-    for (const canonical of brandTargets) {
-      if (isCloseAliasToken(tok, canonical)) {
-        bump("brand_alias", canonical, tok, txt, at);
-        break;
-      }
-    }
+      if (knownTokens.has(nt)) continue;
+      if (tokenAlreadyLearned(tok, rules)) continue;
 
-    // 2) classes
-    if (nt.length >= 4) {
-      for (const canonical of classTargets) {
-        const words = tokenize(canonical);
-        if (words.some((w) => isCloseAliasToken(tok, w))) {
-          bump("class_alias", canonical, tok, txt, at);
+      // 1) brands
+      for (const canonical of brandTargets) {
+        if (isCloseAliasToken(tok, canonical)) {
+          bump("brand_alias", canonical, tok, txt, atIso);
           break;
         }
       }
-    }
 
-    // 3) categories
-    if (nt.length >= 4) {
-      for (const canonical of categoryTargets) {
-        const words = tokenize(canonical);
-        if (words.some((w) => isCloseAliasToken(tok, w))) {
-          bump("category_alias", canonical, tok, txt, at);
-          break;
+      // 2) classes
+      if (nt.length >= 4) {
+        for (const canonical of classTargets) {
+          const words = classCanonWords.get(canonical) || [];
+          if (words.some((w) => isCloseAliasToken(tok, w))) {
+            bump("class_alias", canonical, tok, txt, atIso);
+            break;
+          }
+        }
+      }
+
+      // 3) categories
+      if (nt.length >= 4) {
+        for (const canonical of categoryTargets) {
+          const words = categoryCanonWords.get(canonical) || [];
+          if (words.some((w) => isCloseAliasToken(tok, w))) {
+            bump("category_alias", canonical, tok, txt, atIso);
+            break;
+          }
         }
       }
     }
   }
-}
-
-
 
   // Convert to ranked suggestions
-  const out = [];
-  for (const [k, count] of freq.entries()) {
+  const suggestions = [];
+  for (const [key, count] of freq.entries()) {
     if (count < minOcc) continue;
 
-    const [type, canonical, alias] = k.split("|");
-    out.push({
+    const [type, canonical, aliasNorm] = String(key).split("|");
+
+    suggestions.push({
       type,
       canonical,
-      alias,
+      alias: rawAliasFirstSeen.get(key) || aliasNorm,
       count,
-      examples: examples.get(k) || [],
-      lastSeen: lastSeen.get(k) || null,
-      // Apply hint: where to put this if you accept it
+      examples: examples.get(key) || [],
+      lastSeen: lastSeen.get(key) || null,
       applyTo:
         type === "brand_alias"
           ? "LEARNING_RULES.brand_aliases"
@@ -2570,11 +2786,11 @@ for (const ev of events) {
     });
   }
 
-  out.sort((a, b) => b.count - a.count);
+  suggestions.sort((a, b) => b.count - a.count);
 
   return res.json({
     ok: true,
-    suggestions: out.slice(0, limit),
+    suggestions: suggestions.slice(0, limit),
     meta: {
       scannedLines: lines.length,
       fallbackEvents: events.length,
@@ -2584,6 +2800,7 @@ for (const ev of events) {
     },
   });
 });
+
 
 
 // Main webhook
