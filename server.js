@@ -242,18 +242,21 @@ const RULES_I18N = {
     payment: "Paiement: cash 3nd ttsslim wla virement (zid note f formulaire).",
     warranty: "Garantie: 1 an.",
     wall_mount: "TV kayji m3ah support/bracket mural free.",
+    deliveryCallback: "Sift lina coordonnées dyalk (smia, l-mdina, رقم الهاتف) w ghadi n3yto lik.",
   },
   fr: {
     delivery: "Livraison : entre 1 et 7 jours selon la ville.",
     payment: "Paiement : cash à la livraison ou virement (note à ajouter dans le formulaire).",
     warranty: "Garantie : 1 an.",
     wall_mount: "Support mural gratuit avec les TV.",
+    deliveryCallback: "Merci d’envoyer vos coordonnées (nom, ville, numéro). Nous vous rappellerons.",
   },
   ar: {
     delivery: "التوصيل: من 1 إلى 7 أيام.",
     payment: "الدفع: نقداً عند التسليم أو تحويل بنكي (أضف ملاحظة في الاستمارة).",
     warranty: "الضمان: سنة واحدة.",
     wall_mount: "حامل/براكيط مجاني مع التلفاز.",
+    deliveryCallback: "من فضلك صيفط لينا معلومات التواصل ديالك (الاسم، المدينة، رقم الهاتف) وغادي نعيطو ليك.",
   },
 };
 
@@ -2718,7 +2721,7 @@ if (isIptvIntent(userTextRaw)) {
       const parts = [];
       const r = RULES_I18N[lang] || RULES_I18N.dzl;
 
-      if (s.indexOf("delivery") >= 0 || s.indexOf("livraison") >= 0 || s.indexOf("توصيل") >= 0 || s.indexOf("التوصيل") >= 0) parts.push(r.delivery);
+      if (s.indexOf("delivery") >= 0 || s.indexOf("livraison") >= 0 || s.indexOf("توصيل") >= 0 || s.indexOf("التوصيل") >= 0) parts.push(r.deliveryCallback || r.delivery);
 
       if (
         s.indexOf("payment") >= 0 ||
