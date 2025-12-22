@@ -2611,10 +2611,12 @@ function validateWanotifierToken(req) {
   if (auth) {
     const parts = auth.split(" ");
     if (parts.length === 2 && parts[0].toLowerCase() === "bearer" && parts[1] === token) return true;
+
   }
 
   return false;
 }
+
 
 function timingSafeEqualStr(a, b) {
   try {
@@ -2655,6 +2657,100 @@ function validateWanotifierHmac(req) {
 
   return timingSafeEqualStr(sig, expected);
 }
+
+function resolveShippingCategoryKey(input) {
+  var s = "";
+  if (typeof input === "string") {
+    s = normMatch(input);
+  } else if (input && typeof input === "object") {
+    var a = "";
+    if (input.class) a += " " + String(input.class);
+    if (input.category) a += " " + String(input.category);
+    if (input.name) a += " " + String(input.name);
+    if (input.model) a += " " + String(input.model);
+    s = normMatch(a);
+  } else {
+    s = normMatch(String(input || ""));
+  }
+
+  if (!s) return null;
+
+  var tvSize = null;
+  var mSize = s.match(/(^|[^0-9])(24|32|40|43|50|55|65|75|85|98|100)($|[^0-9])/);
+  if (mSize && mSize[2]) tvSize = Number(mSize[2]);
+
+  var isTv =
+    s.indexOf("tv") >= 0 ||
+    s.indexOf("tele") >= 0 ||
+    s.indexOf("télé") >= 0 ||
+    s.indexOf("television") >= 0 ||
+    s.indexOf("télévision") >= 0 ||
+    s.indexOf("تلفاز") >= 0 ||
+    s.indexOf("تلفزيون") >= 0;
+
+  if (isTv) {
+    if (tvSize && tvSize >= 65) return "tv_65_100";
+    if (tvSize && tvSize >= 50) return "tv_50_55";
+    return "tv_24_43";
+  }
+
+  if (s.indexOf("mini bar") >= 0) return "mini_bar";
+
+  if (s.indexOf("ventil") >= 0 || s.indexOf("aspirat") >= 0 || s.indexOf("speaker") >= 0) {
+    return "ventilateur_aspirateur_speakers";
+  }
+
+  if (s.indexOf("petit") >= 0 || s.indexOf("small") >= 0) return "petits_electro";
+
+  if (s.indexOf("chauffe") >= 0 || s.indexOf("sachan") >= 0 || s.indexOf("سخان") >= 0) {
+    var liters = NaN;
+    var ml = s.match(/(^|[^0-9])([0-9]{1,3})[ ]*l($|[^a-z0-9])/);
+    if (ml && ml[2]) liters = Number(ml[2]);
+    if (Number.isFinite(liters) && liters >= 45) return "chauffe_eau_50l";
+    return "chauffe_eau_6_35l";
+  }
+
+  if (s.indexOf("hotte") >= 0 || s.indexOf("plaque") >= 0 || s.indexOf("four posable") >= 0 || s.indexOf("micro") >= 0) {
+    return "hotte_plaque_four_micro";
+  }
+
+  if (s.indexOf("table top") >= 0) return "table_top";
+
+  if (s.indexOf("clim") >= 0 || s.indexOf("climat") >= 0 || s.indexOf("مكيف") >= 0) return "climat";
+
+  if (s.indexOf("four encastr") >= 0 || s.indexOf("encastrable") >= 0) return "four_encastrable";
+
+  if (s.indexOf("congel") >= 0 || s.indexOf("freezer") >= 0 || s.indexOf("فريزر") >= 0) {
+    var liters2 = NaN;
+    var ml2 = s.match(/(^|[^0-9])([0-9]{2,4})[ ]*l($|[^a-z0-9])/);
+    if (ml2 && ml2[2]) liters2 = Number(ml2[2]);
+    if (Number.isFinite(liters2) && liters2 > 240) return "congelateur_plus_240l";
+    return "congelateur_70_240l";
+  }
+
+  if (s.indexOf("lave vaisselle") >= 0 || s.indexOf("dishwasher") >= 0) return "lave_vaisselle_machine_a_laver";
+
+  if (
+    s.indexOf("machine a laver") >= 0 ||
+    s.indexOf("machine à laver") >= 0 ||
+    s.indexOf("lave linge") >= 0 ||
+    s.indexOf("washing") >= 0 ||
+    s.indexOf("غسالة") >= 0
+  ) {
+    return "lave_vaisselle_machine_a_laver";
+  }
+
+  if (s.indexOf("refriger") >= 0 || s.indexOf("réfrig") >= 0 || s.indexOf("frigo") >= 0 || s.indexOf("ثلاجة") >= 0) {
+    return "refrigerateur";
+  }
+
+  if (s.indexOf("cuisin") >= 0 || s.indexOf("cooker") >= 0 || s.indexOf("gazini") >= 0 || s.indexOf("بوتاغاز") >= 0) {
+    return "cuisiniers";
+  }
+
+  return null;
+}
+
 
 const maintenanceTimer = setInterval(() => {
   const now = Date.now();
