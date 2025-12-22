@@ -2664,6 +2664,35 @@ function validateWanotifierToken(req) {
   return false;
 }
 
+function validateWanotifierHmac(req) {
+  const secret = CFG.wanotifierHmacSecret;
+  if (!secret) return true;
+
+  const h = req.headers || {};
+  const sig = String(h[CFG.wanotifierHmacHeader] || "").trim();
+  const ts = String(h[CFG.wanotifierTsHeader] || "").trim();
+  if (!sig || !ts) return false;
+
+  const tsNum = Number(ts);
+  if (!Number.isFinite(tsNum)) return false;
+
+  const nowSec = Math.floor(Date.now() / 1000);
+  const skew = Math.abs(nowSec - tsNum);
+  if (skew > CFG.wanotifierMaxSkewSec) return false;
+
+  const raw = String(req.rawBody || "");
+  const base = ts + "." + raw;
+
+  let expected = "";
+  try {
+    expected = crypto.createHmac("sha256", secret).update(base, "utf8").digest("hex");
+  } catch {
+    return false;
+  }
+
+  return timingSafeEqualStr(sig, expected);
+}
+
 
 function timingSafeEqualStr(a, b) {
   try {
