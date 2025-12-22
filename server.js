@@ -210,6 +210,25 @@ function detectDeliveryZone(text) {
   return SHIPPING.zones.other;
 }
 
+function resolveShippingCategoryKey(userText, key) {
+  const s = normMatch(userText || "");
+
+  for (let i = 0; i < SHIPPING.casaTokens.length; i += 1) {
+    if (includesToken(s, SHIPPING.casaTokens[i])) return SHIPPING.zones.casa;
+  }
+
+  for (let i = 0; i < SHIPPING.southCitiesTokens.length; i += 1) {
+    if (includesToken(s, SHIPPING.southCitiesTokens[i])) return SHIPPING.zones.south;
+  }
+
+  for (let i = 0; i < SHIPPING.otherCityTokens.length; i += 1) {
+    if (includesToken(s, SHIPPING.otherCityTokens[i])) return SHIPPING.zones.other;
+  }
+
+  return SHIPPING.zones.other;
+}
+
+
 function includesToken(text, token) {
   const s = normMatch(text);
   const t0 = normMatch(token);
@@ -2664,6 +2683,18 @@ function validateWanotifierToken(req) {
   return false;
 }
 
+
+function timingSafeEqualStr(a, b) {
+  try {
+    const sa = Buffer.from(String(a || ""), "utf8");
+    const sb = Buffer.from(String(b || ""), "utf8");
+    if (sa.length !== sb.length) return false;
+    return crypto.timingSafeEqual(sa, sb);
+  } catch {
+    return false;
+  }
+}
+
 function validateWanotifierHmac(req) {
   const secret = CFG.wanotifierHmacSecret;
   if (!secret) return true;
@@ -2694,127 +2725,8 @@ function validateWanotifierHmac(req) {
 }
 
 
-function timingSafeEqualStr(a, b) {
-  try {
-    const sa = Buffer.from(String(a || ""), "utf8");
-    const sb = Buffer.from(String(b || ""), "utf8");
-    if (sa.length !== sb.length) return false;
-    return crypto.timingSafeEqual(sa, sb);
-  } catch {
-    return false;
-  }
-}
 
-function resolveShippingCategoryKey(input) {
-  let s = "";
-  if (typeof input === "string") {
-    s = normMatch(input);
-  } else if (input && typeof input === "object") {
-    let a = "";
-    if (input.class) a += " " + String(input.class);
-    if (input.category) a += " " + String(input.category);
-    if (input.name) a += " " + String(input.name);
-    if (input.model) a += " " + String(input.model);
-    s = normMatch(a);
-  } else {
-    s = normMatch(String(input || ""));
-  }
 
-  if (!s) return null;
-
-  // --- TV sizes ---
-  let tvSize = null;
-  const mSize = s.match(/(^|[^0-9])(24|32|40|43|50|55|65|75|85|98|100)($|[^0-9])/);
-  if (mSize && mSize[2]) tvSize = Number(mSize[2]);
-
-  const isTv =
-    s.includes("tv") ||
-    s.includes("tele") ||
-    s.includes("télé") ||
-    s.includes("television") ||
-    s.includes("télévision") ||
-    s.includes("تلفاز") ||
-    s.includes("تلفزيون");
-
-  if (isTv) {
-    if (tvSize && tvSize >= 65) return "tv_65_100";
-    if (tvSize && tvSize >= 50) return "tv_50_55";
-    return "tv_24_43";
-  }
-
-  // --- Mini bar ---
-  if (s.includes("mini bar") || s.includes("minibar")) return "mini_bar";
-
-  // --- Fans / aspirator / speakers ---
-  if (s.includes("ventil") || s.includes("aspirat") || s.includes("speaker") || s.includes("haut parleur") || s.includes("مروحة") || s.includes("سبيكر")) {
-    return "fans_vac_speakers";
-  }
-
-  // --- Small electro ---
-  if (s.includes("petit") || s.includes("small") || s.includes("petits electro") || s.includes("صغير") || s.includes("صغار")) return "small_electro";
-
-  // --- Water heater (chauffe-eau / سخان) ---
-  if (s.includes("chauffe") || s.includes("water heater") || s.includes("سخان")) {
-    let liters = NaN;
-    const ml = s.match(/(^|[^0-9])([0-9]{1,3})\s*l($|[^a-z0-9])/);
-    if (ml && ml[2]) liters = Number(ml[2]);
-    if (Number.isFinite(liters) && liters >= 45) return "water_heater_50";
-    return "water_heater_small";
-  }
-
-  // --- Hood / hobs / microwave / small oven ---
-  if (
-    s.includes("hotte") ||
-    s.includes("hood") ||
-    s.includes("plaque") ||
-    s.includes("hobs") ||
-    s.includes("micro") ||
-    s.includes("micro-ondes") ||
-    s.includes("microwave") ||
-    s.includes("four posable")
-  ) {
-    return "hobs_hood_mw_small_oven";
-  }
-
-  // --- Table top ---
-  if (s.includes("table top") || s.includes("tabletop")) return "table_top";
-
-  // --- Climat ---
-  if (s.includes("clim") || s.includes("climat") || s.includes("climatiseur") || s.includes("مكيف")) return "climat";
-
-  // --- Built-in oven ---
-  if (s.includes("four encastr") || s.includes("encastrable") || s.includes("built in")) return "built_in_oven";
-
-  // --- Freezer ---
-  if (s.includes("congel") || s.includes("freezer") || s.includes("فريزر")) {
-    let liters2 = NaN;
-    const ml2 = s.match(/(^|[^0-9])([0-9]{2,4})\s*l($|[^a-z0-9])/);
-    if (ml2 && ml2[2]) liters2 = Number(ml2[2]);
-    if (Number.isFinite(liters2) && liters2 > 240) return "freezer_240_plus";
-    return "freezer_70_240";
-  }
-
-  // --- Washer / Dishwasher ---
-  if (
-    s.includes("lave vaisselle") ||
-    s.includes("dishwasher") ||
-    s.includes("machine a laver") ||
-    s.includes("machine à laver") ||
-    s.includes("lave linge") ||
-    s.includes("washing") ||
-    s.includes("غسالة")
-  ) {
-    return "washer_dishwasher";
-  }
-
-  // --- Refrigerator ---
-  if (s.includes("refriger") || s.includes("réfrig") || s.includes("frigo") || s.includes("ثلاجة")) return "refrigerateur";
-
-  // --- Cookers ---
-  if (s.includes("cuisin") || s.includes("cooker") || s.includes("gazini") || s.includes("بوتاغاز")) return "cuisiniers";
-
-  return null;
-}
 
 const maintenanceTimer = setInterval(() => {
   const now = Date.now();
@@ -3017,26 +2929,10 @@ if (isIptvIntent(userTextRaw)) {
       return res.json({ ok: true, reply });
     }
 
-function zoneLabel(lang, zoneKey) {
-  if (lang === "ar") {
-    if (zoneKey === SHIPPING.zones.casa) return "داخل الدار البيضاء";
-    if (zoneKey === SHIPPING.zones.south) return "الجنوب (العيون/الداخلة/السمارة)";
-    return "خارج الدار البيضاء";
-  }
-  if (lang === "fr") {
-    if (zoneKey === SHIPPING.zones.casa) return "Casablanca";
-    if (zoneKey === SHIPPING.zones.south) return "Zone Sud (Laâyoune/Dakhla/Smara)";
-    return "Hors Casablanca";
-  }
-  if (zoneKey === SHIPPING.zones.casa) return "Casa";
-  if (zoneKey === SHIPPING.zones.south) return "South (Laâyoune/Dakhla/Smara)";
-  return "Hors Casa";
-}
-
 if (asksAboutDeliveryPaymentWarranty(userTextRaw)) {
   if (isDeliveryCostIntent(userTextRaw)) {
     const zoneKey = detectDeliveryZone(userTextRaw);
-    const catKey = resolveShippingCategoryKey(userTextRaw);
+    const catKey = resolveShippingCategoryKey(userTextRaw, key);
 
     if (!catKey || !SHIPPING.costs[catKey]) {
       const out = shortenNoQuestion(t(lang, "deliveryCostNeed"), 220);
@@ -3046,8 +2942,7 @@ if (asksAboutDeliveryPaymentWarranty(userTextRaw)) {
     }
 
     const cost = SHIPPING.costs[catKey][zoneKey];
-    const zoneName = zoneLabel(lang, zoneKey);
-
+    const zoneName = zoneKey === "casa" ? "Casa" : zoneKey === "south" ? "South" : "Hors Casa";
     const out = shortenNoQuestion(t(lang, "deliveryCostLine", { zoneName, cost }), 220);
     memory.push(key, "assistant", out);
     resetStrikes(key);
