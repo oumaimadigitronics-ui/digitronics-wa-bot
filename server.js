@@ -210,71 +210,23 @@ function detectDeliveryZone(text) {
   return SHIPPING.zones.other;
 }
 
-function extractLitersFromText(text) {
-  const raw = arabicIndicToAsciiDigits(String(text || "")).replace(/,/g, ".");
-  const m = raw.match(/(?:^|[^\d])(\d{2,4})\s*(?:l|litre|litres)(?=$|[^\w])/i);
-  if (m && m[1]) {
-    const n = Number(m[1]);
-    if (Number.isFinite(n)) return n;
-  }
-  return null;
-}
-
 function resolveShippingCategoryKey(userText, key) {
-  const raw = String(userText || "");
-  const s = normMatch(arabicIndicToAsciiDigits(raw));
-  const ctx = (typeof getCtx === "function" && key ? getCtx(key) : null) || {};
-  const ctxHints = [ctx.lastClass, ctx.lastCategory, ctx.lastSize].filter(Boolean).join(" ");
-  const merged = raw + (ctxHints ? " " + ctxHints : "");
+  const s = normMatch(userText || "");
 
-  const tvSize = extractTvSize(merged);
-  if (tvSize) {
-    if (tvSize <= 43) return "tvSmall";
-    if (tvSize <= 55) return "tvMid";
-    return "tvBig";
+  for (let i = 0; i < SHIPPING.casaTokens.length; i += 1) {
+    if (includesToken(s, SHIPPING.casaTokens[i])) return SHIPPING.zones.casa;
   }
 
-  const liters = extractLitersFromText(merged);
-
-  const cls = detectClass(merged) || "";
-  const cat = detectCategory(merged) || "";
-  const sc = s + " " + normMatch(cls + " " + cat);
-
-  const has = (tok) => sc.indexOf(normMatch(tok)) >= 0;
-
-  if (has("mini bar") || has("minibar") || has("ميني بار") || has("مينيبار")) return "miniBar";
-
-  if (has("refrigerateur") || has("réfrigérateur") || has("refrigerator") || has("frigo") || has("ثلاجة") || has("تلاجة")) return "refrigerator";
-
-  if (has("congelateur") || has("congélateur") || has("freezer") || has("فريزر") || has("مجمد") || has("مجمّد") || has("كونجيلاتور")) {
-    if (liters && liters > 240) return "freezer240plus";
-    return "freezer70_240";
+  for (let i = 0; i < SHIPPING.southCitiesTokens.length; i += 1) {
+    if (includesToken(s, SHIPPING.southCitiesTokens[i])) return SHIPPING.zones.south;
   }
 
-  if (has("machine a laver") || has("machine à laver") || has("washing machine") || has("lave linge") || has("غسالة") || has("مكينة غسل") || has("lave vaisselle") || has("dishwasher") || has("غسالة صحون")) return "washerDishwasher";
-
-  if (has("climat") || has("clim") || has("climatiseur") || has("air conditioner") || has("ac") || has("مكيف") || has("تكييف")) return "climat";
-
-  if (has("chauffe") || has("chauffe-eau") || has("chauffe eau") || has("water heater") || has("sakhane") || has("سخان")) {
-    if (liters && liters >= 45) return "waterHeater50";
-    return "waterHeaterSmall";
+  for (let i = 0; i < SHIPPING.otherCityTokens.length; i += 1) {
+    if (includesToken(s, SHIPPING.otherCityTokens[i])) return SHIPPING.zones.other;
   }
 
-  if (has("four encastrable") || has("encastrable") || has("built in oven") || has("فرن مدمج") || has("فرن مدمج")) return "builtInOven";
-
-  if (has("cuisinier") || has("cuisiniere") || has("cuisinière") || has("cuisiniers") || has("gaziniere") || has("gazinière") || has("cuiseur") || has("طباخ") || has("طباخة") || has("بوتاجاز") || has("كوزينة")) return "cookers";
-
-  if (has("table top") || has("tabletop") || has("table-top") || has("tabletop")) return "tableTop";
-
-  if (has("ventil") || has("aspir") || has("speaker") || has("enceinte") || has("مروحة") || has("مكنسة") || has("سبيكر") || has("مكبر")) return "fansVacSpeakers";
-
-  if (has("hotte") || has("hote") || has("plaque") || has("micro-ondes") || has("micro ondes") || has("microwave") || has("four posable") || has("four") || has("شفاط") || has("بلات") || has("ميكرو") || has("ميكروويف") || has("فران")) return "hoodHobOvenMicro";
-
-  if (has("petit electro") || has("petits electro") || has("small electro") || has("small appliances") || has("electromenager") || has("إلكتر") || has("خلاط") || has("mixeur") || has("blender")) return "smallElectro";
-
-  return null;
+  return SHIPPING.zones.other;
 }
-
 
 
 function includesToken(text, token) {
@@ -557,6 +509,9 @@ function t(lang, key, vars) {
       needDetails: "3tini brand/model/size wla catégorie bach n3tik options.",
       deliveryCostNeed: "Sift lmdina w type dyal produit b 1 sطر, b7al Casa tv 32 wla Rabat refrigerateur.",
 deliveryCostLine: ({ zoneName, cost }) => `Thمن livraison ${zoneName}: ${cost} dh.`,
+    deliveryCallback: "صيفط لينا الاسم والمدينة والعنوان ورقم الهاتف وغادي نعيطو ليك بخصوص التوصيل.",
+    deliveryCallback: "Envoie-nous tes coordonnées et on te rappelle pour la livraison.",
+    deliveryCallback: "Sift lina lism w lmdina w l3nwan w n3ayto lik bkhssos tawsil.",
 
       cannot3: "Ma qdrtch n3tik jawab bd9a daba. T9dr t3yt lina: " + CONTACTS.calls.join(" / ") + ".",
       photoLink: (x) => {
@@ -2220,6 +2175,17 @@ function asksAboutDeliveryPaymentWarranty(text) {
   return false;
 }
 
+
+function isDeliveryIntent(text) {
+  const s = normMatch(text);
+  return (
+    s.indexOf("delivery") >= 0 ||
+    s.indexOf("livraison") >= 0 ||
+    s.indexOf("توصيل") >= 0 ||
+    s.indexOf("التوصيل") >= 0
+  );
+}
+
 function isDeliveryCostIntent(text) {
   const raw = String(text || "");
   const s = normMatch(raw);
@@ -2978,6 +2944,12 @@ if (isIptvIntent(userTextRaw)) {
     }
 
 if (asksAboutDeliveryPaymentWarranty(userTextRaw)) {
+  if (isDeliveryIntent(userTextRaw)) {
+    const out = shortenNoQuestion(t(lang, "deliveryCallback"), 260);
+    memory.push(key, "assistant", out);
+    resetStrikes(key);
+    return res.json({ ok: true, reply: out });
+  }
   if (isDeliveryCostIntent(userTextRaw)) {
     const zoneKey = detectDeliveryZone(userTextRaw);
     const catKey = resolveShippingCategoryKey(userTextRaw, key);
@@ -2990,9 +2962,7 @@ if (asksAboutDeliveryPaymentWarranty(userTextRaw)) {
     }
 
     const cost = SHIPPING.costs[catKey][zoneKey];
-    let zoneName = zoneKey === "casa" ? "Casa" : zoneKey === "south" ? "South" : "Hors Casa";
-    if (lang === "ar") zoneName = zoneKey === "casa" ? "الدار البيضاء" : zoneKey === "south" ? "الجنوب" : "خارج الدار البيضاء";
-    if (lang === "fr") zoneName = zoneKey === "casa" ? "Casablanca" : zoneKey === "south" ? "Sud" : "Hors Casa";
+    const zoneName = zoneKey === "casa" ? "Casa" : zoneKey === "south" ? "South" : "Hors Casa";
     const out = shortenNoQuestion(t(lang, "deliveryCostLine", { zoneName, cost }), 220);
     memory.push(key, "assistant", out);
     resetStrikes(key);
