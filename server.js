@@ -210,25 +210,6 @@ function detectDeliveryZone(text) {
   return SHIPPING.zones.other;
 }
 
-function resolveShippingCategoryKey(userText, key) {
-  const s = normMatch(userText || "");
-
-  for (let i = 0; i < SHIPPING.casaTokens.length; i += 1) {
-    if (includesToken(s, SHIPPING.casaTokens[i])) return SHIPPING.zones.casa;
-  }
-
-  for (let i = 0; i < SHIPPING.southCitiesTokens.length; i += 1) {
-    if (includesToken(s, SHIPPING.southCitiesTokens[i])) return SHIPPING.zones.south;
-  }
-
-  for (let i = 0; i < SHIPPING.otherCityTokens.length; i += 1) {
-    if (includesToken(s, SHIPPING.otherCityTokens[i])) return SHIPPING.zones.other;
-  }
-
-  return SHIPPING.zones.other;
-}
-
-
 function includesToken(text, token) {
   const s = normMatch(text);
   const t0 = normMatch(token);
@@ -2696,11 +2677,11 @@ function timingSafeEqualStr(a, b) {
 }
 
 function resolveShippingCategoryKey(input) {
-  var s = "";
+  let s = "";
   if (typeof input === "string") {
     s = normMatch(input);
   } else if (input && typeof input === "object") {
-    var a = "";
+    let a = "";
     if (input.class) a += " " + String(input.class);
     if (input.category) a += " " + String(input.category);
     if (input.name) a += " " + String(input.name);
@@ -2712,18 +2693,19 @@ function resolveShippingCategoryKey(input) {
 
   if (!s) return null;
 
-  var tvSize = null;
-  var mSize = s.match(/(^|[^0-9])(24|32|40|43|50|55|65|75|85|98|100)($|[^0-9])/);
+  // --- TV sizes ---
+  let tvSize = null;
+  const mSize = s.match(/(^|[^0-9])(24|32|40|43|50|55|65|75|85|98|100)($|[^0-9])/);
   if (mSize && mSize[2]) tvSize = Number(mSize[2]);
 
-  var isTv =
-    s.indexOf("tv") >= 0 ||
-    s.indexOf("tele") >= 0 ||
-    s.indexOf("télé") >= 0 ||
-    s.indexOf("television") >= 0 ||
-    s.indexOf("télévision") >= 0 ||
-    s.indexOf("تلفاز") >= 0 ||
-    s.indexOf("تلفزيون") >= 0;
+  const isTv =
+    s.includes("tv") ||
+    s.includes("tele") ||
+    s.includes("télé") ||
+    s.includes("television") ||
+    s.includes("télévision") ||
+    s.includes("تلفاز") ||
+    s.includes("تلفزيون");
 
   if (isTv) {
     if (tvSize && tvSize >= 65) return "tv_65_100";
@@ -2731,59 +2713,76 @@ function resolveShippingCategoryKey(input) {
     return "tv_24_43";
   }
 
-  if (s.indexOf("mini bar") >= 0) return "mini_bar";
+  // --- Mini bar ---
+  if (s.includes("mini bar") || s.includes("minibar")) return "mini_bar";
 
-  if (s.indexOf("ventil") >= 0 || s.indexOf("aspirat") >= 0 || s.indexOf("speaker") >= 0) {
-    return "ventilateur_aspirateur_speakers";
+  // --- Fans / aspirator / speakers ---
+  if (s.includes("ventil") || s.includes("aspirat") || s.includes("speaker") || s.includes("haut parleur") || s.includes("مروحة") || s.includes("سبيكر")) {
+    return "fans_vac_speakers";
   }
 
-  if (s.indexOf("petit") >= 0 || s.indexOf("small") >= 0) return "petits_electro";
+  // --- Small electro ---
+  if (s.includes("petit") || s.includes("small") || s.includes("petits electro") || s.includes("صغير") || s.includes("صغار")) return "small_electro";
 
-  if (s.indexOf("chauffe") >= 0 || s.indexOf("sachan") >= 0 || s.indexOf("سخان") >= 0) {
-    var liters = NaN;
-    var ml = s.match(/(^|[^0-9])([0-9]{1,3})[ ]*l($|[^a-z0-9])/);
+  // --- Water heater (chauffe-eau / سخان) ---
+  if (s.includes("chauffe") || s.includes("water heater") || s.includes("سخان")) {
+    let liters = NaN;
+    const ml = s.match(/(^|[^0-9])([0-9]{1,3})\s*l($|[^a-z0-9])/);
     if (ml && ml[2]) liters = Number(ml[2]);
-    if (Number.isFinite(liters) && liters >= 45) return "chauffe_eau_50l";
-    return "chauffe_eau_6_35l";
+    if (Number.isFinite(liters) && liters >= 45) return "water_heater_50";
+    return "water_heater_small";
   }
 
-  if (s.indexOf("hotte") >= 0 || s.indexOf("plaque") >= 0 || s.indexOf("four posable") >= 0 || s.indexOf("micro") >= 0) {
-    return "hotte_plaque_four_micro";
-  }
-
-  if (s.indexOf("table top") >= 0) return "table_top";
-
-  if (s.indexOf("clim") >= 0 || s.indexOf("climat") >= 0 || s.indexOf("مكيف") >= 0) return "climat";
-
-  if (s.indexOf("four encastr") >= 0 || s.indexOf("encastrable") >= 0) return "four_encastrable";
-
-  if (s.indexOf("congel") >= 0 || s.indexOf("freezer") >= 0 || s.indexOf("فريزر") >= 0) {
-    var liters2 = NaN;
-    var ml2 = s.match(/(^|[^0-9])([0-9]{2,4})[ ]*l($|[^a-z0-9])/);
-    if (ml2 && ml2[2]) liters2 = Number(ml2[2]);
-    if (Number.isFinite(liters2) && liters2 > 240) return "congelateur_plus_240l";
-    return "congelateur_70_240l";
-  }
-
-  if (s.indexOf("lave vaisselle") >= 0 || s.indexOf("dishwasher") >= 0) return "lave_vaisselle_machine_a_laver";
-
+  // --- Hood / hobs / microwave / small oven ---
   if (
-    s.indexOf("machine a laver") >= 0 ||
-    s.indexOf("machine à laver") >= 0 ||
-    s.indexOf("lave linge") >= 0 ||
-    s.indexOf("washing") >= 0 ||
-    s.indexOf("غسالة") >= 0
+    s.includes("hotte") ||
+    s.includes("hood") ||
+    s.includes("plaque") ||
+    s.includes("hobs") ||
+    s.includes("micro") ||
+    s.includes("micro-ondes") ||
+    s.includes("microwave") ||
+    s.includes("four posable")
   ) {
-    return "lave_vaisselle_machine_a_laver";
+    return "hobs_hood_mw_small_oven";
   }
 
-  if (s.indexOf("refriger") >= 0 || s.indexOf("réfrig") >= 0 || s.indexOf("frigo") >= 0 || s.indexOf("ثلاجة") >= 0) {
-    return "refrigerateur";
+  // --- Table top ---
+  if (s.includes("table top") || s.includes("tabletop")) return "table_top";
+
+  // --- Climat ---
+  if (s.includes("clim") || s.includes("climat") || s.includes("climatiseur") || s.includes("مكيف")) return "climat";
+
+  // --- Built-in oven ---
+  if (s.includes("four encastr") || s.includes("encastrable") || s.includes("built in")) return "built_in_oven";
+
+  // --- Freezer ---
+  if (s.includes("congel") || s.includes("freezer") || s.includes("فريزر")) {
+    let liters2 = NaN;
+    const ml2 = s.match(/(^|[^0-9])([0-9]{2,4})\s*l($|[^a-z0-9])/);
+    if (ml2 && ml2[2]) liters2 = Number(ml2[2]);
+    if (Number.isFinite(liters2) && liters2 > 240) return "freezer_240_plus";
+    return "freezer_70_240";
   }
 
-  if (s.indexOf("cuisin") >= 0 || s.indexOf("cooker") >= 0 || s.indexOf("gazini") >= 0 || s.indexOf("بوتاغاز") >= 0) {
-    return "cuisiniers";
+  // --- Washer / Dishwasher ---
+  if (
+    s.includes("lave vaisselle") ||
+    s.includes("dishwasher") ||
+    s.includes("machine a laver") ||
+    s.includes("machine à laver") ||
+    s.includes("lave linge") ||
+    s.includes("washing") ||
+    s.includes("غسالة")
+  ) {
+    return "washer_dishwasher";
   }
+
+  // --- Refrigerator ---
+  if (s.includes("refriger") || s.includes("réfrig") || s.includes("frigo") || s.includes("ثلاجة")) return "refrigerateur";
+
+  // --- Cookers ---
+  if (s.includes("cuisin") || s.includes("cooker") || s.includes("gazini") || s.includes("بوتاغاز")) return "cuisiniers";
 
   return null;
 }
@@ -2989,10 +2988,26 @@ if (isIptvIntent(userTextRaw)) {
       return res.json({ ok: true, reply });
     }
 
+function zoneLabel(lang, zoneKey) {
+  if (lang === "ar") {
+    if (zoneKey === SHIPPING.zones.casa) return "داخل الدار البيضاء";
+    if (zoneKey === SHIPPING.zones.south) return "الجنوب (العيون/الداخلة/السمارة)";
+    return "خارج الدار البيضاء";
+  }
+  if (lang === "fr") {
+    if (zoneKey === SHIPPING.zones.casa) return "Casablanca";
+    if (zoneKey === SHIPPING.zones.south) return "Zone Sud (Laâyoune/Dakhla/Smara)";
+    return "Hors Casablanca";
+  }
+  if (zoneKey === SHIPPING.zones.casa) return "Casa";
+  if (zoneKey === SHIPPING.zones.south) return "South (Laâyoune/Dakhla/Smara)";
+  return "Hors Casa";
+}
+
 if (asksAboutDeliveryPaymentWarranty(userTextRaw)) {
   if (isDeliveryCostIntent(userTextRaw)) {
-    const zoneKey = resolveShippingCategoryKey(userTextRaw, key);
-    const catKey = resolveShippingCategoryKey(userTextRaw, key);
+    const zoneKey = detectDeliveryZone(userTextRaw);
+    const catKey = resolveShippingCategoryKey(userTextRaw);
 
     if (!catKey || !SHIPPING.costs[catKey]) {
       const out = shortenNoQuestion(t(lang, "deliveryCostNeed"), 220);
@@ -3002,7 +3017,8 @@ if (asksAboutDeliveryPaymentWarranty(userTextRaw)) {
     }
 
     const cost = SHIPPING.costs[catKey][zoneKey];
-    const zoneName = zoneKey === "casa" ? "Casa" : zoneKey === "south" ? "South" : "Hors Casa";
+    const zoneName = zoneLabel(lang, zoneKey);
+
     const out = shortenNoQuestion(t(lang, "deliveryCostLine", { zoneName, cost }), 220);
     memory.push(key, "assistant", out);
     resetStrikes(key);
