@@ -194,6 +194,23 @@ function hasArabicScript(text) {
   return /[\u0600-\u06FF]/.test(String(text || ""));
 }
 
+function detectDeliveryZone(text) {
+  const s = normMatch(text);
+  if (!s) return SHIPPING.zones.other;
+
+  if (s.indexOf("casa") >= 0) return SHIPPING.zones.casa;
+  if (s.indexOf("casablanca") >= 0) return SHIPPING.zones.casa;
+  if (s.indexOf("الدار") >= 0 && s.indexOf("البيضاء") >= 0) return SHIPPING.zones.casa;
+
+  for (let i = 0; i < SHIPPING.southCitiesTokens.length; i += 1) {
+    const tok = normMatch(SHIPPING.southCitiesTokens[i]);
+    if (tok && s.indexOf(tok) >= 0) return SHIPPING.zones.south;
+  }
+
+  return SHIPPING.zones.other;
+}
+
+
 function includesToken(text, token) {
   const s = normMatch(text);
   const t0 = normMatch(token);
@@ -234,6 +251,44 @@ function looksLikeFallback(reply) {
   if (r.indexOf("cannot") >= 0) return true;
   return false;
 }
+
+const SHIPPING = Object.freeze({
+  zones: {
+    casa: "casa",
+    south: "south",
+    other: "other",
+  },
+  southCitiesTokens: [
+    "laayoune",
+    "laâyoune",
+    "layoune",
+    "dakhla",
+    "daxla",
+    "samara",
+    "smara",
+  ],
+  costs: {
+    "tv_24_43": { other: 45, south: 60, casa: 30 },
+    "mini_bar": { other: 45, south: 60, casa: 40 },
+    "fans_vac_speakers": { other: 45, south: 60, casa: 20 },
+    "water_heater_small": { other: 45, south: 60, casa: 30 },
+    "hobs_hood_mw_small_oven": { other: 45, south: 60, casa: 30 },
+    "small_electro": { other: 45, south: 45, casa: 20 },
+    "tv_50_55": { other: 90, south: 120, casa: 40 },
+    "table_top": { other: 90, south: 120, casa: 40 },
+    "climat": { other: 90, south: 120, casa: 40 },
+    "water_heater_50": { other: 90, south: 120, casa: 30 },
+    "built_in_oven": { other: 90, south: 120, casa: 30 },
+    "freezer_70_240": { other: 135, south: 240, casa: 50 },
+    "washer_dishwasher": { other: 180, south: 240, casa: 50 },
+    "refrigerateur": { other: 250, south: 450, casa: 150 },
+    "tv_65_100": { other: 250, south: 450, casa: 150 },
+    "freezer_240_plus": { other: 250, south: 450, casa: 150 },
+    "cuisiniers": { other: 250, south: 450, casa: 150 },
+  },
+});
+
+
 
 const RULES_I18N = {
   dzl: {
@@ -334,6 +389,9 @@ function t(lang, key, vars) {
         'Ila bghiti tخلص b virement: mlli tdir commande, zid note f formulaire: "paiement par virement bancaire".\nFormulaire: ' +
         ORDER_FORM_URL,
       needDetails: "3tini brand/model/size wla catégorie bach n3tik options.",
+      deliveryCostNeed: "Sift lmdina w type dyal produit b 1 sطر, b7al Casa tv 32 wla Rabat refrigerateur.",
+deliveryCostLine: ({ zoneName, cost }) => `Thمن livraison ${zoneName}: ${cost} dh.`,
+
       cannot3: "Ma qdrtch n3tik jawab bd9a daba. T9dr t3yt lina: " + CONTACTS.calls.join(" / ") + ".",
       photoLink: (x) => {
         const link = String((x || {}).link || "");
@@ -350,6 +408,7 @@ function t(lang, key, vars) {
       preferBest: "L’a7san men had l-khtiyarat هو",
       preferCheapest: "L’ar5as men had l-khtiyarat هو",
       preferNeedContext: "Sift size (b7al tv 50) wla model bach nختar l’a7san wla l’ar5as.",
+      iptvCall: "IPTV kayn f service. 3afak 3ayet 0605123934.",
     },
     fr: {
       askTextInsteadMedia: "Merci. Pour que je comprenne, envoyez un message écrit (sans audio/image).",
@@ -384,6 +443,10 @@ function t(lang, key, vars) {
         ORDER_FORM_URL,
       needDetails: "Merci de préciser la marque, le modèle, la taille ou la catégorie.",
       cannot3: "Je ne peux pas répondre avec certitude pour le moment. Vous pouvez appeler: " + CONTACTS.calls.join(" / ") + ".",
+      deliveryCostNeed: "Envoyez la ville et le type produit en une ligne, exemple Casa tv 32 ou Rabat refrigerateur.",
+deliveryCostLine: ({ zoneName, cost }) => `Frais de livraison ${zoneName} : ${cost} dh.`,
+
+      
       photoLink: (x) => {
         const link = String((x || {}).link || "");
         return "Voici le lien du produit: " + link;
@@ -399,6 +462,7 @@ function t(lang, key, vars) {
       preferBest: "Le meilleur parmi ces options est",
       preferCheapest: "Le moins cher parmi ces options est",
       preferNeedContext: "Envoyez la taille (ex tv 50) ou le modèle pour choisir le meilleur ou le moins cher.",
+      iptvCall: "Service IPTV disponible. Veuillez appeler 0605123934.",
     },
     ar: {
       askTextInsteadMedia: "شكراً. من فضلك ارسل رسالة مكتوبة (بدون صوت/صورة) باش نقدر نفهمك.",
@@ -431,6 +495,9 @@ function t(lang, key, vars) {
       bankTransferHow:
         'باش تخلص بالتحويل البنكي: منين دير الطلب زيد ملاحظة فالفورم: "الدفع بتحويل بنكي".\nالفورم: ' + ORDER_FORM_URL,
       needDetails: "عطيني الماركة أو الموديل أو الحجم أو الفئة باش نعاونك.",
+      deliveryCostNeed: "صيفط المدينة ونوع المنتج فسطـر واحد، مثال Casa tv 32 ولا Rabat refrigerateur.",
+deliveryCostLine: ({ zoneName, cost }) => `ثمن التوصيل ${zoneName}: ${cost} درهم.`,
+
       cannot3: "ماقدرتش نعطيك جواب مؤكد دابا. تقدر تعيط لينا: " + CONTACTS.calls.join(" / ") + ".",
       photoLink: (x) => {
         const link = String((x || {}).link || "");
@@ -447,6 +514,7 @@ function t(lang, key, vars) {
       preferBest: "الأفضل من هاد الخيارات هو",
       preferCheapest: "الأرخص من هاد الخيارات هو",
       preferNeedContext: "صيفط الحجم (مثلاً tv 50) ولا الموديل باش نختار الأفضل ولا الأرخص.",
+      iptvCall: "خدمة IPTV متوفرة. اتصل على 0605123934.",
     },
   };
 
@@ -1535,6 +1603,58 @@ function detectCategory(text) {
     return canonical;
   }
 
+function resolveShippingCategoryKey(userText, key) {
+  const text = String(userText || "");
+  const s = normMatch(text);
+  const ctx = getCtx(key);
+
+  const sizeVal = extractTvSize(text) || Number(ctx.lastSize || 0) || null;
+
+  if (sizeVal) {
+    if (sizeVal <= 43) return "tv_24_43";
+    if (sizeVal === 50 || sizeVal === 55) return "tv_50_55";
+    if (sizeVal >= 65) return "tv_65_100";
+  }
+
+  if (s.indexOf("refrigerateur") >= 0 || s.indexOf("réfrigérateur") >= 0 || s.indexOf("frigo") >= 0 || s.indexOf("ثلاجة") >= 0) return "refrigerateur";
+  if (s.indexOf("congelateur") >= 0 || s.indexOf("congélateur") >= 0 || s.indexOf("freezer") >= 0 || s.indexOf("فريزر") >= 0) return "freezer_70_240";
+  if (s.indexOf("+240") >= 0 || s.indexOf("240") >= 0) {
+    if (s.indexOf("congel") >= 0 || s.indexOf("freezer") >= 0 || s.indexOf("فريزر") >= 0) return "freezer_240_plus";
+  }
+
+  if (s.indexOf("machine a laver") >= 0 || s.indexOf("machine à laver") >= 0 || s.indexOf("washing") >= 0 || s.indexOf("غسالة") >= 0) return "washer_dishwasher";
+  if (s.indexOf("lave vaisselle") >= 0 || s.indexOf("dishwasher") >= 0 || s.indexOf("غسالة صحون") >= 0) return "washer_dishwasher";
+
+  if (s.indexOf("climat") >= 0 || s.indexOf("climatiseur") >= 0 || s.indexOf("مكيف") >= 0) return "climat";
+  if (s.indexOf("chauffe") >= 0 || s.indexOf("water heater") >= 0 || s.indexOf("سخان") >= 0) {
+    if (s.indexOf("50") >= 0) return "water_heater_50";
+    return "water_heater_small";
+  }
+
+  if (s.indexOf("micro-ondes") >= 0 || s.indexOf("microwave") >= 0 || s.indexOf("ميكرو") >= 0) return "hobs_hood_mw_small_oven";
+  if (s.indexOf("hote") >= 0 || s.indexOf("hotte") >= 0 || s.indexOf("hood") >= 0) return "hobs_hood_mw_small_oven";
+  if (s.indexOf("plaque") >= 0 || s.indexOf("hob") >= 0) return "hobs_hood_mw_small_oven";
+  if (s.indexOf("four encastrable") >= 0 || s.indexOf("encastrable") >= 0) return "built_in_oven";
+  if (s.indexOf("four") >= 0 && s.indexOf("posable") >= 0) return "hobs_hood_mw_small_oven";
+
+  if (s.indexOf("mini bar") >= 0 || s.indexOf("minibar") >= 0) return "mini_bar";
+  if (s.indexOf("ventilateur") >= 0 || s.indexOf("aspirateur") >= 0 || s.indexOf("speaker") >= 0) return "fans_vac_speakers";
+
+  if (s.indexOf("table top") >= 0) return "table_top";
+  if (s.indexOf("cuisinier") >= 0 || s.indexOf("cuisiniere") >= 0 || s.indexOf("cuisinière") >= 0 || s.indexOf("cuisiniers") >= 0) return "cuisiniers";
+
+  const lastCls = normMatch(ctx.lastClass || "");
+  if (lastCls && lastCls.indexOf("tv") >= 0) return "tv_24_43";
+
+  const lastCat = normMatch(ctx.lastCategory || "");
+  if (lastCat.indexOf("refriger") >= 0) return "refrigerateur";
+  if (lastCat.indexOf("congel") >= 0) return "freezer_70_240";
+  if (lastCat.indexOf("climat") >= 0) return "climat";
+
+  return null;
+}
+
+
   const entries = Object.entries(CATEGORY_ALIASES);
   for (let i = 0; i < entries.length; i += 1) {
     const canonical = entries[i][0];
@@ -1565,28 +1685,37 @@ function extractOrderNumber(text) {
 
 function extractTvSize(text) {
   const s0 = arabicIndicToAsciiDigits(String(text || ""));
-  const allowed = { "24": 1, "32": 1, "40": 1, "43": 1, "50": 1, "55": 1, "65": 1, "75": 1 };
+  const s = s0.toLowerCase();
 
-  let cur = "";
-  for (let i = 0; i < s0.length; i += 1) {
-    const ch = s0[i];
-    const code = s0.charCodeAt(i);
-    const isDigit = code >= 48 && code <= 57;
-    if (isDigit) {
-      cur += ch;
-      if (cur.length > 2) cur = cur.slice(-2);
-    } else {
-      if (cur.length === 2 && allowed[cur]) return Number(cur);
-      cur = "";
-    }
-  }
-  if (cur.length === 2 && allowed[cur]) return Number(cur);
+  const hasTvHint =
+    s.includes('"') ||
+    s.includes("inch") ||
+    s.includes("inches") ||
+    s.includes("tv") ||
+    s.includes("tele") ||
+    s.includes("télé") ||
+    s.includes("بوصة");
+
+  const looksLikeLiters =
+    /\b\d{2,4}\s*l\b/i.test(s0) ||
+    /\b\d{2,4}\s*litre\b/i.test(s) ||
+    /\b\d{2,4}\s*litres\b/i.test(s) ||
+    /\b\d{2,4}\s*litr\b/i.test(s) ||
+    /\b\d{2,4}\s*ltrs\b/i.test(s);
+
+  if (looksLikeLiters && !hasTvHint) return null;
+
+  const m = s0.match(/(?:^|[^\d])(24|32|40|43|50|55|65|75)(?=$|[^\d])/);
+  if (m) return Number(m[1]);
 
   const digitsOnly = s0.replace(/[^\d]/g, "");
-  if (digitsOnly.length === 2 && allowed[digitsOnly]) return Number(digitsOnly);
-
+  if (digitsOnly.length === 2) {
+    const n = Number(digitsOnly);
+    if ([24, 32, 40, 43, 50, 55, 65, 75].includes(n)) return n;
+  }
   return null;
 }
+
 
 function formatOfferLine(brand, o) {
   const sizePart = o && o.size ? " " + o.size + '"' : "";
@@ -1875,25 +2004,6 @@ function isGreeting(text) {
   return false;
 }
 
-function isLocationIntent(text) {
-  const s = normMatch(text);
-  const finRe = /(^|\s)fin(\s|$)/i;
-  const whereRe = /(^|\s)where(\s|$)/i;
-
-  if (whereRe.test(s)) return true;
-  if (finRe.test(s)) return true;
-  if (s.indexOf("address") >= 0) return true;
-  if (s.indexOf("adresse") >= 0) return true;
-  if (s.indexOf("location") >= 0) return true;
-  if (s.indexOf("localisation") >= 0) return true;
-  if (s.indexOf("فين") >= 0) return true;
-  if (s.indexOf("العنوان") >= 0) return true;
-  if (s.indexOf("عنوان") >= 0) return true;
-  if (s.indexOf("المحل") >= 0) return true;
-
-  return false;
-}
-
 function isCallMeIntent(text) {
   const s = normMatch(text);
   if (s.indexOf("3ayet") >= 0) return true;
@@ -1962,6 +2072,19 @@ function isBankTransferIntent(text) {
   return false;
 }
 
+function isIptvIntent(text) {
+  const s = normMatch(text);
+  if (!s) return false;
+  if (s.indexOf("iptv") >= 0) return true;
+  if (s.indexOf("abonnement iptv") >= 0) return true;
+  if (s.indexOf("code iptv") >= 0) return true;
+  if (s.indexOf("boitier iptv") >= 0) return true;
+  if (s.indexOf("box iptv") >= 0) return true;
+  if (s.indexOf("اشتراك") >= 0 && s.indexOf("iptv") >= 0) return true;
+  return false;
+}
+
+
 function asksAboutDeliveryPaymentWarranty(text) {
   const s = normMatch(text);
   if (s.indexOf("delivery") >= 0) return true;
@@ -1982,6 +2105,34 @@ function asksAboutDeliveryPaymentWarranty(text) {
   if (s.indexOf("براكي") >= 0) return true;
   return false;
 }
+
+function isDeliveryCostIntent(text) {
+  const raw = String(text || "");
+  const s = normMatch(raw);
+
+  const hasDeliveryWord =
+    s.indexOf("delivery") >= 0 ||
+    s.indexOf("livraison") >= 0 ||
+    s.indexOf("توصيل") >= 0 ||
+    s.indexOf("التوصيل") >= 0;
+
+  if (!hasDeliveryWord) return false;
+
+  const hasCostWord =
+    s.indexOf("cost") >= 0 ||
+    s.indexOf("price") >= 0 ||
+    s.indexOf("prix") >= 0 ||
+    s.indexOf("frais") >= 0 ||
+    s.indexOf("tarif") >= 0 ||
+    s.indexOf("combien") >= 0 ||
+    s.indexOf("بكم") >= 0 ||
+    s.indexOf("ثمن") >= 0 ||
+    s.indexOf("السعر") >= 0 ||
+    s.indexOf("prix livraison") >= 0;
+
+  return Boolean(hasCostWord);
+}
+
 
 function isPhotoRequestIntent(text) {
   const s = normMatch(text);
@@ -2012,43 +2163,116 @@ function isOrderStatusIntent(text) {
   const raw = String(text || "");
   const s = normMatch(raw);
 
-  const trackingSignals = ["suivi", "tracking", "statut", "status", "où est", "ou est", "where", "fin"];
-  const problemSignals = [
-    "pas recu",
-    "pas reçu",
-    "late",
-    "delayed",
-    "retard",
+  const orderNo = extractOrderNumber(raw);
+  const hasDigits = Boolean(orderNo);
+
+  const orderWords = [
+    "commande",
+    "commende",
+    "order",
+    "tracking",
+    "suivi",
+    "statut",
+    "status",
+    "numero",
+    "num",
+    "رقم",
+    "الطلب",
+    "طلب",
+    "commande رقم",
+    "num commande",
+  ];
+
+  const progressWords = [
+    "ou est",
+    "où est",
+    "where",
+    "fin",
+    "فين",
+    "wsl",
+    "wsla",
+    "wasla",
     "matwsl",
     "ma wslatch",
+    "ma wslat",
+    "ma wslatch",
+    "retard",
+    "late",
+    "delayed",
+    "pas recu",
+    "pas reçu",
     "لم اتوصل",
     "ما توصلتش",
     "متأخر",
     "تأخر",
+    "واصلة",
+    "وصل",
+    "وصلات",
+    "توصلت",
   ];
 
-  let hasTracking = false;
-  for (let i = 0; i < trackingSignals.length; i += 1) {
-    if (s.indexOf(normMatch(trackingSignals[i])) >= 0) {
-      hasTracking = true;
+  let hasOrderWord = false;
+  for (let i = 0; i < orderWords.length; i += 1) {
+    const k = normMatch(orderWords[i]);
+    if (k && s.indexOf(k) >= 0) {
+      hasOrderWord = true;
       break;
     }
   }
 
-  let hasProblem = false;
-  for (let i = 0; i < problemSignals.length; i += 1) {
-    if (s.indexOf(normMatch(problemSignals[i])) >= 0) {
-      hasProblem = true;
+  let hasProgressWord = false;
+  for (let i = 0; i < progressWords.length; i += 1) {
+    const k = normMatch(progressWords[i]);
+    if (k && s.indexOf(k) >= 0) {
+      hasProgressWord = true;
       break;
     }
   }
 
-  const mentionsOrderNo =
-    (s.indexOf("numero") >= 0 && s.indexOf("commande") >= 0) ||
-    (s.indexOf("num") >= 0 && s.indexOf("commande") >= 0) ||
-    (s.indexOf("رقم") >= 0 && (s.indexOf("الطلب") >= 0 || s.indexOf("طلب") >= 0));
+  if (hasOrderWord) return true;
 
-  return Boolean(mentionsOrderNo || hasTracking || hasProblem);
+  if (hasProgressWord && hasDigits) return true;
+
+  if (hasProgressWord) {
+    if (s.indexOf("commande") >= 0) return true;
+    if (s.indexOf("رقم") >= 0) return true;
+    if (s.indexOf("الطلب") >= 0) return true;
+    if (s.indexOf("طلب") >= 0) return true;
+  }
+
+  return false;
+}
+
+function isLocationIntent(text) {
+  if (isOrderStatusIntent(text)) return false;
+
+  const s = normMatch(text);
+  if (!s) return false;
+
+  const orderNo = extractOrderNumber(text);
+  if (orderNo) return false;
+
+  const tokens = String(s)
+    .replace(/[^a-z0-9\u0600-\u06ff]+/g, " ")
+    .trim()
+    .split(/\s+/)
+    .filter((x) => x);
+
+  for (let i = 0; i < tokens.length; i += 1) {
+    const tok = tokens[i];
+    if (tok === "fin") return true;
+    if (tok === "where") return true;
+  }
+
+  if (s.indexOf("address") >= 0) return true;
+  if (s.indexOf("adresse") >= 0) return true;
+  if (s.indexOf("location") >= 0) return true;
+  if (s.indexOf("localisation") >= 0) return true;
+  if (s.indexOf("العنوان") >= 0) return true;
+  if (s.indexOf("عنوان") >= 0) return true;
+  if (s.indexOf("المحل") >= 0) return true;
+
+  return false;
 }
 
 function tryDirectOfferAnswer(userText, historyMsgs, lang, key) {
@@ -2584,6 +2808,12 @@ app.post("/wanotifier", async (req, res) => {
 
     memory.push(key, "user", userTextRaw);
     const history = memory.get(key);
+if (isIptvIntent(userTextRaw)) {
+  const out = shortenNoQuestion(t(lang, "iptvCall"), 220);
+  memory.push(key, "assistant", out);
+  resetStrikes(key);
+  return res.json({ ok: true, reply: out });
+}
 
     if (isGreeting(userTextRaw) && userTextRaw.length <= 25) {
       const daikoLines = buildBigOffersForGreeting("DAIKO", OFFERS_INDEX.classCanon.tv || null);
@@ -2628,6 +2858,25 @@ app.post("/wanotifier", async (req, res) => {
     }
 
     if (asksAboutDeliveryPaymentWarranty(userTextRaw)) {
+      if (isDeliveryCostIntent(userTextRaw)) {
+  const zone = detectDeliveryZone(userTextRaw);
+  const catKey = resolveShippingCategoryKey(userTextRaw, key);
+
+  if (!catKey || !SHIPPING.costs[catKey]) {
+    const out = shortenNoQuestion(t(lang, "deliveryCostNeed"), 220);
+    memory.push(key, "assistant", out);
+    resetStrikes(key);
+    return res.json({ ok: true, reply: out });
+  }
+
+  const cost = SHIPPING.costs[catKey][zone];
+  const zoneName = zone === SHIPPING.zones.casa ? "Casa" : zone === SHIPPING.zones.south ? "South" : "Hors Casa";
+  const out = shortenNoQuestion(t(lang, "deliveryCostLine", { zoneName, cost }), 220);
+  memory.push(key, "assistant", out);
+  resetStrikes(key);
+  return res.json({ ok: true, reply: out });
+}
+
       const s = normMatch(userTextRaw);
       const parts = [];
       const r = RULES_I18N[lang] || RULES_I18N.dzl;
