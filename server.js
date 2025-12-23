@@ -594,6 +594,92 @@ function extractTextFromBody(body) {
   return "";
 }
 
+function extractMediaMetaFromBody(body) {
+  const b = body || {};
+  const typeHint = extractMessageType(b);
+  const candidates = [];
+  const pushCandidate = (val, kindHint) => {
+    if (!val) return;
+    if (Array.isArray(val) && val.length) {
+      candidates.push(Object.assign({}, val[0], { kind: kindHint || val[0].kind }));
+      return;
+    }
+    if (typeof val === "string") {
+      candidates.push({ url: val, kind: kindHint || null });
+      return;
+    }
+    if (typeof val === "object") {
+      candidates.push({
+        kind: kindHint || val.kind || val.type || val.messageType || null,
+        url: val.url || val.media_url || val.mediaUrl || val.downloadUrl || val.href || val.link || null,
+        mimeType: val.mimeType || val.mimetype || val.contentType || val.typeMime || null,
+        filename: val.filename || val.fileName || val.name || null,
+        base64: val.base64 || val.payload || val.data || null,
+        id: val.id || val.mediaId || val.media_id || null,
+      });
+    }
+  };
+
+  const fields = [
+    ["media_url"],
+    ["mediaUrl"],
+    ["media"],
+    ["attachment"],
+    ["audio"],
+    ["voice"],
+    ["voice_note"],
+    ["voiceNote"],
+    ["video"],
+    ["image"],
+    ["document"],
+    ["data", "media"],
+    ["data", "audio"],
+    ["data", "voice"],
+    ["data", "voice_note"],
+    ["data", "media_url"],
+    ["data", "mediaUrl"],
+    ["data", "attachment"],
+    ["data", "message", "audio"],
+    ["data", "message", "voice"],
+  ];
+
+  for (let i = 0; i < fields.length; i += 1) {
+    const val = safeGet(b, fields[i]);
+    if (val !== undefined && val !== null) pushCandidate(val, fields[i].includes("audio") || fields[i].includes("voice") ? "audio" : null);
+  }
+
+  if (!candidates.length) return null;
+
+  const guessKind = (meta) => {
+    const kRaw = String(meta.kind || typeHint || "").toLowerCase();
+    const mime = String(meta.mimeType || "").toLowerCase();
+    const fn = String(meta.filename || "").toLowerCase();
+    const u = String(meta.url || "").toLowerCase();
+    if (kRaw.includes("audio") || kRaw.includes("voice")) return "audio";
+    if (kRaw.includes("image") || kRaw.includes("photo")) return "image";
+    if (kRaw.includes("video")) return "video";
+    if (kRaw.includes("doc")) return "document";
+    if (mime.startsWith("audio/")) return "audio";
+    if (mime.startsWith("image/")) return "image";
+    if (mime.startsWith("video/")) return "video";
+    if (mime.includes("pdf")) return "document";
+    const ext = path.extname(fn || u).replace(/^\./, "");
+    if (["ogg", "opus", "m4a", "mp3", "wav", "webm"].includes(ext)) return "audio";
+    if (["jpg", "jpeg", "png", "gif", "webp"].includes(ext)) return "image";
+    if (["mp4", "mov", "avi"].includes(ext)) return "video";
+    return null;
+  };
+
+  for (let i = 0; i < candidates.length; i += 1) {
+    const c = candidates[i];
+    if (c && (c.url || c.base64 || c.id)) {
+      return Object.assign({}, c, { kind: guessKind(c) });
+    }
+  }
+
+  return null;
+}
+
 function extractMediaFromBody(body) {
   const b = body || {};
   const p = [
@@ -1973,6 +2059,8 @@ function normalizeMediaInput(mediaVal) {
     id: String(raw.id || raw.mediaId || raw.media_id || "").trim(),
     mimeType: String(raw.mimeType || raw.contentType || "").trim(),
     filename: String(raw.filename || raw.fileName || raw.name || "").trim(),
+    base64: raw.base64 || null,
+    kind: raw.kind || null,
   };
 }
 
@@ -2003,12 +2091,63 @@ function isAudioMime(mime) {
   return m.startsWith("audio/");
 }
 
+function isAudioMeta(meta) {
+  const m = meta || {};
+  const kind = String(m.kind || "").toLowerCase();
+  const mime = String(m.mimeType || "").toLowerCase();
+  const filename = String(m.filename || "");
+  const url = String(m.url || "");
+  const ext = path.extname(filename || url).replace(/^\./, "").toLowerCase();
+  if (kind === "audio") return true;
+  if (mime && mime.startsWith("audio/")) return true;
+  if (["ogg", "opus", "m4a", "mp3", "wav", "webm"].includes(ext)) return true;
+  return false;
+}
+
 function extFromAudioMime(mime) {
   const m = String(mime || "").toLowerCase();
   if (m.indexOf("audio/ogg") === 0 || m.indexOf("audio/opus") === 0) return ".ogg";
   if (m.indexOf("audio/mpeg") === 0 || m.indexOf("audio/mp3") === 0) return ".mp3";
   if (m.indexOf("audio/mp4") === 0 || m.indexOf("audio/aac") === 0) return ".m4a";
   return ".mp3";
+}
+
+function inferMimeFromPath(filepath, fallbackMime) {
+  const ext = path.extname(String(filepath || "")).toLowerCase();
+  if (!ext) return fallbackMime || "";
+  const map = {
+    ".ogg": "audio/ogg",
+    ".opus": "audio/ogg",
+    ".m4a": "audio/mp4",
+    ".mp3": "audio/mpeg",
+    ".wav": "audio/wav",
+    ".webm": "audio/webm",
+  };
+  return map[ext] || fallbackMime || "";
+}
+
+async function downloadToTemp(url, filepath) {
+  const target = path.resolve(filepath);
+  fs.mkdirSync(path.dirname(target), { recursive: true });
+  let sizeBytes = 0;
+  const resp = await axios.get(url, { responseType: "stream", timeout: 15000 });
+  const ctRaw = (resp.headers && (resp.headers["content-type"] || resp.headers["Content-Type"])) || "";
+  await new Promise((resolve, reject) => {
+    const ws = fs.createWriteStream(target);
+    resp.data.on("data", (chunk) => {
+      sizeBytes += chunk.length;
+      if (sizeBytes > MAX_AUDIO_BYTES) {
+        const err = new Error("audio_too_large");
+        resp.data.destroy(err);
+        ws.destroy(err);
+      }
+    });
+    resp.data.on("error", reject);
+    ws.on("error", reject);
+    ws.on("finish", resolve);
+    resp.data.pipe(ws);
+  });
+  return { filePath: target, mimeType: String(ctRaw || ""), sizeBytes };
 }
 
 async function downloadAudioBuffer(mediaInput, reqId) {
@@ -2057,7 +2196,7 @@ async function downloadAudioBuffer(mediaInput, reqId) {
   }
 }
 
-async function transcribeAudio(filePath, mimeType) {
+async function transcribeAudioFile(filePath, mimeType) {
   if (typeof audioTranscriberOverride === "function") return audioTranscriberOverride(filePath, mimeType);
 
   const mime = String(mimeType || "").toLowerCase();
@@ -2066,12 +2205,16 @@ async function transcribeAudio(filePath, mimeType) {
 
   const resp = await getOpenAIClient().audio.transcriptions.create({
     file: fs.createReadStream(finalPath),
-    model: "gpt-4o-mini-transcribe",
+    model: "whisper-1",
     response_format: "text",
   });
 
   if (resp && typeof resp === "object" && resp.text) return String(resp.text || "").trim();
   return String(resp || "").trim();
+}
+
+async function transcribeAudio(filePath, mimeType) {
+  return transcribeAudioFile(filePath, mimeType);
 }
 
 function parseVisionJson(rawText) {
@@ -2720,9 +2863,10 @@ function buildGreetingExtras() {
 
 function shouldSendInitialGreeting(ctx, now) {
   const ts = Number(now || Date.now());
-  if (!ctx || ctx.didSendInitialGreeting !== true) return true;
-  if (!ctx.initialGreetingAt) return true;
-  return ts - Number(ctx.initialGreetingAt || 0) > INITIAL_GREETING_TTL_MS;
+  if (!ctx || (ctx.didSendInitialGreeting !== true && ctx.greeted !== true)) return true;
+  const at = Number(ctx.greetedAt || ctx.initialGreetingAt || 0);
+  if (!at) return true;
+  return ts - at > INITIAL_GREETING_TTL_MS;
 }
 
 function buildInitialGreeting(lang) {
@@ -2737,7 +2881,7 @@ function maybeSendInitialGreeting({ key, lang, now }) {
   if (!shouldSendInitialGreeting(ctx, now)) return null;
   const ts = Number(now || Date.now());
   const greeting = buildInitialGreeting(lang);
-  setCtx(key, { ...ctx, didSendInitialGreeting: true, initialGreetingAt: ts });
+  setCtx(key, { ...ctx, didSendInitialGreeting: true, initialGreetingAt: ts, greeted: true, greetedAt: ts });
   return greeting;
 }
 
@@ -4021,19 +4165,44 @@ app.post("/wanotifier", async (req, res) => {
       return res.status(401).json({ ok: false, error: "Unauthorized" });
     }
 
+    const mediaMeta = extractMediaMetaFromBody(req.body || {});
     const incoming = normalizeIncoming(req.body || {}, req);
     const key = incoming.key;
     const phone = incoming.phone;
     let userTextRaw = String(incoming.text || "").slice(0, 2000);
-    const mediaInfo = normalizeMediaInput(incoming.media);
+    const mediaInfo = normalizeMediaInput(mediaMeta || incoming.media);
     const msgType = String(incoming.type || "").toLowerCase();
-    const mediaResult = await processIncomingMedia({ mediaInfo, msgType, lang: detectLang(userTextRaw), key, reqId });
+    const mediaResult = await processIncomingMedia({
+      mediaInfo,
+      mediaMeta,
+      msgType,
+      lang: detectLang(userTextRaw),
+      key,
+      reqId,
+    });
     if (mediaResult && mediaResult.userText) {
       userTextRaw = mediaResult.userText;
+      incoming.text = userTextRaw;
     }
 
     const lang = detectLang(userTextRaw);
     const ip = String(req.ip || "");
+
+    const logLine = {
+      msg: "media_route",
+      reqId,
+      hasText: Boolean(userTextRaw),
+      mediaKind: (mediaResult && mediaResult.path) || (mediaInfo ? "other" : "text"),
+      mimeType:
+        (mediaResult && mediaResult.mimeType) ||
+        (mediaInfo && mediaInfo.mimeType) ||
+        (mediaMeta && mediaMeta.mimeType) ||
+        null,
+      hasUrl: Boolean(mediaInfo && mediaInfo.url),
+      sizeBytes: (mediaResult && mediaResult.sizeBytes) || null,
+      transcriptChars: (mediaResult && mediaResult.transcriptChars) || null,
+    };
+    console.log(JSON.stringify(logLine));
 
     const offersAvailable = Boolean(
       lastOffersSync &&
@@ -4347,7 +4516,11 @@ export {
   setAudioTranscriberForTest,
   handleVisionMediaForTest,
   isAudioMime,
+  isAudioMeta,
   extFromAudioMime,
+  extractMediaMetaFromBody,
+  downloadToTemp,
+  transcribeAudioFile,
   classifyMediaRoute,
   processIncomingMedia,
   maybeSendInitialGreeting,
@@ -4412,30 +4585,58 @@ async function main() {
 
 function classifyMediaRoute(mediaInfo, msgType) {
   const mimeType = String((mediaInfo && mediaInfo.mimeType) || "").toLowerCase();
-  const audioLikely = Boolean(msgType === "audio" || msgType === "voice" || (mediaInfo && isAudioMime(mimeType)));
-  const imageLikely = Boolean(mediaInfo && mimeType.startsWith("image/"));
-  const path = mediaInfo ? (audioLikely ? "audio" : imageLikely ? "image" : "other") : "text";
-  return { mimeType: mediaInfo ? mediaInfo.mimeType || "" : "", audioLikely, imageLikely, path };
+  const audioLikely = Boolean(
+    msgType === "audio" || msgType === "voice" || (mediaInfo && (isAudioMime(mimeType) || isAudioMeta(mediaInfo)))
+  );
+  const imageLikely = Boolean(mediaInfo && (mimeType.startsWith("image/") || String(mediaInfo.kind || "") === "image"));
+  const mediaKind = mediaInfo ? (audioLikely ? "audio" : imageLikely ? "image" : "other") : "text";
+  return { mimeType: mediaInfo ? mediaInfo.mimeType || "" : "", audioLikely, imageLikely, path: mediaKind, mediaKind };
 }
 
-async function processIncomingMedia({ mediaInfo, msgType, lang, key, reqId }) {
-  const route = classifyMediaRoute(mediaInfo, msgType);
-  if (mediaInfo) {
-    console.log(
-      JSON.stringify({ level: "info", msg: "media_route", reqId, mimeType: route.mimeType || null, path: route.path })
-    );
-  }
+async function processIncomingMedia({ mediaInfo, mediaMeta, msgType, lang, key, reqId }) {
+  const normalizedMedia = normalizeMediaInput(mediaInfo || mediaMeta || null);
+  const route = classifyMediaRoute(normalizedMedia, msgType || (mediaMeta && mediaMeta.kind));
 
-  if (route.audioLikely && mediaInfo) {
+  if (route.audioLikely && normalizedMedia) {
     let audioDl = null;
+    let tmpDir = null;
     try {
-      audioDl = await downloadAudioBuffer(mediaInfo, reqId);
-      const transcriptText = await transcribeAudio(audioDl.filePath, audioDl.mimeType);
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), "wanotifier-audio-"));
+      tmpDir = dir;
+      const ext = path.extname(normalizedMedia.filename || normalizedMedia.url || "") || extFromAudioMime(normalizedMedia.mimeType || "");
+      const tmpFile = path.join(dir, `audio${ext || ".ogg"}`);
+      let sizeBytes = 0;
+      let mimeType = normalizedMedia.mimeType || "";
+
+      if (typeof audioDownloaderOverride === "function") {
+        audioDl = await audioDownloaderOverride(normalizedMedia, reqId);
+        if (audioDl && audioDl.filePath) {
+          mimeType = audioDl.mimeType || mimeType;
+          sizeBytes = audioDl.sizeBytes || sizeBytes;
+        }
+      } else if (normalizedMedia.base64) {
+        const buf = Buffer.from(String(normalizedMedia.base64 || ""), "base64");
+        sizeBytes = buf.length;
+        if (sizeBytes > MAX_AUDIO_BYTES) throw new Error("audio_too_large");
+        fs.writeFileSync(tmpFile, buf);
+        audioDl = { filePath: tmpFile, mimeType, filename: normalizedMedia.filename || null };
+      } else if (normalizedMedia.url) {
+        audioDl = await downloadToTemp(normalizedMedia.url, tmpFile);
+        mimeType = mimeType || audioDl.mimeType || "";
+        sizeBytes = audioDl.sizeBytes || 0;
+      } else {
+        throw new Error("audio_url_missing");
+      }
+
+      const safeMime = mimeType || inferMimeFromPath(normalizedMedia.filename || normalizedMedia.url || tmpFile, "audio/ogg");
+      const transcriptText = await transcribeAudioFile((audioDl && audioDl.filePath) || tmpFile, safeMime);
       if (!transcriptText) throw new Error("transcription_empty");
       const userTextRaw = String(transcriptText || "").slice(0, 2000);
       const preview = userTextRaw.slice(0, 120);
-      console.log(JSON.stringify({ level: "info", msg: "audio_transcribed", reqId, textPreview: preview }));
-      return { ...route, userText: userTextRaw };
+      console.log(
+        JSON.stringify({ level: "info", msg: "audio_transcribed", reqId, textPreview: preview, sizeBytes, mimeType: safeMime })
+      );
+      return { ...route, userText: userTextRaw, sizeBytes, transcriptChars: userTextRaw.length, mimeType: safeMime };
     } catch (e) {
       console.error(JSON.stringify({ level: "error", msg: "audio_failed", reqId, error: (e && e.message) || String(e) }));
       return { ...route, reply: "I couldn’t read the voice note. Please type your request." };
@@ -4443,12 +4644,15 @@ async function processIncomingMedia({ mediaInfo, msgType, lang, key, reqId }) {
       try {
         if (audioDl && audioDl.tmpDir) fs.rmSync(audioDl.tmpDir, { recursive: true, force: true });
       } catch {}
+      try {
+        if (tmpDir) fs.rmSync(tmpDir, { recursive: true, force: true });
+      } catch {}
     }
   }
 
-  if (route.imageLikely && mediaInfo) {
+  if (route.imageLikely && normalizedMedia) {
     try {
-      const visionReply = await handleVisionMedia(mediaInfo, lang, key);
+      const visionReply = await handleVisionMedia(normalizedMedia, lang, key);
       const reply = shortenNoQuestion(visionReply.reply, 520);
       return { ...route, reply };
     } catch (e) {
@@ -4457,7 +4661,7 @@ async function processIncomingMedia({ mediaInfo, msgType, lang, key, reqId }) {
     }
   }
 
-  if (mediaInfo && route.path === "other") {
+  if (normalizedMedia && route.path === "other") {
     return { ...route, reply: "I received a file. Please send text, an image, or a voice note." };
   }
 

@@ -20,12 +20,14 @@ import {
   setAudioTranscriberForTest,
   setWcFetchJsonForTest,
   isAudioMime,
+  isAudioMeta,
   extFromAudioMime,
   stripQuestions,
   tryDirectOfferAnswer,
   tryWebsiteCatalogAnswer,
   processIncomingMedia,
   maybeSendInitialGreeting,
+  extractMediaMetaFromBody,
   getCtxForTest,
   setCtxForTest,
   INITIAL_GREETING_TTL_MS,
@@ -141,9 +143,20 @@ function countQuestions(text) {
   setCtxForTest(key, {
     didSendInitialGreeting: true,
     initialGreetingAt: Date.now() - INITIAL_GREETING_TTL_MS - 1000,
+    greetedAt: Date.now() - INITIAL_GREETING_TTL_MS - 1000,
+    greeted: true,
   });
   const again = maybeSendInitialGreeting({ key, lang: "ar" });
   assert.ok(again);
+})();
+
+(function testGreetingCtxFlagSet() {
+  const key = "greet-ctx";
+  const out = maybeSendInitialGreeting({ key, lang: "dzl" });
+  assert.ok(out.includes("kifach n3awnk") || out.includes("كيفاش نعاونك") || out.length > 0);
+  const ctx = getCtxForTest(key);
+  assert.strictEqual(ctx.greeted, true);
+  assert.ok(ctx.greetedAt);
 })();
 
 (function testForcedIntentResolver() {
@@ -264,6 +277,18 @@ await (async function testWebsiteCatalogCuisiniereAliases() {
   assert.strictEqual(extFromAudioMime("unknown/type"), ".mp3");
 })();
 
+(function testExtractMediaMetaAudio() {
+  const meta = extractMediaMetaFromBody({
+    data: {
+      type: "voice",
+      media: { downloadUrl: "http://example.com/voice-note.opus", fileName: "note.opus" },
+    },
+  });
+  assert.ok(meta);
+  assert.strictEqual(meta.kind, "audio");
+  assert.ok(isAudioMeta(meta));
+})();
+
 await (async function testVisionRoutingUsesOffers() {
   setOffersForTest(TEST_OFFERS);
   setMediaFetcherForTest(async () => ({ buffer: Buffer.from("test"), mimeType: "image/png" }));
@@ -287,15 +312,28 @@ await (async function testVisionRoutingUsesOffers() {
 
 await (async function testAudioMediaTranscribesToTextFlow() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "audio-test-"));
-  const tmpFile = path.join(dir, "audio.mp3");
+  const tmpFile = path.join(dir, "audio.ogg");
   fs.writeFileSync(tmpFile, "dummy");
 
-  setAudioDownloaderForTest(() => ({ filePath: tmpFile, mimeType: "audio/mp3", tmpDir: dir }));
+  setAudioDownloaderForTest(() => ({ filePath: tmpFile, mimeType: "", tmpDir: dir, sizeBytes: 5 }));
   setAudioTranscriberForTest(() => "ثلاجة");
   setOffersForTest(TEST_OFFERS);
 
+  const body = {
+    data: {
+      type: "audio",
+      media: { mediaId: "mid-1", url: "http://example.com/a.ogg", filename: "note.ogg" },
+    },
+    wa_number: "+21260000000",
+  };
+
+  const meta = extractMediaMetaFromBody(body);
+  assert.ok(meta);
+  assert.ok(isAudioMeta(meta));
+
   const res = await processIncomingMedia({
-    mediaInfo: { url: "http://example.com/a", mimeType: "audio/mp3" },
+    mediaInfo: meta,
+    mediaMeta: meta,
     msgType: "audio",
     lang: "dzl",
     key: "k-audio",
@@ -304,6 +342,7 @@ await (async function testAudioMediaTranscribesToTextFlow() {
 
   assert.strictEqual(res.path, "audio");
   assert.strictEqual(res.userText, "ثلاجة");
+  assert.ok(res.transcriptChars >= 3);
   const reply = tryDirectOfferAnswer(res.userText, [], "dzl", "k-audio");
   assert.ok(reply.includes("FR-1"));
 
