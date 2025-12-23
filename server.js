@@ -809,34 +809,76 @@ function findPhoneInObject(obj, maxDepth) {
 
 function buildConversationKey(fields, req, body) {
   const f = fields || {};
-  if (f.phone) return f.phone;
+  const remoteJid = String(f.remoteJid || "").trim();
+  const from = String(f.from || "").trim();
+  const sender = String(f.sender || "").trim();
+  const phone = String(f.phone || "").trim();
+  const convId = String(f.convId || "").trim();
 
-  const cid = String(f.convId || "").trim();
-  if (cid) return "conv:" + cid;
+  const logPayload = {
+    used: null,
+    remoteJid: remoteJid || null,
+    from: from || null,
+    sender: sender || null,
+    phone: phone || null,
+    convId: convId || null,
+  };
 
-  const rj = String(f.remoteJid || "").trim();
-  if (rj) return "jid:" + rj.slice(0, 120);
+  if (remoteJid) {
+    const key = "jid:" + remoteJid.slice(0, 120);
+    debugLog("conversation_key", Object.assign({}, logPayload, { used: "remoteJid", key }));
+    return key;
+  }
 
-  const ch = String(f.chatId || "").trim();
-  if (ch) return "chat:" + ch.slice(0, 120);
+  if (from) {
+    const key = "from:" + stableHash(from);
+    debugLog("conversation_key", Object.assign({}, logPayload, { used: "from", key }));
+    return key;
+  }
 
-  const frm = String(f.from || f.sender || "").trim();
-  if (frm) return "from:" + stableHash(frm);
+  if (sender) {
+    const key = "sender:" + stableHash(sender);
+    debugLog("conversation_key", Object.assign({}, logPayload, { used: "sender", key }));
+    return key;
+  }
+
+  if (phone) {
+    const key = "phone:" + stableHash(phone);
+    debugLog("conversation_key", Object.assign({}, logPayload, { used: "phone", key }));
+    return key;
+  }
+
+  if (convId) {
+    const key = "conv:" + convId.slice(0, 120);
+    debugLog("conversation_key", Object.assign({}, logPayload, { used: "convId", key }));
+    return key;
+  }
 
   const ua = String((req && req.headers && req.headers["user-agent"]) || "").slice(0, 120);
-  const payloadHint = JSON.stringify({
-    a: safeGet(body || {}, ["wa_id"]) || safeGet(body || {}, ["waId"]) || safeGet(body || {}, ["data", "wa_id"]) || safeGet(body || {}, ["data", "waId"]) || null,
-    b:
+  const fallbackHint = {
+    ua,
+    waId:
+      safeGet(body || {}, ["wa_id"]) ||
+      safeGet(body || {}, ["waId"]) ||
+      safeGet(body || {}, ["data", "wa_id"]) ||
+      safeGet(body || {}, ["data", "waId"]) ||
+      null,
+    contactId:
       safeGet(body || {}, ["contact_id"]) ||
       safeGet(body || {}, ["contactId"]) ||
       safeGet(body || {}, ["data", "contact_id"]) ||
       safeGet(body || {}, ["data", "contactId"]) ||
       null,
-    c:
-      safeGet(body || {}, ["thread_id"]) || safeGet(body || {}, ["threadId"]) || safeGet(body || {}, ["data", "thread_id"]) || safeGet(body || {}, ["data", "threadId"]) || null,
-    ua,
-  });
-  return "anon:" + stableHash(payloadHint);
+    threadId:
+      safeGet(body || {}, ["thread_id"]) ||
+      safeGet(body || {}, ["threadId"]) ||
+      safeGet(body || {}, ["data", "thread_id"]) ||
+      safeGet(body || {}, ["data", "threadId"]) ||
+      null,
+  };
+  const key = "anon:" + stableHash(JSON.stringify(fallbackHint));
+  debugLog("conversation_key", Object.assign({}, logPayload, { used: "fallback", key }));
+  return key;
 }
 
 function normalizeIncoming(body, req) {
@@ -2863,7 +2905,7 @@ function buildGreetingExtras() {
 
 function shouldSendInitialGreeting(ctx, now) {
   const ts = Number(now || Date.now());
-  if (!ctx || (ctx.didSendInitialGreeting !== true && ctx.greeted !== true)) return true;
+  if (!ctx || (ctx.didSendInitialGreeting !== true && ctx.greeted !== true && ctx.hasGreeted !== true)) return true;
   const at = Number(ctx.greetedAt || ctx.initialGreetingAt || 0);
   if (!at) return true;
   return ts - at > INITIAL_GREETING_TTL_MS;
@@ -2881,7 +2923,14 @@ function maybeSendInitialGreeting({ key, lang, now }) {
   if (!shouldSendInitialGreeting(ctx, now)) return null;
   const ts = Number(now || Date.now());
   const greeting = buildInitialGreeting(lang);
-  setCtx(key, { ...ctx, didSendInitialGreeting: true, initialGreetingAt: ts, greeted: true, greetedAt: ts });
+  setCtx(key, {
+    ...ctx,
+    didSendInitialGreeting: true,
+    initialGreetingAt: ts,
+    greeted: true,
+    greetedAt: ts,
+    hasGreeted: true,
+  });
   return greeting;
 }
 
@@ -3023,6 +3072,36 @@ function isGreeting(text) {
   if (s.indexOf("salut") >= 0) return true;
 
   if (hasArabicScript(raw) && /سلام|السلام|مرحبا/.test(raw)) return true;
+  return false;
+}
+
+function normalizeGreetingLike(text) {
+  const base = stripDiacritics(arabicIndicToAsciiDigits(String(text || "").toLowerCase()));
+  return base
+    .replace(/[\p{P}\p{S}]+/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function isGreetingLikeOpener(text) {
+  const s = normalizeGreetingLike(text);
+  if (!s) return false;
+  if (isGreeting(text)) return true;
+
+  const candidates = [
+    "hello can i get more info on this",
+    "bonjour puis je en savoir plus a ce sujet",
+    "مرحبًا هل يمكنني الحصول على مزيد من المعلومات حول هذا",
+  ];
+
+  for (let i = 0; i < candidates.length; i += 1) {
+    const c = normalizeGreetingLike(candidates[i]);
+    if (!c) continue;
+    if (s === c) return true;
+    if (s.startsWith(c)) return true;
+    if (c.startsWith(s)) return true;
+  }
+
   return false;
 }
 
@@ -3571,6 +3650,23 @@ function tryDirectOfferAnswer(userText, historyMsgs, lang, key) {
   }
 
   return null;
+}
+
+function handleGreetingMessage({ key, lang, text, now }) {
+  if (!isGreetingLikeOpener(text)) return null;
+  const ctx = getCtx(key);
+  if (ctx && (ctx.greeted === true || ctx.didSendInitialGreeting === true || ctx.hasGreeted === true)) return null;
+  const ts = Number(now || Date.now());
+  const greeting = buildInitialGreeting(lang);
+  setCtx(key, {
+    ...ctx,
+    didSendInitialGreeting: true,
+    initialGreetingAt: ts,
+    greeted: true,
+    greetedAt: ts,
+    hasGreeted: true,
+  });
+  return greeting;
 }
 
 function bestGuessOffers(lang, key, limit = 3) {
@@ -4247,22 +4343,18 @@ app.post("/wanotifier", async (req, res) => {
 
     memory.push(key, "user", userTextRaw);
     const history = memory.get(key);
+    const greetingFlow = handleGreetingMessage({ key, lang, text: userTextRaw });
+    if (greetingFlow) {
+      memory.push(key, "assistant", greetingFlow);
+      resetStrikes(key);
+      return res.json({ ok: true, reply: greetingFlow });
+    }
 if (isIptvIntent(userTextRaw)) {
   const out = shortenNoQuestion(t(lang, "iptvCall"), 220);
   memory.push(key, "assistant", out);
   resetStrikes(key);
   return res.json({ ok: true, reply: out });
 }
-
-    if (isGreeting(userTextRaw) && userTextRaw.length <= 25) {
-      const daikoLines = buildBigOffersForGreeting("DAIKO", OFFERS_INDEX.classCanon.tv || null);
-      const extras = buildGreetingExtras();
-
-      const reply = shortenNoQuestion(t(lang, "greeting", { daikoLines, extras }), 1000);
-      memory.push(key, "assistant", reply);
-      resetStrikes(key);
-      return res.json({ ok: true, reply });
-    }
 
     if (isLocationIntent(userTextRaw)) {
       const reply = shortenNoQuestion(t(lang, "address"), 420);
@@ -4503,6 +4595,8 @@ export {
   ensureNoQuestion,
   extractCapacityLiters,
   resolveCategoryIntent,
+  buildConversationKey,
+  normalizeIncoming,
   tryWebsiteCatalogAnswer,
   tryDirectOfferAnswer,
   setOffersForTest,
@@ -4524,6 +4618,8 @@ export {
   classifyMediaRoute,
   processIncomingMedia,
   maybeSendInitialGreeting,
+  handleGreetingMessage,
+  isGreetingLikeOpener,
   getCtx as getCtxForTest,
   setCtx as setCtxForTest,
   INITIAL_GREETING_TTL_MS,
