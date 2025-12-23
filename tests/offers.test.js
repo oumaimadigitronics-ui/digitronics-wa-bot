@@ -14,10 +14,13 @@ import {
 } from "../server.js";
 
 const TEST_OFFERS = {
-  COOL: [{ price: 3500, stock: 3, model: "AC-1", category: "Climatiseur" }],
-  WASH: [{ price: 2500, stock: 2, model: "WM-1", category: "Machine A Laver" }],
-  FRIG: [{ price: 2000, stock: 4, model: "FR-1", category: "Refrigerateur" }],
-  SCREEN: [{ price: 4000, stock: 5, model: "TV-50", class: "Tv", category: "Tv", size: 50 }],
+  COOL: [{ price: 3500, stock: 3, model: "AC-1", category: "Climatiseur", url: "http://x/AC-1" }],
+  WASH: [{ price: 2500, stock: 2, model: "WM-1", category: "Machine A Laver", url: "http://x/WM-1" }],
+  FRIG: [
+    { price: 2000, stock: 4, model: "FR-1", category: "Refrigerateur", capacity_l: 300, url: "http://x/FR-1" },
+    { price: 2100, stock: 4, model: "FR-2", category: "Refrigerateur", capacity_l: 350, url: "http://x/FR-2" },
+  ],
+  SCREEN: [{ price: 4000, stock: 5, model: "TV-50", class: "Tv", category: "Tv", size: 50, url: "http://x/TV-50" }],
 };
 
 function assertNoQuestionMarks(text) {
@@ -76,6 +79,11 @@ function mockWcFetch(pages) {
   assert.ok(line.includes("Prix sur demande"));
 })();
 
+(function testFormatOfferLineUrl() {
+  const line = formatOfferLine("BrandX", { model: "ModelY", price: 10, url: "http://example.com/p" });
+  assert.ok(line.includes("example.com"));
+})();
+
 (function testStripQuestions() {
   const cleaned = stripQuestions("Wash bghiti?\nChno size?\n\n");
   assert.ok(!cleaned.includes("?"));
@@ -93,6 +101,7 @@ function mockWcFetch(pages) {
   const reply = tryDirectOfferAnswer("ثلاجة", [], "dzl", "k-fridge");
   assert.ok(reply.includes("FR-1"));
   assert.ok(!reply.includes("TV-50"));
+  assert.ok(reply.includes("http://x/FR-1"));
   assertNoQuestionMarks(reply);
 })();
 
@@ -129,6 +138,7 @@ await (async function testWebsiteCatalogFridge() {
     stock_status: "instock",
     categories: [{ name: "Refrigerateur" }],
     brands: [{ name: "COOLBRAND" }],
+    permalink: "https://example.com/fr-300",
   };
   const tv = {
     name: "TV 50\"",
@@ -142,6 +152,7 @@ await (async function testWebsiteCatalogFridge() {
   setWcFetchJsonForTest(mockWcFetch([[fridge, tv], []]));
   const reply = await tryWebsiteCatalogAnswer("ثلاجة refrigerateur", "fr", "k-fridge-site");
   assert.ok(reply.includes("FR-300"));
+  assert.ok(reply.includes("example.com"));
   assert.ok(!reply.toLowerCase().includes("tv 50"));
   assertNoQuestionMarks(reply);
 })();
@@ -154,11 +165,28 @@ await (async function testWebsiteCatalogCuisiniereAliases() {
     stock_status: "instock",
     categories: [{ name: "Cuisiniere" }],
     brands: [{ name: "HOT" }],
+    permalink: "https://example.com/ck-4",
   };
   setWcFetchJsonForTest(mockWcFetch([[cooker]]));
   const reply = await tryWebsiteCatalogAnswer("كوزينة", "dzl", "k-cooker-site");
   assert.ok(reply.includes("CK-4"));
+  assert.ok(reply.includes("example.com"));
   assertNoQuestionMarks(reply);
+})();
+
+(function testFridgeFollowupCapacity() {
+  setOffersForTest(TEST_OFFERS);
+  tryDirectOfferAnswer("ثلاجة", [], "dzl", "k-fridge-followup");
+  const reply = tryDirectOfferAnswer("350 لتر", [], "dzl", "k-fridge-followup");
+  assert.ok(reply.includes("FR-2"));
+  assert.ok(!reply.toLowerCase().includes("tv-50"));
+  assertNoQuestionMarks(reply);
+})();
+
+(function testCuisiniereSynonymsNonTv() {
+  setOffersForTest(TEST_OFFERS);
+  const reply = tryDirectOfferAnswer("فورنو", [], "dzl", "k-oven");
+  assert.ok(!reply.toLowerCase().includes("tv"));
 })();
 
 await (async function testWebsiteCatalogTvRanking() {
