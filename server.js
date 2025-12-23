@@ -1617,10 +1617,15 @@ function extractTvSize(text) {
 
 
 function formatOfferLine(brand, o) {
-  const sizePart = o && o.size ? " " + o.size + '"' : "";
-  const typePart = o && o.type ? " — " + o.type : "";
-  return "• " + brand + " " + o.model + sizePart + ": " + o.price + " dh" + typePart;
+  const safeBrand = String(brand || "").trim();
+  const model = String((o && o.model) || "").trim();
+  const price = (o && o.price != null) ? String(o.price) : "";
+  const sizePart = (o && o.size) ? ` ${o.size}"` : "";
+  const typePart = (o && o.type) ? ` — ${o.type}` : "";
+
+  return `• ${safeBrand} ${model}${sizePart}: ${price} dh${typePart}`.trim();
 }
+
 
 function offersHeader(lang, ctx) {
   const L = lang || "dzl";
@@ -2178,8 +2183,37 @@ function tryDirectOfferAnswer(userText, historyMsgs, lang, key) {
   const cls2 = sizeVal ? tvCanon || cls : cls;
   const category2 = sizeVal ? null : category;
 
+  const priorityRank = new Map(TV_BRAND_PRIORITY.map((b, i) => [String(b).toUpperCase(), i]));
+  const brandRank = (b) => {
+    const r = priorityRank.get(String(b || "").toUpperCase());
+    return Number.isInteger(r) ? r : Number.POSITIVE_INFINITY;
+  };
+
+  const sortByBrandThenPrice = (arr) =>
+    (arr || []).slice().sort((a, b) => {
+      const ra = brandRank(a.brand);
+      const rb = brandRank(b.brand);
+      if (ra !== rb) return ra - rb;
+
+      const pa = Number((a.offer || {}).price);
+      const pb = Number((b.offer || {}).price);
+      if (!Number.isFinite(pa) && !Number.isFinite(pb)) return 0;
+      if (!Number.isFinite(pa)) return 1;
+      if (!Number.isFinite(pb)) return -1;
+      return pa - pb;
+    });
+
   if (sizeVal && !brand) {
     const picks = listOffersForSizeAcrossBrands(sizeVal, { cls: tvCanon, limit: 3 }) || [];
+
+    // Re-rank picks so priority brands come first (keeps existing picker logic for ties)
+    picks.sort((a, b) => {
+      const ra = brandRank(a.brand);
+      const rb = brandRank(b.brand);
+      if (ra !== rb) return ra - rb;
+      return 0;
+    });
+
     if (picks.length) {
       const lines = [];
       for (let i = 0; i < picks.length; i += 1) lines.push(formatOfferLine(picks[i].brand, picks[i].offer));
@@ -2266,10 +2300,8 @@ function tryDirectOfferAnswer(userText, historyMsgs, lang, key) {
     const k = normMatch(category2);
     const items0 = OFFERS_INDEX.categoryToOffers.get(k) || [];
     const items = items0.filter((it) => Number(((it.offer || {}).stock) || 0) > 0);
-    const sorted = items
-      .filter((it) => Number.isFinite(Number((it.offer || {}).price)))
-      .sort((a, b) => Number(a.offer.price) - Number(b.offer.price))
-      .slice(0, 3);
+
+    const sorted = sortByBrandThenPrice(items.filter((it) => Number.isFinite(Number((it.offer || {}).price)))).slice(0, 3);
 
     if (sorted.length) {
       setCtx(key, {
@@ -2289,10 +2321,8 @@ function tryDirectOfferAnswer(userText, historyMsgs, lang, key) {
     const k = normMatch(cls2);
     const items0 = OFFERS_INDEX.classToOffers.get(k) || [];
     const items = items0.filter((it) => Number(((it.offer || {}).stock) || 0) > 0);
-    const sorted = items
-      .filter((it) => Number.isFinite(Number((it.offer || {}).price)))
-      .sort((a, b) => Number(a.offer.price) - Number(b.offer.price))
-      .slice(0, 3);
+
+    const sorted = sortByBrandThenPrice(items.filter((it) => Number.isFinite(Number((it.offer || {}).price)))).slice(0, 3);
 
     if (sorted.length) {
       setCtx(key, {
@@ -2376,32 +2406,53 @@ function limitOffersForPromptPayload(data) {
   const outOffers = {};
   let remaining = MAX_OFFERS_FOR_PROMPT;
 
-  const priorityRank = new Map(TV_BRAND_PRIORITY.map((b, idx) => [b, idx]));
+  // Build rank map (uppercase keys)
+  const priorityRank = new Map(
+    (TV_BRAND_PRIORITY || []).map((b, idx) => [String(b).toUpperCase(), idx])
+  );
 
-  const brandEntries = Object.keys(offersObj).map((brand, idx) => {
+  const brandKeys = Object.keys(offersObj);
+
+  // Compute brand entries once (trim per brand)
+  const brandEntries = brandKeys.map((brand, idx) => {
     const arr = Array.isArray(offersObj[brand]) ? offersObj[brand] : [];
-    const trimmed = trimOffersForPrompt(arr, { size: (src.meta && src.meta.size) || null });
-    const rank = priorityRank.get(String(brand || "").toUpperCase());
-    return { brand, trimmed, rank: Number.isInteger(rank) ? rank : Number.POSITIVE_INFINITY, idx };
+    const trimmed = trimOffersForPrompt(arr, { size: meta.size ?? null });
+
+    const key = String(brand || "").toUpperCase();
+    const r = priorityRank.get(key);
+
+    return {
+      brand,
+      trimmed,
+      rank: Number.isInteger(r) ? r : Number.POSITIVE_INFINITY, // non-priority brands go last
+      originalIdx: idx, // preserve original order for ties / non-priority
+    };
   });
 
-  const hasPriorityBrand = brandEntries.some((entry) => entry.trimmed.length && Number.isFinite(entry.rank));
+  // If at least one PRIORITY brand exists with offers, sort all brands by:
+  // 1) priority rank (priority first, non-priority last)
+  // 2) original order (stable)
+  // Otherwise keep original order.
+  const hasPriorityBrand = brandEntries.some(
+    (e) => e.trimmed.length > 0 && Number.isFinite(e.rank)
+  );
 
   const ordered = hasPriorityBrand
     ? brandEntries
-        .filter((entry) => entry.trimmed.length)
+        .filter((e) => e.trimmed.length > 0)
         .sort((a, b) => {
           if (a.rank !== b.rank) return a.rank - b.rank;
-          return a.idx - b.idx;
+          return a.originalIdx - b.originalIdx;
         })
-    : brandEntries.filter((entry) => entry.trimmed.length);
+    : brandEntries.filter((e) => e.trimmed.length > 0);
 
   for (const entry of ordered) {
     if (remaining <= 0) break;
-    const trimmed = entry.trimmed.slice(0, remaining);
-    if (trimmed.length) {
-      outOffers[entry.brand] = trimmed;
-      remaining -= trimmed.length;
+
+    const take = entry.trimmed.slice(0, remaining);
+    if (take.length) {
+      outOffers[entry.brand] = take;
+      remaining -= take.length;
     }
   }
 
