@@ -2204,7 +2204,22 @@ function tryDirectOfferAnswer(userText, historyMsgs, lang, key) {
     });
 
   if (sizeVal && !brand) {
-    const picks = listOffersForSizeAcrossBrands(sizeVal, { cls: tvCanon, limit: 3 }) || [];
+let picks = listOffersForSizeAcrossBrands(sizeVal, { cls: tvCanon, limit: 10 }) || [];
+
+const priorityExists = picks.some((p) => Number.isFinite(brandRank(p.brand)));
+
+if (priorityExists) {
+  picks = picks.filter((p) => Number.isFinite(brandRank(p.brand)));
+}
+
+picks = picks
+  .sort((a, b) => {
+    const ra = brandRank(a.brand);
+    const rb = brandRank(b.brand);
+    if (ra !== rb) return ra - rb;
+    return 0;
+  })
+  .slice(0, 3);
 
     // Re-rank picks so priority brands come first (keeps existing picker logic for ties)
     picks.sort((a, b) => {
