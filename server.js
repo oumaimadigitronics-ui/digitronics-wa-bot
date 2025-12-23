@@ -5,6 +5,7 @@ import fs from "fs";
 import path from "path";
 import http from "http";
 import https from "https";
+import assert from "assert";
 import { fileURLToPath } from "url";
 import OpenAI from "openai";
 
@@ -13,7 +14,8 @@ app.set("trust proxy", true);
 
 const LOG_DEBUG = String(process.env.LOG_DEBUG || "0") === "1";
 const ENTRY_FILE = fileURLToPath(import.meta.url);
-const REQUIRE_ENV = process.argv[1] === ENTRY_FILE;
+const RUN_SELF_TESTS = String(process.env.RUN_SELF_TESTS || "0") === "1";
+const REQUIRE_ENV = process.argv[1] === ENTRY_FILE && !RUN_SELF_TESTS;
 
 function debugLog(event, payload) {
   if (!LOG_DEBUG) return;
@@ -213,13 +215,18 @@ function hasArabicScript(text) {
   return /[\u0600-\u06FF]/.test(String(text || ""));
 }
 
+function escapeRegExp(str) {
+  return String(str || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 function includesToken(text, token) {
   const s = normMatch(text);
   const t0 = normMatch(token);
   if (!t0) return false;
 
+  const escaped = escapeRegExp(t0);
   if (t0.length <= 3) {
-    const re = new RegExp("\\b" + t0 + "\\b", "i");
+    const re = new RegExp(`(^|[^a-z0-9])${escaped}(?=($|[^a-z0-9]|\\d))`, "i");
     return re.test(s);
   }
   return s.indexOf(t0) >= 0;
@@ -248,15 +255,37 @@ function ensureNoQuestion(text) {
   for (let i = 0; i < s.length; i += 1) {
     const c = s.charCodeAt(i);
     if (c === 63) continue;
+    if (c === 191) continue;
     if (c === 1567) continue;
+    if (c === 65311) continue;
     out += s[i];
   }
   return stripQuestions(out);
 }
 
 function shortenNoQuestion(text, max) {
-  return shorten(ensureNoQuestion(stripQuestions(text)), max || 520);
+  const cleaned = stripUrlQueriesInText(stripQuestions(text));
+  return shorten(ensureNoQuestion(cleaned), max || 520);
 }
+
+function sanitizeUrlNoQuestion(urlStr) {
+  try {
+    const u = new URL(String(urlStr || ""));
+    return u.origin + u.pathname;
+  } catch (_e) {
+    const s = String(urlStr || "");
+    const idx = s.search(/[؟?]/);
+    if (idx >= 0) return s.slice(0, idx);
+    return s;
+  }
+}
+
+function stripUrlQueriesInText(text) {
+  const s = String(text || "");
+  return s.replace(/https?:\/\/\S+/g, (m) => sanitizeUrlNoQuestion(m));
+}
+
+const ORDER_FORM_URL_SAFE = sanitizeUrlNoQuestion(ORDER_FORM_URL);
 
 function looksLikeFallback(reply) {
   const r = normMatch(reply);
@@ -359,20 +388,20 @@ function t(lang, key, vars) {
           offersPart +
           "\n\n" +
           "📝 Ila bghiti tdir commande: " +
-          ORDER_FORM_URL +
+          ORDER_FORM_URL_SAFE +
           "\n\n" +
           extras
         ).trim();
       },
       address: "L3nwan dyalna: " + COMPANY.address,
-      orderForm: "Tfdal/ي: 3mmer had formulaire bach tdir commande: " + ORDER_FORM_URL,
+      orderForm: "Tfdal/ي: 3mmer had formulaire bach tdir commande: " + ORDER_FORM_URL_SAFE,
       askOrderNo: "3afak sft رقم الطلب bach n9dro n7ssbo.",
       gotOrderNo: "Shokran. Tsslna b رقم الطلب. Ghadi n3yto lik قريب.",
       callSoon: "Mzyan. Ghadi n3yto lik قريب.",
       callSoonNeedOrder: "Mzyan. Ghadi n3yto lik قريب. Ila 3ndk رقم الطلب sftih lina 3afak.",
       bankTransferHow:
         'Ila bghiti tخلص b virement: mlli tdir commande, zid note f formulaire: "paiement par virement bancaire".\nFormulaire: ' +
-        ORDER_FORM_URL,
+        ORDER_FORM_URL_SAFE,
       needDetails: "3tini brand/model/size wla catégorie bach n3tik options.",
       cannot3: "Ma qdrtch n3tik jawab bd9a daba. T9dr t3yt lina: " + CONTACTS.calls.join(" / ") + ".",
       photoLink: (x) => {
@@ -416,18 +445,18 @@ function t(lang, key, vars) {
           RULES_I18N.fr.delivery +
           "\n" +
           "Pour commander: " +
-          ORDER_FORM_URL
+          ORDER_FORM_URL_SAFE
         ).trim();
       },
       address: "Notre adresse: " + COMPANY.address,
-      orderForm: "Veuillez remplir ce formulaire pour commander: " + ORDER_FORM_URL,
+      orderForm: "Veuillez remplir ce formulaire pour commander: " + ORDER_FORM_URL_SAFE,
       askOrderNo: "Merci d’envoyer votre numéro de commande pour vérification.",
       gotOrderNo: "Merci. Nous avons bien reçu votre numéro de commande. Nous vous appellerons bientôt.",
       callSoon: "D’accord. Nous vous appellerons bientôt.",
       callSoonNeedOrder: "D’accord. Nous vous appellerons bientôt. Si vous avez un numéro de commande, envoyez-le.",
       bankTransferHow:
         'Paiement par virement : lors de la commande, ajoutez une note dans le formulaire : "paiement par virement bancaire".\nFormulaire: ' +
-        ORDER_FORM_URL,
+        ORDER_FORM_URL_SAFE,
       needDetails: "Merci de préciser la marque, le modèle, la taille ou la catégorie.",
       cannot3: "Je ne peux pas répondre avec certitude pour le moment. Vous pouvez appeler: " + CONTACTS.calls.join(" / ") + ".",
       photoLink: (x) => {
@@ -471,17 +500,17 @@ function t(lang, key, vars) {
           RULES_I18N.ar.delivery +
           "\n" +
           "للطلب: " +
-          ORDER_FORM_URL
+          ORDER_FORM_URL_SAFE
         ).trim();
       },
       address: "عنواننا: " + COMPANY.address,
-      orderForm: "من فضلك عبّئ هذا الفورم للطلب: " + ORDER_FORM_URL,
+      orderForm: "من فضلك عبّئ هذا الفورم للطلب: " + ORDER_FORM_URL_SAFE,
       askOrderNo: "من فضلك ارسل رقم الطلب باش نقدر نتحققو.",
       gotOrderNo: "شكراً. توصلنا برقم الطلب. غادي نعيطو ليك قريب.",
       callSoon: "حسناً. غادي نعيطو ليك قريب.",
       callSoonNeedOrder: "حسناً. غادي نعيطو ليك قريب. إلا كان عندك رقم الطلب صيفطو من فضلك.",
       bankTransferHow:
-        'باش تخلص بالتحويل البنكي: منين دير الطلب زيد ملاحظة فالفورم: "الدفع بتحويل بنكي".\nالفورم: ' + ORDER_FORM_URL,
+        'باش تخلص بالتحويل البنكي: منين دير الطلب زيد ملاحظة فالفورم: "الدفع بتحويل بنكي".\nالفورم: ' + ORDER_FORM_URL_SAFE,
       needDetails: "عطيني الماركة أو الموديل أو الحجم أو الفئة باش نعاونك.",
       cannot3: "ماقدرتش نعطيك جواب مؤكد دابا. تقدر تعيط لينا: " + CONTACTS.calls.join(" / ") + ".",
       photoLink: (x) => {
@@ -1031,6 +1060,8 @@ function parsePrice(raw) {
     s = s.replace(/,/g, "");
   }
   const cleaned = s.replace(/[^\d.]/g, "");
+  if (!/\d/.test(cleaned)) return NaN;
+  if (cleaned === ".") return NaN;
   const n = Number(cleaned);
   if (Number.isFinite(n)) return n;
   return NaN;
@@ -1442,14 +1473,16 @@ function offerFromWooProduct(p) {
   const price = wcPrice(p);
   if (!Number.isFinite(price)) return null;
 
+  const cls = getClassFromCategories(p);
+
   return {
     model,
     name: String(((p && p.name) || "")).trim(),
-    category: firstCategoryName(p),
+    category: cls || firstCategoryName(p),
     size: getSizeFromCategories(p),
     type: getTypeFromProduct(p),
     price,
-    class: getClassFromCategories(p),
+    class: cls,
     stock: wcInStock(p),
     link: String(((p && p.permalink) || "")).trim(),
   };
@@ -1797,6 +1830,8 @@ function extractTvSize(text, opts = {}) {
 
   if (looksLikeLiters && !hasTvHint) return null;
 
+  if (opts.requireTvHint === true && !hasTvHint) return null;
+
   if (!hasTvHint && !allowNoHint) return null;
 
   const m = s0.match(/(?:^|[^\d])(24|32|40|43|50|55|65|75)(?=$|[^\d])/);
@@ -1877,10 +1912,46 @@ function rankOffers(items, opts) {
 
       if (a.sizeScore !== b.sizeScore) return a.sizeScore - b.sizeScore;
       if (a.price !== b.price) return a.price - b.price;
+      const brandCmp = String(a.brand || "").localeCompare(String(b.brand || ""));
+      if (brandCmp !== 0) return brandCmp;
+      const modelCmp = normMatch((a.offer && a.offer.model) || "").localeCompare(
+        normMatch((b.offer && b.offer.model) || "")
+      );
+      if (modelCmp !== 0) return modelCmp;
+      const nameCmp = normMatch((a.offer && a.offer.name) || "").localeCompare(
+        normMatch((b.offer && b.offer.name) || "")
+      );
+      if (nameCmp !== 0) return nameCmp;
       return a.originalIdx - b.originalIdx;
     });
 
   return limit !== null ? ranked.slice(0, limit) : ranked;
+}
+
+function pickCheapestPerBrand(items) {
+  const map = new Map();
+  const arr = Array.isArray(items) ? items : [];
+  for (let i = 0; i < arr.length; i += 1) {
+    const it = arr[i] || {};
+    const brand = String(it.brand || "").toUpperCase();
+    if (!brand) continue;
+    const offer = it.offer || {};
+    const priceNum = Number(offer.price);
+    if (!Number.isFinite(priceNum)) continue;
+    const modelNorm = normMatch(offer.model || offer.name || "");
+    const existing = map.get(brand);
+    if (!existing) {
+      map.set(brand, { brand, offer, price: priceNum, modelNorm });
+      continue;
+    }
+    if (
+      priceNum < existing.price ||
+      (priceNum === existing.price && modelNorm.localeCompare(existing.modelNorm) < 0)
+    ) {
+      map.set(brand, { brand, offer, price: priceNum, modelNorm });
+    }
+  }
+  return Array.from(map.values()).map((x) => ({ brand: x.brand, offer: x.offer }));
 }
 
 
@@ -2220,11 +2291,20 @@ function resolveOfferForPhoto(userText, historyMsgs, key) {
   const combinedParts = [text];
   for (let i = 0; i < hist.length; i += 1) combinedParts.push(String(hist[i].content || ""));
   const combined = combinedParts.join(" ");
+  const ctx = getCtx(key);
+  const forcedIntent = resolveCategoryIntent(text);
+  const categoryHint = (forcedIntent && forcedIntent.category) || detectCategory(combined) || ctx.lastCategory || null;
+  const classHint = (forcedIntent && forcedIntent.cls) || detectClass(combined) || ctx.lastClass || null;
+  const tvCanonNorm = normMatch(OFFERS_INDEX.classCanon.tv || "tv");
+  const isNonTvContext = Boolean(
+    (categoryHint && normMatch(categoryHint) !== tvCanonNorm && normMatch(categoryHint) !== "tv") ||
+      (classHint && normMatch(classHint) !== tvCanonNorm)
+  );
 
   const modelHit = detectModel(combined);
   if (modelHit && Number(((modelHit.offer || {}).stock) || 0) > 0) return modelHit;
 
-  const size = extractTvSize(text);
+  const size = extractTvSize(text, { requireTvHint: isNonTvContext });
   let brand = detectBrand(combined);
 
   if (!brand && size) {
@@ -2305,7 +2385,12 @@ function pickFromLastShown(key, prefer) {
   const isTvContext = normMatch(ctx.lastClass || "") === normMatch(tvCanon);
 
   if (prefer === "cheapest") {
-    resolved.sort((a, b) => Number(a.offer.price) - Number(b.offer.price));
+    resolved.sort((a, b) => {
+      const pa = Number(a.offer.price);
+      const pb = Number(b.offer.price);
+      if (pa !== pb) return pa - pb;
+      return normMatch(a.offer.model || "").localeCompare(normMatch(b.offer.model || ""));
+    });
     return resolved[0];
   }
 
@@ -2313,7 +2398,9 @@ function pickFromLastShown(key, prefer) {
     const sa = isTvContext ? tvTypeScore(a.offer.type) : 0;
     const sb = isTvContext ? tvTypeScore(b.offer.type) : 0;
     if (sb !== sa) return sb - sa;
-    return Number(b.offer.price) - Number(a.offer.price);
+    const pa = Number(b.offer.price) - Number(a.offer.price);
+    if (pa !== 0) return pa;
+    return normMatch(a.offer.model || "").localeCompare(normMatch(b.offer.model || ""));
   });
   return resolved[0];
 }
@@ -2613,15 +2700,36 @@ function tryDirectOfferAnswer(userText, historyMsgs, lang, key) {
   const brand = detectBrand(text);
   const category = forcedCategory || detectCategory(text);
   const cls = forcedClass || (!category ? detectClass(text) : null);
-  const sizeVal = extractTvSize(text);
+  const tvCanon = OFFERS_INDEX.classCanon.tv;
+  const tvCanonNorm = normMatch(tvCanon || "tv");
+  const categoryNorm = normMatch(category || "");
+  const clsNorm = normMatch(cls || "");
+  const hasTvHint = (() => {
+    const s0 = arabicIndicToAsciiDigits(String(text || ""));
+    const s = s0.toLowerCase();
+    return (
+      s.includes('"') ||
+      s.includes("inch") ||
+      s.includes("inches") ||
+      s.includes("tv") ||
+      s.includes("tele") ||
+      s.includes("télé") ||
+      s.includes("بوصة")
+    );
+  })();
+  const isTvCategory = categoryNorm === tvCanonNorm || categoryNorm === "tv";
+  const isTvClass = clsNorm === tvCanonNorm;
+  const isNonTvSignal = Boolean((category && !isTvCategory) || (cls && !isTvClass));
+  const sizeVal = extractTvSize(text, { requireTvHint: isNonTvSignal });
 
   if (category) resetCtxForCategoryChange(key, category, cls);
 
   const ctx = getCtx(key);
-  const tvCanon = OFFERS_INDEX.classCanon.tv;
+  const tvPriorityRank = new Map(TV_BRAND_PRIORITY.map((b, idx) => [normMatch(b), idx]));
 
-  const cls2 = sizeVal && !category && !forcedCategory ? tvCanon || cls : cls;
-  const category2 = category;
+  const cls2 =
+    Number.isFinite(sizeVal) && (isTvClass || isTvCategory || hasTvHint) ? tvCanon || cls : cls;
+  const category2 = Number.isFinite(sizeVal) && (isTvClass || isTvCategory || hasTvHint) ? null : category;
 
   if (sizeVal && !brand) {
     const picks = listOffersForSizeAcrossBrands(sizeVal, { cls: tvCanon, limit: 3 }) || [];
@@ -2717,7 +2825,27 @@ function tryDirectOfferAnswer(userText, historyMsgs, lang, key) {
       .map((it, idx) => Object.assign({}, it, { originalIdx: idx }))
       .filter((it) => Number(((it.offer || {}).stock) || 0) > 0);
 
-    const sorted = rankOffers(items, { limit: 3 });
+    const isTvCategory2 = normMatch(category2) === tvCanonNorm || normMatch(category2) === "tv";
+    const sorted = isTvCategory2
+      ? pickCheapestPerBrand(items)
+          .map((it, idx) => Object.assign({}, it, { originalIdx: idx }))
+          .sort((a, b) => {
+            const ra = tvPriorityRank.has(normMatch(a.brand))
+              ? tvPriorityRank.get(normMatch(a.brand))
+              : Number.POSITIVE_INFINITY;
+            const rb = tvPriorityRank.has(normMatch(b.brand))
+              ? tvPriorityRank.get(normMatch(b.brand))
+              : Number.POSITIVE_INFINITY;
+            if (ra !== rb) return ra - rb;
+            const pa = Number((a.offer || {}).price) || Number.POSITIVE_INFINITY;
+            const pb = Number((b.offer || {}).price) || Number.POSITIVE_INFINITY;
+            if (pa !== pb) return pa - pb;
+            return normMatch((a.offer && a.offer.model) || "").localeCompare(
+              normMatch((b.offer && b.offer.model) || "")
+            );
+          })
+          .slice(0, 3)
+      : rankOffers(items, { limit: 3 });
 
     if (sorted.length) {
       setCtx(key, {
@@ -2741,7 +2869,27 @@ function tryDirectOfferAnswer(userText, historyMsgs, lang, key) {
       .map((it, idx) => Object.assign({}, it, { originalIdx: idx }))
       .filter((it) => Number(((it.offer || {}).stock) || 0) > 0);
 
-    const sorted = rankOffers(items, { limit: 3 });
+    const isTvClass2 = normMatch(cls2) === tvCanonNorm;
+    const sorted = isTvClass2
+      ? pickCheapestPerBrand(items)
+          .map((it, idx) => Object.assign({}, it, { originalIdx: idx }))
+          .sort((a, b) => {
+            const ra = tvPriorityRank.has(normMatch(a.brand))
+              ? tvPriorityRank.get(normMatch(a.brand))
+              : Number.POSITIVE_INFINITY;
+            const rb = tvPriorityRank.has(normMatch(b.brand))
+              ? tvPriorityRank.get(normMatch(b.brand))
+              : Number.POSITIVE_INFINITY;
+            if (ra !== rb) return ra - rb;
+            const pa = Number((a.offer || {}).price) || Number.POSITIVE_INFINITY;
+            const pb = Number((b.offer || {}).price) || Number.POSITIVE_INFINITY;
+            if (pa !== pb) return pa - pb;
+            return normMatch((a.offer && a.offer.model) || "").localeCompare(
+              normMatch((b.offer && b.offer.model) || "")
+            );
+          })
+          .slice(0, 3)
+      : rankOffers(items, { limit: 3 });
 
     if (sorted.length) {
       setCtx(key, {
@@ -2992,9 +3140,28 @@ function buildOffersSubsetForPrompt(userText, historyMsgs, key) {
   if (!brand && hasFocusBrand() && FOCUS.mode === "preferred") brand = FOCUS.brand;
   if (brand && !(OFFERS && OFFERS.offers && OFFERS.offers[brand])) brand = null;
 
-  const sizeVal = extractTvSize(combined);
   const tvCanon = OFFERS_INDEX.classCanon.tv;
-  if (sizeVal && tvCanon && !forcedCategory && !category) {
+  const tvCanonNorm = normMatch(tvCanon || "tv");
+  const categoryNorm = normMatch(category || "");
+  const clsNorm = normMatch(cls || "");
+  const hasTvHint = (() => {
+    const s0 = arabicIndicToAsciiDigits(String(combined || ""));
+    const s = s0.toLowerCase();
+    return (
+      s.includes('"') ||
+      s.includes("inch") ||
+      s.includes("inches") ||
+      s.includes("tv") ||
+      s.includes("tele") ||
+      s.includes("télé") ||
+      s.includes("بوصة")
+    );
+  })();
+  const isTvCategory = categoryNorm === tvCanonNorm || categoryNorm === "tv";
+  const isTvClass = clsNorm === tvCanonNorm;
+  const isNonTvSignal = Boolean((category && !isTvCategory) || (cls && !isTvClass));
+  const sizeVal = extractTvSize(combined, { requireTvHint: isNonTvSignal });
+  if (Number.isFinite(sizeVal) && (isTvClass || isTvCategory || hasTvHint) && !forcedCategory && !category) {
     cls = tvCanon;
   }
 
@@ -3083,6 +3250,21 @@ async function callOpenAIChat(messages, maxOut) {
   }
 }
 
+function withTimeout(promise, ms) {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error("timeout")), Number(ms) || 10000);
+    promise
+      .then((v) => {
+        clearTimeout(timer);
+        resolve(v);
+      })
+      .catch((e) => {
+        clearTimeout(timer);
+        reject(e);
+      });
+  });
+}
+
 async function digibotLLMReply(userText, historyMsgs, lang, key) {
   const hist = Array.isArray(historyMsgs) ? historyMsgs : [];
 
@@ -3092,13 +3274,19 @@ async function digibotLLMReply(userText, historyMsgs, lang, key) {
   for (let i = 0; i < slice.length; i += 1) messages.push({ role: slice[i].role, content: slice[i].content });
   messages.push({ role: "user", content: String(userText || "") });
 
-  const r = await callOpenAIChat(messages, 380);
-  const choice = r && r.choices && r.choices[0] && r.choices[0].message ? r.choices[0].message.content : "";
-  let reply = String(choice || "").trim();
-  reply = ensureNoQuestion(reply);
+  try {
+    const r = await withTimeout(callOpenAIChat(messages, 380), 10000);
+    const choice = r && r.choices && r.choices[0] && r.choices[0].message ? r.choices[0].message.content : "";
+    let reply = String(choice || "").trim();
+    reply = ensureNoQuestion(reply);
 
-  if (!reply) reply = ensureNoQuestion(t(lang, "needDetails"));
-  return reply;
+    if (!reply) reply = ensureNoQuestion(t(lang, "needDetails"));
+    return reply;
+  } catch (_err) {
+    const direct = tryDirectOfferAnswer(userText, historyMsgs, lang, key);
+    if (direct) return ensureNoQuestion(direct);
+    return ensureNoQuestion(t(lang, "needDetails"));
+  }
 }
 
 function validateWanotifierToken(req) {
@@ -3373,7 +3561,8 @@ if (isIptvIntent(userTextRaw)) {
       }
 
       const link = String(((resolved.offer || {}).link) || "").trim();
-      const reply = shortenNoQuestion(link ? t(lang, "photoLink", { link }) : t(lang, "photoNoLink"), 520);
+      const safeLink = sanitizeUrlNoQuestion(link);
+      const reply = shortenNoQuestion(link ? t(lang, "photoLink", { link: safeLink }) : t(lang, "photoNoLink"), 520);
       memory.push(key, "assistant", reply);
       resetStrikes(key);
       return res.json({ ok: true, reply });
@@ -3425,6 +3614,14 @@ if (isIptvIntent(userTextRaw)) {
 
     if (isBuyIntent(userTextRaw)) {
       supportModeStore.delete(key);
+      const direct = tryDirectOfferAnswer(userTextRaw, history, lang, key);
+      if (direct) {
+        const withForm = shortenNoQuestion(direct + "\n\n" + t(lang, "orderForm"), 520);
+        const reply = withForm || shortenNoQuestion(direct, 520);
+        memory.push(key, "assistant", reply);
+        resetStrikes(key);
+        return res.json({ ok: true, reply });
+      }
       const reply = shortenNoQuestion(t(lang, "orderForm"), 520);
       memory.push(key, "assistant", reply);
       resetStrikes(key);
@@ -3590,6 +3787,47 @@ export {
   setWcFetchJsonForTest,
 };
 
+function runSelfTests() {
+  const tvCanon = "Tv";
+  OFFERS = {
+    offers: {
+      TCL: [
+        { model: "TCL-A1", name: "TCL A1", category: tvCanon, class: tvCanon, size: 55, type: "LED", price: 4000, stock: 5, link: "http://example.com/tcl55?x=1" },
+        { model: "TCL-NO-PRICE", name: "TCL No Price", category: tvCanon, class: tvCanon, size: 50, type: "LED", price: NaN, stock: 3, link: "http://example.com/tcl50?y=1" },
+      ],
+      DAIKO: [
+        { model: "DK-50", name: "Daiko 50", category: tvCanon, class: tvCanon, size: 50, type: "LED", price: 3500, stock: 3, link: "http://example.com/daiko50?z=1" },
+      ],
+      HAIER: [
+        { model: "HR-55", name: "Haier 55", category: tvCanon, class: tvCanon, size: 55, type: "LED", price: 3600, stock: 2, link: "http://example.com/haier55?u=1" },
+        { model: "H-FRIDGE", name: "Haier Fridge", category: "Refrigerateur", class: "Refrigerateur", size: 0, type: "Fridge", price: 4200, stock: 4, link: "http://example.com/fridge?f=1" },
+      ],
+    },
+  };
+  rebuildOffersIndex();
+
+  const safeForm = sanitizeUrlNoQuestion(ORDER_FORM_URL);
+  assert.ok(!safeForm.includes("?"));
+  assert.ok(safeForm.endsWith("/viewform"));
+  assert.ok(Number.isNaN(parsePrice("")));
+  assert.ok(Number.isNaN(parsePrice(null)));
+  assert.strictEqual(includesToken("tcl55", "tcl"), true);
+  assert.strictEqual(includesToken("vacance", "ac"), false);
+
+  const frigoReply = tryDirectOfferAnswer("frigo 55", [], "fr", "self_frigo");
+  assert.ok(normMatch(frigoReply).indexOf("refrigerateur") >= 0);
+  assert.ok(normMatch(frigoReply).indexOf("tv") < 0);
+
+  const tvReply = tryDirectOfferAnswer("tv", [], "fr", "self_tv");
+  const tclIdx = tvReply.indexOf("TCL");
+  const daikoIdx = tvReply.indexOf("DAIKO");
+  const haierIdx = tvReply.indexOf("HAIER");
+  assert.ok(tclIdx >= 0 && daikoIdx > tclIdx && haierIdx > daikoIdx);
+
+  assert.ok(!/[\?؟]/.test(frigoReply));
+  assert.ok(!/[\?؟]/.test(tvReply));
+}
+
 async function main() {
   memory.load();
   startMaintenanceTimer();
@@ -3604,6 +3842,16 @@ async function main() {
 }
 
 if (process.argv[1] === ENTRY_FILE) {
+  if (RUN_SELF_TESTS) {
+    try {
+      runSelfTests();
+      console.log("SELF_TESTS_OK");
+      process.exit(0);
+    } catch (e) {
+      console.error("SELF_TESTS_FAILED", (e && e.message) || String(e));
+      process.exit(1);
+    }
+  }
   main().catch((e) => {
     console.error("Fatal startup error:", (e && e.message) || String(e));
     process.exit(1);
