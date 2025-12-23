@@ -18,6 +18,7 @@ const LOG_DEBUG = String(process.env.LOG_DEBUG || "0") === "1";
 const ENTRY_FILE = fileURLToPath(import.meta.url);
 const RUN_SELF_TESTS = String(process.env.RUN_SELF_TESTS || "0") === "1";
 const REQUIRE_ENV = process.argv[1] === ENTRY_FILE && !RUN_SELF_TESTS;
+const MAX_AUDIO_BYTES = 25 * 1024 * 1024;
 
 function debugLog(event, payload) {
   if (!LOG_DEBUG) return;
@@ -1953,6 +1954,8 @@ const VISION_CATEGORY_MAP = {
 
 let visionAnalyzer = analyzeProductImage;
 let mediaFetcherOverride = null;
+let audioDownloaderOverride = null;
+let audioTranscriberOverride = null;
 
 function normalizeMediaInput(mediaVal) {
   const raw = Array.isArray(mediaVal) ? mediaVal[0] : mediaVal;
@@ -2004,48 +2007,66 @@ function extFromAudioMime(mime) {
 }
 
 async function downloadAudioBuffer(mediaInput, reqId) {
+  if (typeof audioDownloaderOverride === "function") return audioDownloaderOverride(mediaInput, reqId);
+
   const m = mediaInput || {};
   const baseUrl = String(CFG.wanotifierMediaUrl || "").replace(/\/$/, "");
   const url = m.url || (m.id && baseUrl ? `${baseUrl}/${m.id}` : "");
   if (!url) throw new Error("audio_url_missing");
 
-  const resp = await axios.get(url, { responseType: "arraybuffer" });
-  const buf = Buffer.isBuffer(resp.data) ? resp.data : Buffer.from(resp.data);
-  const ctRaw = (resp.headers && (resp.headers["content-type"] || resp.headers["Content-Type"])) || "";
-  const mimeType = m.mimeType || String(ctRaw || "").trim() || "application/octet-stream";
-
-  console.log(
-    JSON.stringify({
-      level: "info",
-      msg: "audio_download",
-      sizeBytes: buf.length,
-      contentType: mimeType,
-      reqId,
-    })
-  );
-
-  return { buffer: buf, mimeType, filename: m.filename || null };
-}
-
-async function transcribeAudio(buffer, mimeType) {
-  const mime = String(mimeType || "").toLowerCase();
-  const ext = extFromAudioMime(mime);
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "wanote-"));
+  const ext = extFromAudioMime(m.mimeType || "");
   const tmpFile = path.join(dir, `audio${ext}`);
-
-  await fs.promises.writeFile(tmpFile, buffer);
+  let sizeBytes = 0;
   try {
-    const resp = await getOpenAIClient().audio.transcriptions.create({
-      file: fs.createReadStream(tmpFile),
-      model: "gpt-4o-transcribe",
-      response_format: "text",
+    const resp = await axios.get(url, { responseType: "stream" });
+    const ctRaw = (resp.headers && (resp.headers["content-type"] || resp.headers["Content-Type"])) || "";
+    const mimeType = m.mimeType || String(ctRaw || "").trim() || "application/octet-stream";
+
+    await new Promise((resolve, reject) => {
+      const ws = fs.createWriteStream(tmpFile);
+      resp.data.on("data", (chunk) => {
+        sizeBytes += chunk.length;
+        if (sizeBytes > MAX_AUDIO_BYTES) {
+          const err = new Error("audio_too_large");
+          resp.data.destroy(err);
+          ws.destroy(err);
+        }
+      });
+      resp.data.on("error", reject);
+      ws.on("error", reject);
+      ws.on("finish", resolve);
+      resp.data.pipe(ws);
     });
-    return String(resp || "").trim();
-  } finally {
+
+    console.log(
+      JSON.stringify({ level: "info", msg: "audio_download", sizeBytes, contentType: mimeType, reqId })
+    );
+
+    return { filePath: tmpFile, mimeType, filename: m.filename || null, tmpDir: dir, sizeBytes };
+  } catch (err) {
     try {
       fs.rmSync(dir, { recursive: true, force: true });
     } catch {}
+    throw err;
   }
+}
+
+async function transcribeAudio(filePath, mimeType) {
+  if (typeof audioTranscriberOverride === "function") return audioTranscriberOverride(filePath, mimeType);
+
+  const mime = String(mimeType || "").toLowerCase();
+  const ext = path.extname(filePath) || extFromAudioMime(mime);
+  const finalPath = filePath || path.join(os.tmpdir(), `audio-fallback${ext}`);
+
+  const resp = await getOpenAIClient().audio.transcriptions.create({
+    file: fs.createReadStream(finalPath),
+    model: "gpt-4o-mini-transcribe",
+    response_format: "text",
+  });
+
+  if (resp && typeof resp === "object" && resp.text) return String(resp.text || "").trim();
+  return String(resp || "").trim();
 }
 
 function parseVisionJson(rawText) {
@@ -2162,7 +2183,21 @@ async function handleVisionMedia(mediaInput, lang, key) {
   const normalizedMedia = normalizeMediaInput(mediaInput);
   if (!normalizedMedia) throw new Error("media_missing");
 
+  const mime = String(normalizedMedia.mimeType || "").toLowerCase();
+  if (mime && !mime.startsWith("image/")) {
+    console.warn(
+      JSON.stringify({ level: "warn", msg: "vision_blocked_non_image", mimeType: normalizedMedia.mimeType || null })
+    );
+    throw new Error("vision_non_image");
+  }
+
   const downloaded = await downloadMediaBuffer(normalizedMedia);
+  const downloadedMime = String(downloaded.mimeType || "").toLowerCase();
+  if (downloadedMime && !downloadedMime.startsWith("image/")) {
+    console.warn(JSON.stringify({ level: "warn", msg: "vision_blocked_after_download", mimeType: downloaded.mimeType || null }));
+    throw new Error("vision_non_image");
+  }
+
   const vision = await visionAnalyzer(downloaded.buffer, downloaded.mimeType);
   const mapped = VISION_CATEGORY_MAP[vision.category] || {};
   const cls = mapped.cls || null;
@@ -2204,6 +2239,14 @@ function setVisionAnalyzerForTest(fn) {
 
 function setMediaFetcherForTest(fn) {
   mediaFetcherOverride = fn;
+}
+
+function setAudioDownloaderForTest(fn) {
+  audioDownloaderOverride = fn;
+}
+
+function setAudioTranscriberForTest(fn) {
+  audioTranscriberOverride = fn;
 }
 
 function handleVisionMediaForTest(mediaInput, lang, key) {
@@ -3947,25 +3990,16 @@ app.post("/wanotifier", async (req, res) => {
     let userTextRaw = String(incoming.text || "").slice(0, 2000);
     const mediaInfo = normalizeMediaInput(incoming.media);
     const msgType = String(incoming.type || "").toLowerCase();
+    const mediaResult = await processIncomingMedia({ mediaInfo, msgType, lang: detectLang(userTextRaw), key, reqId });
+    if (mediaResult && mediaResult.reply) {
+      const reply = shortenNoQuestion(mediaResult.reply, 520);
+      memory.push(key, "assistant", reply);
+      resetStrikes(key);
+      return res.json({ ok: true, reply });
+    }
 
-    const audioLikely = Boolean(msgType === "audio" || msgType === "voice" || (mediaInfo && isAudioMime(mediaInfo.mimeType)));
-
-    if (audioLikely && mediaInfo) {
-      try {
-        const audio = await downloadAudioBuffer(mediaInfo, reqId);
-        const transcriptText = await transcribeAudio(audio.buffer, audio.mimeType);
-        if (!transcriptText) throw new Error("transcription_empty");
-
-        userTextRaw = String(transcriptText || "").slice(0, 2000);
-        const preview = userTextRaw.slice(0, 120);
-        console.log(JSON.stringify({ level: "info", msg: "audio_transcribed", reqId, textPreview: preview }));
-      } catch (e) {
-        const reply = "I couldn’t read the voice note. Please type your request.";
-        memory.push(key, "assistant", reply);
-        resetStrikes(key);
-        console.error(JSON.stringify({ level: "error", msg: "audio_failed", reqId, error: (e && e.message) || String(e) }));
-        return res.json({ ok: true, reply });
-      }
+    if (mediaResult && mediaResult.userText) {
+      userTextRaw = mediaResult.userText;
     }
 
     const lang = detectLang(userTextRaw);
@@ -3988,18 +4022,6 @@ app.post("/wanotifier", async (req, res) => {
       console.error(JSON.stringify({ level: "error", msg: "offers_unavailable", lastOffersSync }));
       memory.push(key, "assistant", reply);
       return res.json({ ok: true, reply });
-    }
-
-    if (mediaInfo && !audioLikely) {
-      try {
-        const visionReply = await handleVisionMedia(mediaInfo, lang, key);
-        const reply = shortenNoQuestion(visionReply.reply, 520);
-        memory.push(key, "assistant", reply);
-        resetStrikes(key);
-        return res.json({ ok: true, reply });
-      } catch (e) {
-        console.error(JSON.stringify({ level: "error", msg: "vision_failed", reqId, error: (e && e.message) || String(e) }));
-      }
     }
 
     if (!userTextRaw) {
@@ -4277,9 +4299,13 @@ export {
   normalizeVisionResult,
   setVisionAnalyzerForTest,
   setMediaFetcherForTest,
+  setAudioDownloaderForTest,
+  setAudioTranscriberForTest,
   handleVisionMediaForTest,
   isAudioMime,
   extFromAudioMime,
+  classifyMediaRoute,
+  processIncomingMedia,
 };
 
 function runSelfTests() {
@@ -4334,6 +4360,60 @@ async function main() {
   server = app.listen(CFG.port, () => {
     console.log("Server running on port", CFG.port);
   });
+}
+
+function classifyMediaRoute(mediaInfo, msgType) {
+  const mimeType = String((mediaInfo && mediaInfo.mimeType) || "").toLowerCase();
+  const audioLikely = Boolean(msgType === "audio" || msgType === "voice" || (mediaInfo && isAudioMime(mimeType)));
+  const imageLikely = Boolean(mediaInfo && mimeType.startsWith("image/"));
+  const path = mediaInfo ? (audioLikely ? "audio" : imageLikely ? "image" : "other") : "text";
+  return { mimeType: mediaInfo ? mediaInfo.mimeType || "" : "", audioLikely, imageLikely, path };
+}
+
+async function processIncomingMedia({ mediaInfo, msgType, lang, key, reqId }) {
+  const route = classifyMediaRoute(mediaInfo, msgType);
+  if (mediaInfo) {
+    console.log(
+      JSON.stringify({ level: "info", msg: "media_route", reqId, mimeType: route.mimeType || null, path: route.path })
+    );
+  }
+
+  if (route.audioLikely && mediaInfo) {
+    let audioDl = null;
+    try {
+      audioDl = await downloadAudioBuffer(mediaInfo, reqId);
+      const transcriptText = await transcribeAudio(audioDl.filePath, audioDl.mimeType);
+      if (!transcriptText) throw new Error("transcription_empty");
+      const userTextRaw = String(transcriptText || "").slice(0, 2000);
+      const preview = userTextRaw.slice(0, 120);
+      console.log(JSON.stringify({ level: "info", msg: "audio_transcribed", reqId, textPreview: preview }));
+      return { ...route, userText: userTextRaw };
+    } catch (e) {
+      console.error(JSON.stringify({ level: "error", msg: "audio_failed", reqId, error: (e && e.message) || String(e) }));
+      return { ...route, reply: "I couldn’t read the voice note. Please type your request." };
+    } finally {
+      try {
+        if (audioDl && audioDl.tmpDir) fs.rmSync(audioDl.tmpDir, { recursive: true, force: true });
+      } catch {}
+    }
+  }
+
+  if (route.imageLikely && mediaInfo) {
+    try {
+      const visionReply = await handleVisionMedia(mediaInfo, lang, key);
+      const reply = shortenNoQuestion(visionReply.reply, 520);
+      return { ...route, reply };
+    } catch (e) {
+      console.error(JSON.stringify({ level: "error", msg: "vision_failed", reqId, error: (e && e.message) || String(e) }));
+      return { ...route, visionError: e };
+    }
+  }
+
+  if (mediaInfo && route.path === "other") {
+    return { ...route, reply: "I received a file. Please send text, an image, or a voice note." };
+  }
+
+  return route;
 }
 
 if (process.argv[1] === ENTRY_FILE) {
