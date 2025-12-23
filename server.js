@@ -5,12 +5,25 @@ import fs from "fs";
 import path from "path";
 import http from "http";
 import https from "https";
+import { fileURLToPath } from "url";
 import OpenAI from "openai";
 
 const app = express();
 app.set("trust proxy", true);
 
 const LOG_DEBUG = String(process.env.LOG_DEBUG || "0") === "1";
+const ENTRY_FILE = fileURLToPath(import.meta.url);
+const REQUIRE_ENV = process.argv[1] === ENTRY_FILE;
+
+function debugLog(event, payload) {
+  if (!LOG_DEBUG) return;
+  const base = typeof payload === "object" && payload !== null ? payload : { detail: payload };
+  try {
+    console.log(JSON.stringify({ level: "debug", event, ...base }));
+  } catch {
+    console.log("[DEBUG]", event, base);
+  }
+}
 
 const {
   PORT = "3000",
@@ -49,12 +62,12 @@ const {
   WANOTIFIER_MAX_SKEW_SECONDS = "300",
 } = process.env;
 
-if (!OPENAI_API_KEY) {
+if (REQUIRE_ENV && !OPENAI_API_KEY) {
   console.error("Missing env var: OPENAI_API_KEY");
   process.exit(1);
 }
 
-if (!WC_BASE_URL || !WC_CONSUMER_KEY || !WC_CONSUMER_SECRET) {
+if (REQUIRE_ENV && (!WC_BASE_URL || !WC_CONSUMER_KEY || !WC_CONSUMER_SECRET)) {
   console.error("Missing WooCommerce env vars: WC_BASE_URL, WC_CONSUMER_KEY, WC_CONSUMER_SECRET");
   process.exit(1);
 }
@@ -101,7 +114,13 @@ const COMPANY = {
 
 const GREETING_DAIKO_MODELS = ["GLED32H93DK", "GLED43H94DK", "GLED50AI95DK", "GLED55AI96DK"];
 
-const openai = new OpenAI({ apiKey: OPENAI_API_KEY });
+let openai = null;
+function getOpenAIClient() {
+  if (openai) return openai;
+  if (!OPENAI_API_KEY) throw new Error("OPENAI_API_KEY is required to call OpenAI");
+  openai = new OpenAI({ apiKey: OPENAI_API_KEY });
+  return openai;
+}
 
 app.use(
   express.json({
@@ -206,6 +225,23 @@ function includesToken(text, token) {
   return s.indexOf(t0) >= 0;
 }
 
+function stripQuestions(text) {
+  const s = String(text || "");
+  const noTrailing = s.replace(/[؟?]+$/g, "").trimEnd();
+  const lines = noTrailing.split(/\r?\n/);
+
+  const looksLikeQuestionLine = (line) => {
+    const t = String(line || "").trim();
+    if (!t) return true;
+    if (/[؟?]\s*$/.test(t)) return true;
+    return /^(wach|wash|chno|chnou|shno|kayen|fin|quel|quelle|quels|quelles|combien)/i.test(t);
+  };
+
+  while (lines.length > 0 && looksLikeQuestionLine(lines[lines.length - 1])) lines.pop();
+
+  return lines.join("\n").trim();
+}
+
 function ensureNoQuestion(text) {
   const s = String(text || "");
   let out = "";
@@ -215,11 +251,11 @@ function ensureNoQuestion(text) {
     if (c === 1567) continue;
     out += s[i];
   }
-  return out.trim();
+  return stripQuestions(out);
 }
 
 function shortenNoQuestion(text, max) {
-  return shorten(ensureNoQuestion(text), max || 520);
+  return shorten(ensureNoQuestion(stripQuestions(text)), max || 520);
 }
 
 function looksLikeFallback(reply) {
@@ -1423,11 +1459,16 @@ async function refreshOffersSafe() {
   offersRefreshInFlight = (async () => {
     try {
       const info = await syncOffersFromWoo();
-      lastOffersSync = { ok: true, at: nowIso(), error: null };
-      console.log("Offers refreshed OK", info);
+      const ok = info && Number(info.kept) > 0;
+      lastOffersSync = { ok, at: nowIso(), error: ok ? null : "No offers fetched" };
+      const payload = Object.assign({ level: ok ? "info" : "warn", msg: "offers_refresh" }, info, { ok });
+      if (ok) console.log(JSON.stringify(payload));
+      else console.error(JSON.stringify(payload));
     } catch (e) {
       lastOffersSync = { ok: false, at: nowIso(), error: (e && e.message) || String(e) };
-      console.log("Offers refresh failed:", lastOffersSync.error);
+      console.error(
+        JSON.stringify({ level: "error", msg: "offers_refresh_failed", error: lastOffersSync.error })
+      );
     } finally {
       offersRefreshInFlight = null;
     }
@@ -1619,11 +1660,73 @@ function extractTvSize(text) {
 function formatOfferLine(brand, o) {
   const safeBrand = String(brand || "").trim();
   const model = String((o && o.model) || "").trim();
-  const price = (o && o.price != null) ? String(o.price) : "";
-  const sizePart = (o && o.size) ? ` ${o.size}"` : "";
-  const typePart = (o && o.type) ? ` — ${o.type}` : "";
+  const priceNum = Number((o && o.price) || NaN);
+  const pricePart = Number.isFinite(priceNum) ? `${priceNum} dh` : "Prix sur demande";
+  const sizeNum = Number((o && o.size) || NaN);
+  const sizePart = Number.isFinite(sizeNum) ? ` ${sizeNum}"` : "";
+  const typeVal = String((o && o.type) || "").trim();
+  const typePart = typeVal ? ` — ${typeVal}` : "";
 
-  return `• ${safeBrand} ${model}${sizePart}: ${price} dh${typePart}`.trim();
+  return `• ${safeBrand}${model ? " " + model : ""}${sizePart}: ${pricePart}${typePart}`.trim();
+}
+
+function normalizeOfferItem(brand, offer, originalIdx) {
+  const priceNum = Number((offer && offer.price) || NaN);
+  const sizeNum = Number((offer && offer.size) || NaN);
+  return {
+    brand: String(brand || "").trim(),
+    offer,
+    price: Number.isFinite(priceNum) ? priceNum : Number.POSITIVE_INFINITY,
+    size: Number.isFinite(sizeNum) ? sizeNum : null,
+    stock: Number((offer && offer.stock) || 0),
+    originalIdx: Number.isInteger(originalIdx) ? originalIdx : 0,
+  };
+}
+
+function rankOffers(items, opts) {
+  const o = opts || {};
+  const size = Number(o.size);
+  const hasSize = Number.isFinite(size);
+  const className = o.className || null;
+  const limitVal = Number(o.limit);
+  const limit = Number.isInteger(limitVal) && limitVal >= 0 ? limitVal : null;
+  const tvClassCanon = o.tvClassCanon || OFFERS_INDEX.classCanon.tv || null;
+  const priority = Array.isArray(o.priorityList) && o.priorityList.length ? o.priorityList : TV_BRAND_PRIORITY;
+
+  const priorityRank = new Map(priority.map((b, idx) => [String(b || "").toUpperCase(), idx]));
+  const rankForBrand = (b) => {
+    const r = priorityRank.get(String(b || "").toUpperCase());
+    return Number.isInteger(r) ? r : Number.POSITIVE_INFINITY;
+  };
+
+  const tvClassNorm = normMatch(tvClassCanon || "");
+  const isTvContext = Boolean((className && normMatch(className) === tvClassNorm) || hasSize);
+
+  let arr = (Array.isArray(items) ? items : [])
+    .map((it, idx) => normalizeOfferItem((it && it.brand) || "", (it && it.offer) || {}, (it && it.originalIdx) ?? idx))
+    .filter((it) => it.brand && it.offer && it.stock > 0);
+
+  const priorityExists = isTvContext && arr.some((it) => Number.isFinite(rankForBrand(it.brand)));
+  if (priorityExists) {
+    arr = arr.filter((it) => Number.isFinite(rankForBrand(it.brand)));
+  }
+
+  const ranked = arr
+    .map((it, idx) => {
+      const sizeScore = hasSize && Number.isFinite(it.size) ? Math.abs(it.size - size) : Number.POSITIVE_INFINITY;
+      return Object.assign({}, it, { sizeScore, idx });
+    })
+    .sort((a, b) => {
+      const ra = isTvContext ? rankForBrand(a.brand) : Number.POSITIVE_INFINITY;
+      const rb = isTvContext ? rankForBrand(b.brand) : Number.POSITIVE_INFINITY;
+      if (ra !== rb) return ra - rb;
+
+      if (a.sizeScore !== b.sizeScore) return a.sizeScore - b.sizeScore;
+      if (a.price !== b.price) return a.price - b.price;
+      return a.originalIdx - b.originalIdx;
+    });
+
+  return limit !== null ? ranked.slice(0, limit) : ranked;
 }
 
 
@@ -1693,33 +1796,26 @@ function listOffersForBrand(brand, opts) {
   const o = opts || {};
   const cls = o.cls || null;
   const category = o.category || null;
-  const size = o.size || null;
+  const sizeNum = Number(o.size);
+  const hasSize = Number.isFinite(sizeNum);
   const limit = Number(o.limit) || 3;
   const withOffers = Boolean(o.withOffers);
 
-  const arr0 = ((OFFERS && OFFERS.offers && OFFERS.offers[brand]) || []).slice(0);
-  let arr = arr0.filter((x) => Number((x && x.stock) || 0) > 0);
+  const filtered = ((OFFERS && OFFERS.offers && OFFERS.offers[brand]) || [])
+    .map((offer, idx) => ({ brand, offer, originalIdx: idx }))
+    .filter((it) => {
+      const o1 = it.offer || {};
+      if (cls && normMatch(o1.class || "") !== normMatch(cls)) return false;
+      if (category && normMatch(o1.category || "") !== normMatch(category)) return false;
+      if (hasSize && Number(o1.size) !== sizeNum) return false;
+      return true;
+    });
 
-  if (cls) {
-    const ncls = normMatch(cls);
-    arr = arr.filter((x) => normMatch((x && x.class) || "") === ncls);
-  }
-  if (category) {
-    const ncat = normMatch(category);
-    arr = arr.filter((x) => normMatch((x && x.category) || "") === ncat);
-  }
-  if (Number(size) > 0) {
-    const ns = Number(size);
-    arr = arr.filter((x) => Number((x && x.size) || 0) === ns);
-  }
-
-  arr = arr
-    .filter((x) => Number.isFinite(Number(x && x.price)))
-    .sort((a, b) => Number(a.price) - Number(b.price))
-    .slice(0, limit);
-
-  const lines = arr.map((x) => formatOfferLine(brand, x));
-  if (withOffers) return { lines, offers: arr };
+  const ranked = rankOffers(filtered, { size: hasSize ? sizeNum : null, className: cls, limit });
+  const offers = ranked.map((r) => r.offer);
+  const lines = ranked.map((r) => formatOfferLine(r.brand, r.offer));
+  debugLog("rank_offers_for_brand", { brand, cls, category, size: hasSize ? sizeNum : null, count: ranked.length });
+  if (withOffers) return { lines, offers };
   return lines;
 }
 
@@ -1728,31 +1824,30 @@ function listOffersForSizeAcrossBrands(size, opts) {
   const cls = o.cls || null;
   const limit = Number(o.limit) || 3;
 
-  const out = [];
+  const items = [];
   const brands = OFFERS_INDEX.brands || [];
   for (let i = 0; i < brands.length; i += 1) {
     const b = brands[i];
-    let arr = ((OFFERS && OFFERS.offers && OFFERS.offers[b]) || []).filter((x) => Number((x && x.stock) || 0) > 0);
-    if (cls) {
-      const ncls = normMatch(cls);
-      arr = arr.filter((x) => normMatch((x && x.class) || "") === ncls);
-    }
-    arr = arr.filter((x) => Number((x && x.size) || 0) === Number(size));
-    const best = arr
-      .filter((x) => Number.isFinite(Number(x && x.price)))
-      .sort((a, b) => Number(a.price) - Number(b.price))[0];
-    if (best) out.push({ brand: b, offer: best });
+    const arr = ((OFFERS && OFFERS.offers && OFFERS.offers[b]) || [])
+      .map((offer, idx) => ({ brand: b, offer, originalIdx: idx }))
+      .filter((it) => {
+        const o1 = it.offer || {};
+        if (cls && normMatch(o1.class || "") !== normMatch(cls)) return false;
+        return Number(o1.size) === Number(size);
+      });
+
+    items.push(...arr);
   }
 
-  out.sort((a, b) => Number(a.offer.price) - Number(b.offer.price));
+  const ranked = rankOffers(items, { size: Number(size), className: cls, limit });
+  debugLog("rank_offers_across_brands", { size, cls, count: ranked.length });
 
   if (hasFocusBrand() && FOCUS.mode === "preferred") {
-    const focus = out.filter((x) => x.brand === FOCUS.brand);
-    const rest = out.filter((x) => x.brand !== FOCUS.brand);
-    return focus.concat(rest).slice(0, limit);
+    const focus = ranked.filter((x) => x.brand === FOCUS.brand).slice(0, limit);
+    if (focus.length) return focus.concat(ranked.filter((x) => x.brand !== FOCUS.brand)).slice(0, limit);
   }
 
-  return out.slice(0, limit);
+  return ranked.slice(0, limit);
 }
 
 function buildBigOffersForGreeting(brand, tvCanon) {
@@ -2183,51 +2278,8 @@ function tryDirectOfferAnswer(userText, historyMsgs, lang, key) {
   const cls2 = sizeVal ? tvCanon || cls : cls;
   const category2 = sizeVal ? null : category;
 
-  const priorityRank = new Map(TV_BRAND_PRIORITY.map((b, i) => [String(b).toUpperCase(), i]));
-  const brandRank = (b) => {
-    const r = priorityRank.get(String(b || "").toUpperCase());
-    return Number.isInteger(r) ? r : Number.POSITIVE_INFINITY;
-  };
-
-  const sortByBrandThenPrice = (arr) =>
-    (arr || []).slice().sort((a, b) => {
-      const ra = brandRank(a.brand);
-      const rb = brandRank(b.brand);
-      if (ra !== rb) return ra - rb;
-
-      const pa = Number((a.offer || {}).price);
-      const pb = Number((b.offer || {}).price);
-      if (!Number.isFinite(pa) && !Number.isFinite(pb)) return 0;
-      if (!Number.isFinite(pa)) return 1;
-      if (!Number.isFinite(pb)) return -1;
-      return pa - pb;
-    });
-
   if (sizeVal && !brand) {
-let picks = listOffersForSizeAcrossBrands(sizeVal, { cls: tvCanon, limit: 10 }) || [];
-
-const priorityExists = picks.some((p) => Number.isFinite(brandRank(p.brand)));
-
-if (priorityExists) {
-  picks = picks.filter((p) => Number.isFinite(brandRank(p.brand)));
-}
-
-picks = picks
-  .sort((a, b) => {
-    const ra = brandRank(a.brand);
-    const rb = brandRank(b.brand);
-    if (ra !== rb) return ra - rb;
-    return 0;
-  })
-  .slice(0, 3);
-
-    // Re-rank picks so priority brands come first (keeps existing picker logic for ties)
-    picks.sort((a, b) => {
-      const ra = brandRank(a.brand);
-      const rb = brandRank(b.brand);
-      if (ra !== rb) return ra - rb;
-      return 0;
-    });
+    const picks = listOffersForSizeAcrossBrands(sizeVal, { cls: tvCanon, limit: 3 }) || [];
 
     if (picks.length) {
       const lines = [];
@@ -2314,9 +2366,11 @@ picks = picks
   if (!brand && category2) {
     const k = normMatch(category2);
     const items0 = OFFERS_INDEX.categoryToOffers.get(k) || [];
-    const items = items0.filter((it) => Number(((it.offer || {}).stock) || 0) > 0);
+    const items = items0
+      .map((it, idx) => Object.assign({}, it, { originalIdx: idx }))
+      .filter((it) => Number(((it.offer || {}).stock) || 0) > 0);
 
-    const sorted = sortByBrandThenPrice(items.filter((it) => Number.isFinite(Number((it.offer || {}).price)))).slice(0, 3);
+    const sorted = rankOffers(items, { limit: 3 });
 
     if (sorted.length) {
       setCtx(key, {
@@ -2335,9 +2389,11 @@ picks = picks
   if (!brand && cls2) {
     const k = normMatch(cls2);
     const items0 = OFFERS_INDEX.classToOffers.get(k) || [];
-    const items = items0.filter((it) => Number(((it.offer || {}).stock) || 0) > 0);
+    const items = items0
+      .map((it, idx) => Object.assign({}, it, { originalIdx: idx }))
+      .filter((it) => Number(((it.offer || {}).stock) || 0) > 0);
 
-    const sorted = sortByBrandThenPrice(items.filter((it) => Number.isFinite(Number((it.offer || {}).price)))).slice(0, 3);
+    const sorted = rankOffers(items, { limit: 3 });
 
     if (sorted.length) {
       setCtx(key, {
@@ -2377,6 +2433,131 @@ picks = picks
   return null;
 }
 
+function bestGuessOffers(lang, key, limit = 3) {
+  if (!OFFERS || !OFFERS.offers || !Object.keys(OFFERS.offers).length) return null;
+
+  const ctx = getCtx(key);
+  const L = lang || "dzl";
+  const max = Number(limit) || 3;
+  const tvCanon = OFFERS_INDEX.classCanon.tv;
+
+  const sizeVal = Number(ctx.lastSize);
+  if (Number.isFinite(sizeVal)) {
+    const cls = ctx.lastClass || tvCanon || null;
+    const picks = listOffersForSizeAcrossBrands(sizeVal, { cls, limit: max }) || [];
+    if (picks.length) {
+      setCtx(key, {
+        lastBrand: undefined,
+        lastClass: cls || undefined,
+        lastCategory: undefined,
+        lastSize: sizeVal,
+        lastOffersShown: picks.map((it) => ({ brand: it.brand, model: (it.offer && it.offer.model) || "" })),
+      });
+      const intro = salesIntro(L, { size: sizeVal, cls });
+      const lines = picks.map((it) => formatOfferLine(it.brand, it.offer)).join("\n\n");
+      return ensureNoQuestion((intro ? intro + "\n\n" : "") + lines);
+    }
+  }
+
+  if (ctx.lastCategory) {
+    const k = normMatch(ctx.lastCategory);
+    const items0 = OFFERS_INDEX.categoryToOffers.get(k) || [];
+    const items = items0
+      .map((it, idx) => Object.assign({}, it, { originalIdx: typeof it.originalIdx === "number" ? it.originalIdx : idx }))
+      .filter((it) => Number(((it.offer || {}).stock) || 0) > 0);
+
+    const ranked = rankOffers(items, { limit: max });
+    if (ranked.length) {
+      setCtx(key, {
+        lastBrand: undefined,
+        lastCategory: ctx.lastCategory,
+        lastClass: undefined,
+        lastSize: undefined,
+        lastOffersShown: ranked.map((it) => ({ brand: it.brand, model: (it.offer && it.offer.model) || "" })),
+      });
+      const lines = ranked.map((it) => formatOfferLine(it.brand, it.offer)).join("\n\n");
+      const base = offersHeader(L, { category: ctx.lastCategory });
+      return ensureNoQuestion(base + "\n" + lines);
+    }
+  }
+
+  if (ctx.lastClass) {
+    const k = normMatch(ctx.lastClass);
+    const items0 = OFFERS_INDEX.classToOffers.get(k) || [];
+    const items = items0
+      .map((it, idx) => Object.assign({}, it, { originalIdx: typeof it.originalIdx === "number" ? it.originalIdx : idx }))
+      .filter((it) => Number(((it.offer || {}).stock) || 0) > 0);
+
+    const ranked = rankOffers(items, { limit: max, className: ctx.lastClass, tvClassCanon: tvCanon });
+    if (ranked.length) {
+      setCtx(key, {
+        lastBrand: undefined,
+        lastClass: ctx.lastClass,
+        lastCategory: undefined,
+        lastSize: undefined,
+        lastOffersShown: ranked.map((it) => ({ brand: it.brand, model: (it.offer && it.offer.model) || "" })),
+      });
+      const lines = ranked.map((it) => formatOfferLine(it.brand, it.offer)).join("\n\n");
+      const base = offersHeader(L, { cls: ctx.lastClass });
+      return ensureNoQuestion(base + "\n" + lines);
+    }
+  }
+
+  if (ctx.lastBrand) {
+    const pack = listOffersForBrand(ctx.lastBrand, { cls: ctx.lastClass || null, limit: max, withOffers: true });
+    if (pack.lines.length) {
+      setCtx(key, {
+        lastBrand: ctx.lastBrand,
+        lastClass: ctx.lastClass || undefined,
+        lastCategory: undefined,
+        lastSize: undefined,
+        lastOffersShown: (pack.offers || []).map((o) => ({ brand: ctx.lastBrand, model: (o && o.model) || "" })),
+      });
+      const base = offersHeader(L, { brand: ctx.lastBrand, cls: ctx.lastClass || undefined });
+      return ensureNoQuestion(base + "\n" + pack.lines.join("\n\n"));
+    }
+  }
+
+  const items = [];
+  if (tvCanon) {
+    const k = normMatch(tvCanon);
+    const arr = OFFERS_INDEX.classToOffers.get(k) || [];
+    for (let i = 0; i < arr.length; i += 1) {
+      const it = arr[i] || {};
+      if (Number(((it.offer || {}).stock) || 0) <= 0) continue;
+      items.push(Object.assign({}, it, { originalIdx: typeof it.originalIdx === "number" ? it.originalIdx : i }));
+    }
+  } else {
+    const offersObj = (OFFERS && OFFERS.offers) || {};
+    const brands = Object.keys(offersObj);
+    for (let i = 0; i < brands.length; i += 1) {
+      const b = brands[i];
+      const arr = Array.isArray(offersObj[b]) ? offersObj[b] : [];
+      for (let j = 0; j < arr.length; j += 1) {
+        const offer = arr[j];
+        if (Number((offer && offer.stock) || 0) <= 0) continue;
+        items.push({ brand: b, offer, originalIdx: j });
+      }
+    }
+  }
+
+  const ranked = rankOffers(items, { limit: max, className: tvCanon || null, tvClassCanon: tvCanon || null });
+  if (ranked.length) {
+    setCtx(key, {
+      lastBrand: undefined,
+      lastClass: tvCanon || undefined,
+      lastCategory: undefined,
+      lastSize: undefined,
+      lastOffersShown: ranked.map((it) => ({ brand: it.brand, model: (it.offer && it.offer.model) || "" })),
+    });
+    const lines = ranked.map((it) => formatOfferLine(it.brand, it.offer)).join("\n\n");
+    const base = offersHeader(L, { cls: tvCanon || undefined });
+    return ensureNoQuestion(base + "\n" + lines);
+  }
+
+  return null;
+}
+
 const MAX_OFFERS_FOR_PROMPT = 20;
 
 const TV_BRAND_PRIORITY = ["TCL", "DAIKO", "HAIER", "SAMSUNG", "VISIO", "REVOLUTION", "MORSAT", "LG"];
@@ -2386,27 +2567,22 @@ const OFFER_SCHEMA_HINT = {
     "Each offer has brand, model, price (dh), size (inches if TV), type, category, class, and optional link for photos when available.",
 };
 
-function trimOffersForPrompt(arr, opts) {
+function trimOffersForPrompt(arr, opts, brand) {
   const o = opts || {};
-  const targetSize = Number(o.size);
-  const hasTargetSize = Number.isFinite(targetSize);
-  const scored = (Array.isArray(arr) ? arr : [])
-    .filter((x) => Number((x && x.stock) || 0) > 0)
-    .map((x) => {
-      const sizeNum = Number((x && x.size) || 0);
-      const sizeScore = hasTargetSize && Number.isFinite(sizeNum) ? Math.abs(sizeNum - targetSize) : Number.MAX_SAFE_INTEGER;
-      const priceScore = Number((x && x.price) || Number.MAX_SAFE_INTEGER);
-      const modelStr = String((x && x.model) || "");
-      return { offer: x, sizeScore, priceScore, modelStr };
-    })
-    .sort((a, b) => {
-      if (a.sizeScore !== b.sizeScore) return a.sizeScore - b.sizeScore;
-      if (a.priceScore !== b.priceScore) return a.priceScore - b.priceScore;
-      return a.modelStr.localeCompare(b.modelStr);
-    })
-    .map((x) => x.offer);
+  const items = (Array.isArray(arr) ? arr : []).map((offer, idx) => ({
+    brand: brand || offer.brand || "",
+    offer,
+    originalIdx: idx,
+  }));
 
-  return scored.slice(0, MAX_OFFERS_FOR_PROMPT);
+  const ranked = rankOffers(items, {
+    size: o.size || null,
+    className: o.className || null,
+    tvClassCanon: o.tvClassCanon || OFFERS_INDEX.classCanon.tv,
+    limit: MAX_OFFERS_FOR_PROMPT,
+  });
+
+  return ranked.map((r) => r.offer);
 }
 
 function limitOffersForPromptPayload(data) {
@@ -2418,58 +2594,33 @@ function limitOffersForPromptPayload(data) {
   }
 
   const offersObj = src.offers || {};
-  const outOffers = {};
-  let remaining = MAX_OFFERS_FOR_PROMPT;
-
-  // Build rank map (uppercase keys)
-  const priorityRank = new Map(
-    (TV_BRAND_PRIORITY || []).map((b, idx) => [String(b).toUpperCase(), idx])
-  );
-
+  const items = [];
   const brandKeys = Object.keys(offersObj);
+  for (let i = 0; i < brandKeys.length; i += 1) {
+    const b = brandKeys[i];
+    const arr = Array.isArray(offersObj[b]) ? offersObj[b] : [];
+    for (let j = 0; j < arr.length; j += 1) items.push({ brand: b, offer: arr[j], originalIdx: j });
+  }
 
-  // Compute brand entries once (trim per brand)
-  const brandEntries = brandKeys.map((brand, idx) => {
-    const arr = Array.isArray(offersObj[brand]) ? offersObj[brand] : [];
-    const trimmed = trimOffersForPrompt(arr, { size: meta.size ?? null });
-
-    const key = String(brand || "").toUpperCase();
-    const r = priorityRank.get(key);
-
-    return {
-      brand,
-      trimmed,
-      rank: Number.isInteger(r) ? r : Number.POSITIVE_INFINITY, // non-priority brands go last
-      originalIdx: idx, // preserve original order for ties / non-priority
-    };
+  const ranked = rankOffers(items, {
+    size: meta.size ?? null,
+    className: meta.class || null,
+    tvClassCanon: OFFERS_INDEX.classCanon.tv,
+    limit: MAX_OFFERS_FOR_PROMPT,
   });
 
-  // If at least one PRIORITY brand exists with offers, sort all brands by:
-  // 1) priority rank (priority first, non-priority last)
-  // 2) original order (stable)
-  // Otherwise keep original order.
-  const hasPriorityBrand = brandEntries.some(
-    (e) => e.trimmed.length > 0 && Number.isFinite(e.rank)
-  );
-
-  const ordered = hasPriorityBrand
-    ? brandEntries
-        .filter((e) => e.trimmed.length > 0)
-        .sort((a, b) => {
-          if (a.rank !== b.rank) return a.rank - b.rank;
-          return a.originalIdx - b.originalIdx;
-        })
-    : brandEntries.filter((e) => e.trimmed.length > 0);
-
-  for (const entry of ordered) {
-    if (remaining <= 0) break;
-
-    const take = entry.trimmed.slice(0, remaining);
-    if (take.length) {
-      outOffers[entry.brand] = take;
-      remaining -= take.length;
-    }
+  const outOffers = {};
+  let remaining = MAX_OFFERS_FOR_PROMPT;
+  for (let i = 0; i < ranked.length && remaining > 0; i += 1) {
+    const r = ranked[i];
+    if (!outOffers[r.brand]) outOffers[r.brand] = [];
+    if (outOffers[r.brand].length >= MAX_OFFERS_FOR_PROMPT) continue;
+    outOffers[r.brand].push(r.offer);
+    remaining -= 1;
   }
+
+  const totalOut = Object.values(outOffers).reduce((acc, arr) => acc + ((arr && arr.length) || 0), 0);
+  debugLog("limit_offers_prompt", { meta, totalIn: items.length, totalOut });
 
   return { offers: outOffers, meta };
 }
@@ -2484,7 +2635,7 @@ function buildOffersSubsetForPrompt(userText, historyMsgs, key) {
   const modelHit = detectModel(combined);
   if (modelHit) {
     const offers = {};
-    offers[modelHit.brand] = trimOffersForPrompt([modelHit.offer]);
+    offers[modelHit.brand] = trimOffersForPrompt([modelHit.offer], {}, modelHit.brand);
     return limitOffersForPromptPayload({ offers, meta: { model: (modelHit.offer && modelHit.offer.model) || "" } });
   }
 
@@ -2507,7 +2658,7 @@ function buildOffersSubsetForPrompt(userText, historyMsgs, key) {
       .filter((o) => Number((o && o.stock) || 0) > 0)
       .filter((o) => normMatch((o && o.class) || "") === normMatch(cls));
     const offers = {};
-    offers[brand] = trimOffersForPrompt(arr, { size: sizeVal });
+    offers[brand] = trimOffersForPrompt(arr, { size: sizeVal, className: cls }, brand);
     return limitOffersForPromptPayload({ offers, meta: { brand, class: cls, size: sizeVal || null } });
   }
 
@@ -2516,14 +2667,14 @@ function buildOffersSubsetForPrompt(userText, historyMsgs, key) {
       .filter((o) => Number((o && o.stock) || 0) > 0)
       .filter((o) => normMatch((o && o.category) || "") === normMatch(category));
     const offers = {};
-    offers[brand] = trimOffersForPrompt(arr, { size: sizeVal });
+    offers[brand] = trimOffersForPrompt(arr, { size: sizeVal }, brand);
     return limitOffersForPromptPayload({ offers, meta: { brand, category } });
   }
 
   if (brand) {
     const arr = ((OFFERS && OFFERS.offers && OFFERS.offers[brand]) || []).filter((o) => Number((o && o.stock) || 0) > 0);
     const offers = {};
-    offers[brand] = trimOffersForPrompt(arr, { size: sizeVal });
+    offers[brand] = trimOffersForPrompt(arr, { size: sizeVal }, brand);
     return limitOffersForPromptPayload({ offers, meta: { brand, size: sizeVal || null } });
   }
 
@@ -2571,14 +2722,14 @@ function buildSystemPrompt(offersSubset, lang, opts) {
 async function callOpenAIChat(messages, maxOut) {
   const maxTokens = Number(maxOut) || 380;
   try {
-    return await openai.chat.completions.create({
+    return await getOpenAIClient().chat.completions.create({
       model: OPENAI_MODEL,
       messages,
       temperature: 0.3,
       max_completion_tokens: maxTokens,
     });
   } catch (_e) {
-    return await openai.chat.completions.create({
+    return await getOpenAIClient().chat.completions.create({
       model: OPENAI_MODEL,
       messages,
       temperature: 0.3,
@@ -2664,42 +2815,45 @@ function validateWanotifierHmac(req) {
   return timingSafeEqualStr(sig, expected);
 }
 
-const maintenanceTimer = setInterval(() => {
-  const now = Date.now();
+let maintenanceTimer = null;
+function startMaintenanceTimer() {
+  maintenanceTimer = setInterval(() => {
+    const now = Date.now();
 
-  memory.cleanup();
+    memory.cleanup();
 
-  for (const [k, v] of rateStore.entries()) {
-    if (!v || !v.windowStart || now - v.windowStart > CFG.rateWindowMs * 2) rateStore.delete(k);
-  }
+    for (const [k, v] of rateStore.entries()) {
+      if (!v || !v.windowStart || now - v.windowStart > CFG.rateWindowMs * 2) rateStore.delete(k);
+    }
 
-  for (const [k, v] of ipRateStore.entries()) {
-    if (!v || !v.windowStart || now - v.windowStart > CFG.rateWindowMs * 2) ipRateStore.delete(k);
-  }
+    for (const [k, v] of ipRateStore.entries()) {
+      if (!v || !v.windowStart || now - v.windowStart > CFG.rateWindowMs * 2) ipRateStore.delete(k);
+    }
 
-  pruneMapSize(rateStore, MAX_RATE_STORE_SIZE);
-  pruneMapSize(ipRateStore, MAX_RATE_STORE_SIZE);
+    pruneMapSize(rateStore, MAX_RATE_STORE_SIZE);
+    pruneMapSize(ipRateStore, MAX_RATE_STORE_SIZE);
 
-  for (const [k, v] of fallbackStrikeStore.entries()) {
-    if (!v || !v.at || now - v.at > FALLBACK_TTL_MS) fallbackStrikeStore.delete(k);
-  }
+    for (const [k, v] of fallbackStrikeStore.entries()) {
+      if (!v || !v.at || now - v.at > FALLBACK_TTL_MS) fallbackStrikeStore.delete(k);
+    }
 
-  for (const [k, v] of ctxStore.entries()) {
-    if (!v || !v.at || now - v.at > CTX_TTL_MS) ctxStore.delete(k);
-  }
+    for (const [k, v] of ctxStore.entries()) {
+      if (!v || !v.at || now - v.at > CTX_TTL_MS) ctxStore.delete(k);
+    }
 
-  for (const [k, v] of supportModeStore.entries()) {
-    if (!v || !v.at || now - v.at > SUPPORT_TTL_MS) supportModeStore.delete(k);
-  }
+    for (const [k, v] of supportModeStore.entries()) {
+      if (!v || !v.at || now - v.at > SUPPORT_TTL_MS) supportModeStore.delete(k);
+    }
 
-  for (const [k, v] of pendingOrderStore.entries()) {
-    if (!v || !v.at || now - v.at > PENDING_TTL_MS) pendingOrderStore.delete(k);
-  }
+    for (const [k, v] of pendingOrderStore.entries()) {
+      if (!v || !v.at || now - v.at > PENDING_TTL_MS) pendingOrderStore.delete(k);
+    }
 
-  for (const [k, v] of lastOrderAckStore.entries()) {
-    if (!v || !v.at || now - v.at > PENDING_TTL_MS) lastOrderAckStore.delete(k);
-  }
-}, 10 * 60 * 1000);
+    for (const [k, v] of lastOrderAckStore.entries()) {
+      if (!v || !v.at || now - v.at > PENDING_TTL_MS) lastOrderAckStore.delete(k);
+    }
+  }, 10 * 60 * 1000);
+}
 
 let refreshTimer = null;
 let server = null;
@@ -2805,8 +2959,23 @@ app.post("/wanotifier", async (req, res) => {
     const lang = detectLang(userTextRaw);
     const ip = String(req.ip || "");
 
+    const offersAvailable = Boolean(
+      lastOffersSync &&
+        lastOffersSync.ok &&
+        OFFERS &&
+        OFFERS.offers &&
+        Object.keys(OFFERS.offers).length > 0
+    );
+
     if (!rateLimitOk(key, ip)) {
       return res.status(429).json({ ok: false, error: "Rate limit exceeded" });
+    }
+
+    if (!offersAvailable) {
+      const reply = shortenNoQuestion(t(lang, "cannot3"), 420);
+      console.error(JSON.stringify({ level: "error", msg: "offers_unavailable", lastOffersSync }));
+      memory.push(key, "assistant", reply);
+      return res.json({ ok: true, reply });
     }
 
     if (looksLikeMediaOrEmpty(req.body || {})) {
@@ -3018,6 +3187,14 @@ if (isIptvIntent(userTextRaw)) {
       return res.json({ ok: true, reply });
     }
 
+    const bestGuess = bestGuessOffers(lang, key, 3);
+    if (bestGuess) {
+      const reply = shortenNoQuestion(bestGuess, 520);
+      memory.push(key, "assistant", reply);
+      resetStrikes(key);
+      return res.json({ ok: true, reply });
+    }
+
     let reply = await digibotLLMReply(userTextRaw, history, lang, key);
 
     if (looksLikeFallback(reply)) {
@@ -3059,8 +3236,11 @@ if (isIptvIntent(userTextRaw)) {
   }
 });
 
+export { rankOffers, trimOffersForPrompt, limitOffersForPromptPayload, formatOfferLine, stripQuestions };
+
 async function main() {
   memory.load();
+  startMaintenanceTimer();
   await refreshOffersSafe();
   refreshTimer = setInterval(() => {
     refreshOffersSafe();
@@ -3071,7 +3251,9 @@ async function main() {
   });
 }
 
-main().catch((e) => {
-  console.error("Fatal startup error:", (e && e.message) || String(e));
-  process.exit(1);
-});
+if (process.argv[1] === ENTRY_FILE) {
+  main().catch((e) => {
+    console.error("Fatal startup error:", (e && e.message) || String(e));
+    process.exit(1);
+  });
+}
