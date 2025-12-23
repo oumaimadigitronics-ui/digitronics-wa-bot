@@ -62,6 +62,7 @@ const {
   WANOTIFIER_HMAC_HEADER = "x-signature",
   WANOTIFIER_TS_HEADER = "x-timestamp",
   WANOTIFIER_MAX_SKEW_SECONDS = "300",
+  WANOTIFIER_MEDIA_URL = "",
 } = process.env;
 
 if (REQUIRE_ENV && !OPENAI_API_KEY) {
@@ -91,6 +92,7 @@ const CFG = {
   wanotifierHmacHeader: String(WANOTIFIER_HMAC_HEADER || "x-signature").toLowerCase(),
   wanotifierTsHeader: String(WANOTIFIER_TS_HEADER || "x-timestamp").toLowerCase(),
   wanotifierMaxSkewSec: Math.max(30, Number(WANOTIFIER_MAX_SKEW_SECONDS) || 300),
+  wanotifierMediaUrl: String(WANOTIFIER_MEDIA_URL || "").trim(),
 
   wcBase: String(WC_BASE_URL || "").replace(/\/$/g, ""),
   wcKey: String(WC_CONSUMER_KEY || ""),
@@ -1906,10 +1908,225 @@ function formatOfferLine(brand, o) {
   const sizePart = Number.isFinite(sizeNum) ? ` ${sizeNum}"` : "";
   const typeVal = String((o && o.type) || "").trim();
   const typePart = typeVal ? ` — ${typeVal}` : "";
-  const url = String((o && o.url) || (o && o.link) || "").trim();
+  const url = sanitizeUrlNoQuestion(String((o && o.url) || (o && o.link) || "").trim());
   const urlPart = url ? ` — ${url}` : "";
 
   return `• ${safeBrand}${model ? " " + model : ""}${sizePart}: ${pricePart}${typePart}${urlPart}`.trim();
+}
+
+/**
+ * Image-to-offer flow:
+ * 1) normalize inbound media and fetch raw bytes (downloadMediaBuffer)
+ * 2) run analyzeProductImage with OpenAI vision to get strict JSON
+ * 3) map the JSON to our offer selection hints (selectOffersFromVision)
+ * 4) build a reply using the same ranking/formatting used for text routes
+ */
+const VISION_CATEGORY_MAP = {
+  tv: { cls: "Tv", category: "Tv" },
+  refrigerateur: { cls: "Refrigerateur", category: "Refrigerateur" },
+  cuisiniere: { cls: "Cuisiniere", category: "Cuisiniere" },
+  lave_linge: { cls: "Machine A Laver", category: "Machine A Laver" },
+};
+
+let visionAnalyzer = analyzeProductImage;
+let mediaFetcherOverride = null;
+
+function normalizeMediaInput(mediaVal) {
+  const raw = Array.isArray(mediaVal) ? mediaVal[0] : mediaVal;
+  if (!raw) return null;
+  if (typeof raw === "string") return { url: String(raw).trim() };
+  if (typeof raw !== "object") return null;
+
+  return {
+    url: String(raw.url || raw.media_url || raw.downloadUrl || raw.href || "").trim(),
+    id: String(raw.id || raw.mediaId || raw.media_id || "").trim(),
+    mimeType: String(raw.mimeType || raw.contentType || "").trim(),
+    filename: String(raw.filename || raw.fileName || raw.name || "").trim(),
+  };
+}
+
+async function downloadMediaBuffer(mediaInput) {
+  const m = mediaInput || {};
+  if (typeof mediaFetcherOverride === "function") return mediaFetcherOverride(m);
+
+  const fetch = getFetch();
+  const baseUrl = String(CFG.wanotifierMediaUrl || "").replace(/\/$/, "");
+  const url = m.url || (m.id && baseUrl ? `${baseUrl}/${m.id}` : "");
+  if (!url) throw new Error("media_url_missing");
+
+  const resp = await fetch(url, { method: "GET" });
+  if (!resp || !resp.ok) throw new Error("media_fetch_failed");
+  const arrBuf = await resp.arrayBuffer();
+  const buf = Buffer.from(arrBuf);
+  const ct = String((resp.headers && resp.headers.get && resp.headers.get("content-type")) || "");
+
+  return {
+    buffer: buf,
+    mimeType: m.mimeType || ct || "application/octet-stream",
+    filename: m.filename || null,
+  };
+}
+
+function parseVisionJson(rawText) {
+  const txt = String(rawText || "").trim();
+  if (!txt) return { ok: false, raw: "" };
+  const cleaned = txt.replace(/^```json\s*/i, "").replace(/```$/g, "").trim();
+  try {
+    const obj = JSON.parse(cleaned);
+    return { ok: true, obj };
+  } catch {
+    return { ok: false, raw: cleaned };
+  }
+}
+
+function normalizeVisionResult(obj) {
+  const o = obj && typeof obj === "object" ? obj : {};
+  const category = String(o.category || "").toLowerCase();
+  const brand = String(o.brand || "").trim();
+  const model = String(o.model || "").trim();
+  const sizeInches = Number(o.size_inches);
+  const capacityLiters = Number(o.capacity_liters);
+  const confidence = Number(o.confidence);
+
+  return {
+    category,
+    brand: brand || null,
+    model: model || null,
+    size_inches: Number.isFinite(sizeInches) ? sizeInches : null,
+    capacity_liters: Number.isFinite(capacityLiters) ? capacityLiters : null,
+    confidence: Number.isFinite(confidence) && confidence >= 0 && confidence <= 1 ? confidence : 0,
+  };
+}
+
+async function analyzeProductImage(imageBytes, mimeType) {
+  const imgBuf = Buffer.isBuffer(imageBytes) ? imageBytes : Buffer.from(imageBytes || []);
+  const safeMime = String(mimeType || "image/jpeg");
+  const b64 = imgBuf.toString("base64");
+  const messages = [
+    {
+      role: "system",
+      content:
+        "You extract appliance details (brand/model/size/capacity) from a single product photo. " +
+        "Always respond with strict JSON only.",
+    },
+    {
+      role: "user",
+      content: [
+        {
+          type: "text",
+          text:
+            "Identify the product. Reply with JSON only using keys: category (tv|refrigerateur|cuisiniere|lave_linge|other), brand, model, size_inches, capacity_liters, confidence (0..1).",
+        },
+        { type: "image_url", image_url: { url: `data:${safeMime};base64,${b64}` } },
+      ],
+    },
+  ];
+
+  const resp = await getOpenAIClient().chat.completions.create({ model: OPENAI_MODEL, messages, temperature: 0 });
+  const raw = resp && resp.choices && resp.choices[0] && resp.choices[0].message ? resp.choices[0].message.content : "";
+  const parsed = parseVisionJson(raw);
+  if (!parsed.ok) return normalizeVisionResult({ confidence: 0 });
+  return normalizeVisionResult(parsed.obj);
+}
+
+function selectOffersFromVision(hints) {
+  const h = hints || {};
+  const mapped = VISION_CATEGORY_MAP[h.category] || { cls: null, category: null };
+  const cls = mapped.cls || h.cls || null;
+  const category = mapped.category || h.categoryReadable || null;
+  const brand = String(h.brand || "").toUpperCase();
+  const size = Number(h.size_inches);
+  const capacity = Number(h.capacity_liters);
+  const sizeNum = Number.isFinite(size) ? size : null;
+  const capNum = Number.isFinite(capacity) ? capacity : null;
+
+  if (brand) {
+    const res = listOffersForBrand(brand, {
+      cls,
+      category,
+      size: sizeNum,
+      capacityLiters: capNum,
+      limit: 3,
+      withOffers: true,
+    });
+    if (res && Array.isArray(res.offers) && res.offers.length) return res;
+  }
+
+  const items = [];
+  const brands = OFFERS_INDEX.brands || [];
+  for (let i = 0; i < brands.length; i += 1) {
+    const b = brands[i];
+    const arr = ((OFFERS && OFFERS.offers && OFFERS.offers[b]) || [])
+      .map((offer, idx) => ({ brand: b, offer, originalIdx: idx }))
+      .filter((it) => {
+        const o = it.offer || {};
+        if (cls && normMatch(o.class || "") !== normMatch(cls)) return false;
+        if (category && normMatch(o.category || "") !== normMatch(category)) return false;
+        return true;
+      });
+    items.push(...arr);
+  }
+
+  const ranked = rankOffers(items, {
+    size: sizeNum,
+    capacityLiters: capNum,
+    className: cls,
+    limit: 3,
+  });
+
+  return { offers: ranked.map((r) => r.offer), lines: ranked.map((r) => formatOfferLine(r.brand, r.offer)) };
+}
+
+async function handleVisionMedia(mediaInput, lang, key) {
+  const normalizedMedia = normalizeMediaInput(mediaInput);
+  if (!normalizedMedia) throw new Error("media_missing");
+
+  const downloaded = await downloadMediaBuffer(normalizedMedia);
+  const vision = await visionAnalyzer(downloaded.buffer, downloaded.mimeType);
+  const mapped = VISION_CATEGORY_MAP[vision.category] || {};
+  const cls = mapped.cls || null;
+  const category = mapped.category || null;
+  const brand = vision.brand ? String(vision.brand).toUpperCase() : null;
+  const sizeNum = vision.size_inches ? Number(vision.size_inches) : null;
+  const capNum = vision.capacity_liters ? Number(vision.capacity_liters) : null;
+
+  const offers = selectOffersFromVision({
+    category: vision.category,
+    cls,
+    categoryReadable: category,
+    brand,
+    size_inches: sizeNum,
+    capacity_liters: capNum,
+  });
+
+  const header = offersHeader(lang, { brand, cls: cls || category || undefined, category: category || undefined, size: sizeNum || undefined });
+  const lines = Array.isArray(offers.lines) ? offers.lines : [];
+  const body = lines.length ? header + "\n" + lines.join("\n") : t(lang, "needDetails");
+  const reply = shortenNoQuestion(body, CFG.maxReplyChars);
+
+  setCtx(key, {
+    lastBrand: brand || undefined,
+    lastClass: cls || undefined,
+    lastCategory: category || undefined,
+    lastSize: sizeNum || undefined,
+    lastOffersShown: Array.isArray(offers.offers)
+      ? offers.offers.map((o) => ({ brand: brand || (o && o.brand) || "", model: (o && o.model) || "" }))
+      : undefined,
+  });
+
+  return { reply, confidence: vision.confidence || 0 };
+}
+
+function setVisionAnalyzerForTest(fn) {
+  visionAnalyzer = fn;
+}
+
+function setMediaFetcherForTest(fn) {
+  mediaFetcherOverride = fn;
+}
+
+function handleVisionMediaForTest(mediaInput, lang, key) {
+  return handleVisionMedia(mediaInput, lang, key);
 }
 
 function normalizeOfferItem(brand, offer, originalIdx) {
@@ -3669,11 +3886,17 @@ app.post("/wanotifier", async (req, res) => {
       return res.json({ ok: true, reply });
     }
 
-    if (looksLikeMediaOrEmpty(req.body || {})) {
-      const reply = shortenNoQuestion(t(lang, "askTextInsteadMedia"), 420);
-      memory.push(key, "assistant", reply);
-      resetStrikes(key);
-      return res.json({ ok: true, reply });
+    const mediaInfo = normalizeMediaInput(incoming.media);
+    if (mediaInfo) {
+      try {
+        const visionReply = await handleVisionMedia(mediaInfo, lang, key);
+        const reply = shortenNoQuestion(visionReply.reply, 520);
+        memory.push(key, "assistant", reply);
+        resetStrikes(key);
+        return res.json({ ok: true, reply });
+      } catch (e) {
+        console.error(JSON.stringify({ level: "error", msg: "vision_failed", reqId, error: (e && e.message) || String(e) }));
+      }
     }
 
     if (!userTextRaw) {
@@ -3946,6 +4169,12 @@ export {
   tryDirectOfferAnswer,
   setOffersForTest,
   setWcFetchJsonForTest,
+  analyzeProductImage,
+  parseVisionJson,
+  normalizeVisionResult,
+  setVisionAnalyzerForTest,
+  setMediaFetcherForTest,
+  handleVisionMediaForTest,
 };
 
 function runSelfTests() {

@@ -3,10 +3,16 @@ import assert from "assert";
 import {
   ensureNoQuestion,
   formatOfferLine,
+  analyzeProductImage,
+  handleVisionMediaForTest,
   limitOffersForPromptPayload,
   rankOffers,
   resolveCategoryIntent,
+  normalizeVisionResult,
+  parseVisionJson,
   setOffersForTest,
+  setMediaFetcherForTest,
+  setVisionAnalyzerForTest,
   setWcFetchJsonForTest,
   stripQuestions,
   tryDirectOfferAnswer,
@@ -187,6 +193,39 @@ await (async function testWebsiteCatalogCuisiniereAliases() {
   setOffersForTest(TEST_OFFERS);
   const reply = tryDirectOfferAnswer("فورنو", [], "dzl", "k-oven");
   assert.ok(!reply.toLowerCase().includes("tv"));
+})();
+
+(function testVisionJsonParsing() {
+  const parsed = parseVisionJson("```json\n{\n \"category\": \"tv\"}\n```");
+  assert.ok(parsed.ok);
+  const normalized = normalizeVisionResult(parsed.obj);
+  assert.strictEqual(normalized.category, "tv");
+
+  const bad = parseVisionJson("not json");
+  assert.ok(!bad.ok);
+  const normalizedBad = normalizeVisionResult(null);
+  assert.strictEqual(normalizedBad.confidence, 0);
+})();
+
+await (async function testVisionRoutingUsesOffers() {
+  setOffersForTest(TEST_OFFERS);
+  setMediaFetcherForTest(async () => ({ buffer: Buffer.from("test"), mimeType: "image/png" }));
+  setVisionAnalyzerForTest(async () => ({
+    category: "tv",
+    brand: "SCREEN",
+    model: null,
+    size_inches: 50,
+    capacity_liters: null,
+    confidence: 0.4,
+  }));
+
+  const replyObj = await handleVisionMediaForTest({ url: "http://example.com/media" }, "dzl", "k-vision");
+  assert.ok(replyObj.reply.includes("TV-50"));
+  assert.ok(replyObj.reply.includes("http://x/TV-50"));
+  assertNoQuestionMarks(replyObj.reply);
+
+  setVisionAnalyzerForTest(analyzeProductImage);
+  setMediaFetcherForTest(null);
 })();
 
 await (async function testWebsiteCatalogTvRanking() {
