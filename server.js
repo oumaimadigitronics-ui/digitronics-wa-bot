@@ -2334,6 +2334,8 @@ function tryDirectOfferAnswer(userText, historyMsgs, lang, key) {
 
 const MAX_OFFERS_FOR_PROMPT = 20;
 
+const TV_BRAND_PRIORITY = ["TCL", "DAIKO", "HAIER", "SAMSUNG", "VISIO", "REVOLUTION", "MORSAT", "LG"];
+
 const OFFER_SCHEMA_HINT = {
   description:
     "Each offer has brand, model, price (dh), size (inches if TV), type, category, class, and optional link for photos when available.",
@@ -2374,12 +2376,31 @@ function limitOffersForPromptPayload(data) {
   const outOffers = {};
   let remaining = MAX_OFFERS_FOR_PROMPT;
 
-  for (const brand of Object.keys(offersObj)) {
-    if (remaining <= 0) break;
+  const priorityRank = new Map(TV_BRAND_PRIORITY.map((b, idx) => [b, idx]));
+
+  const brandEntries = Object.keys(offersObj).map((brand, idx) => {
     const arr = Array.isArray(offersObj[brand]) ? offersObj[brand] : [];
-    const trimmed = trimOffersForPrompt(arr, { size: (src.meta && src.meta.size) || null }).slice(0, remaining);
+    const trimmed = trimOffersForPrompt(arr, { size: (src.meta && src.meta.size) || null });
+    const rank = priorityRank.get(String(brand || "").toUpperCase());
+    return { brand, trimmed, rank: Number.isInteger(rank) ? rank : Number.POSITIVE_INFINITY, idx };
+  });
+
+  const hasPriorityBrand = brandEntries.some((entry) => entry.trimmed.length && Number.isFinite(entry.rank));
+
+  const ordered = hasPriorityBrand
+    ? brandEntries
+        .filter((entry) => entry.trimmed.length)
+        .sort((a, b) => {
+          if (a.rank !== b.rank) return a.rank - b.rank;
+          return a.idx - b.idx;
+        })
+    : brandEntries.filter((entry) => entry.trimmed.length);
+
+  for (const entry of ordered) {
+    if (remaining <= 0) break;
+    const trimmed = entry.trimmed.slice(0, remaining);
     if (trimmed.length) {
-      outOffers[brand] = trimmed;
+      outOffers[entry.brand] = trimmed;
       remaining -= trimmed.length;
     }
   }
@@ -2443,11 +2464,11 @@ function buildOffersSubsetForPrompt(userText, historyMsgs, key) {
   return limitOffersForPromptPayload({ offers: {}, meta: { hint: "no_match" } });
 }
 
-function buildSystemPrompt(offersSubset, lang) {
+function buildSystemPrompt(offersSubset, lang, opts) {
   const L = lang || "dzl";
   const rulesForLang = RULES_I18N[L] || RULES_I18N.dzl;
 
-  const slimOffers = limitOffersForPromptPayload(offersSubset);
+  const slimOffers = opts && opts.alreadyLimited ? offersSubset : limitOffersForPromptPayload(offersSubset);
 
   return (
     "You are DigiBot for Digitronics.ma.\n\n" +
@@ -2503,8 +2524,9 @@ async function callOpenAIChat(messages, maxOut) {
 async function digibotLLMReply(userText, historyMsgs, lang, key) {
   const offersSubset = buildOffersSubsetForPrompt(userText, historyMsgs, key);
   const hist = Array.isArray(historyMsgs) ? historyMsgs : [];
+  const slimOffers = limitOffersForPromptPayload(offersSubset);
 
-  const messages = [{ role: "system", content: buildSystemPrompt(offersSubset, lang) }];
+  const messages = [{ role: "system", content: buildSystemPrompt(slimOffers, lang, { alreadyLimited: true }) }];
   const maxHist = CFG.memoryMaxMessages;
   const slice = hist.slice(Math.max(0, hist.length - maxHist));
   for (let i = 0; i < slice.length; i += 1) messages.push({ role: slice[i].role, content: slice[i].content });
