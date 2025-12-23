@@ -273,6 +273,8 @@ function shortenNoQuestion(text, max) {
   return shorten(ensureNoQuestion(cleaned), max || 520);
 }
 
+const INITIAL_GREETING_TTL_MS = 24 * 60 * 60 * 1000;
+
 function sanitizeUrlNoQuestion(urlStr) {
   try {
     const u = new URL(String(urlStr || ""));
@@ -398,6 +400,7 @@ function t(lang, key, vars) {
           extras
         ).trim();
       },
+      howCanIHelp: "Kifach n9dr n3awnk lyoum?",
       address: "L3nwan dyalna: " + COMPANY.address,
       orderForm: "Tfdal/ي: 3mmer had formulaire bach tdir commande: " + ORDER_FORM_URL_SAFE,
       askOrderNo: "3afak sft رقم الطلب bach n9dro n7ssbo.",
@@ -453,6 +456,7 @@ function t(lang, key, vars) {
           ORDER_FORM_URL_SAFE
         ).trim();
       },
+      howCanIHelp: "Comment puis-je vous aider aujourd’hui ?",
       address: "Notre adresse: " + COMPANY.address,
       orderForm: "Veuillez remplir ce formulaire pour commander: " + ORDER_FORM_URL_SAFE,
       askOrderNo: "Merci d’envoyer votre numéro de commande pour vérification.",
@@ -508,6 +512,7 @@ function t(lang, key, vars) {
           ORDER_FORM_URL_SAFE
         ).trim();
       },
+      howCanIHelp: "كيفاش نقدر نعاونك اليوم؟",
       address: "عنواننا: " + COMPANY.address,
       orderForm: "من فضلك عبّئ هذا الفورم للطلب: " + ORDER_FORM_URL_SAFE,
       askOrderNo: "من فضلك ارسل رقم الطلب باش نقدر نتحققو.",
@@ -2704,6 +2709,38 @@ function buildBigOffersForGreeting(brand, tvCanon) {
   return [];
 }
 
+function buildGreetingExtras() {
+  return (
+    "✅ TV DAIKO: Garantie 2 ans.\n" +
+    "✅ Kayjiw b 2 télécommandes.\n" +
+    "✅ Taman kaychmel support/bracket mural.\n" +
+    "✅ Livraison gratuite."
+  );
+}
+
+function shouldSendInitialGreeting(ctx, now) {
+  const ts = Number(now || Date.now());
+  if (!ctx || ctx.didSendInitialGreeting !== true) return true;
+  if (!ctx.initialGreetingAt) return true;
+  return ts - Number(ctx.initialGreetingAt || 0) > INITIAL_GREETING_TTL_MS;
+}
+
+function buildInitialGreeting(lang) {
+  const daikoLines = buildBigOffersForGreeting("DAIKO", OFFERS_INDEX.classCanon.tv || null);
+  const extras = buildGreetingExtras();
+  const base = t(lang, "greeting", { daikoLines, extras });
+  return `${base}\n\n${t(lang, "howCanIHelp")}`.trim();
+}
+
+function maybeSendInitialGreeting({ key, lang, now }) {
+  const ctx = getCtx(key);
+  if (!shouldSendInitialGreeting(ctx, now)) return null;
+  const ts = Number(now || Date.now());
+  const greeting = buildInitialGreeting(lang);
+  setCtx(key, { ...ctx, didSendInitialGreeting: true, initialGreetingAt: ts });
+  return greeting;
+}
+
 function resolveOfferForPhoto(userText, historyMsgs, key) {
   const text = String(userText || "");
   const hist = Array.isArray(historyMsgs) ? historyMsgs : [];
@@ -3991,13 +4028,6 @@ app.post("/wanotifier", async (req, res) => {
     const mediaInfo = normalizeMediaInput(incoming.media);
     const msgType = String(incoming.type || "").toLowerCase();
     const mediaResult = await processIncomingMedia({ mediaInfo, msgType, lang: detectLang(userTextRaw), key, reqId });
-    if (mediaResult && mediaResult.reply) {
-      const reply = shortenNoQuestion(mediaResult.reply, 520);
-      memory.push(key, "assistant", reply);
-      resetStrikes(key);
-      return res.json({ ok: true, reply });
-    }
-
     if (mediaResult && mediaResult.userText) {
       userTextRaw = mediaResult.userText;
     }
@@ -4015,6 +4045,21 @@ app.post("/wanotifier", async (req, res) => {
 
     if (!rateLimitOk(key, ip)) {
       return res.status(429).json({ ok: false, error: "Rate limit exceeded" });
+    }
+
+    const greetingReply = maybeSendInitialGreeting({ key, lang });
+    if (greetingReply) {
+      if (userTextRaw) memory.push(key, "user", userTextRaw);
+      memory.push(key, "assistant", greetingReply);
+      resetStrikes(key);
+      return res.json({ ok: true, reply: greetingReply });
+    }
+
+    if (mediaResult && mediaResult.reply) {
+      const reply = shortenNoQuestion(mediaResult.reply, 520);
+      memory.push(key, "assistant", reply);
+      resetStrikes(key);
+      return res.json({ ok: true, reply });
     }
 
     if (!offersAvailable) {
@@ -4042,8 +4087,7 @@ if (isIptvIntent(userTextRaw)) {
 
     if (isGreeting(userTextRaw) && userTextRaw.length <= 25) {
       const daikoLines = buildBigOffersForGreeting("DAIKO", OFFERS_INDEX.classCanon.tv || null);
-      const extras =
-        "✅ TV DAIKO: Garantie 2 ans.\n" + "✅ Kayjiw b 2 télécommandes.\n" + "✅ Taman kaychmel support/bracket mural.\n" + "✅ Livraison gratuite.";
+      const extras = buildGreetingExtras();
 
       const reply = shortenNoQuestion(t(lang, "greeting", { daikoLines, extras }), 1000);
       memory.push(key, "assistant", reply);
@@ -4306,6 +4350,10 @@ export {
   extFromAudioMime,
   classifyMediaRoute,
   processIncomingMedia,
+  maybeSendInitialGreeting,
+  getCtx as getCtxForTest,
+  setCtx as setCtxForTest,
+  INITIAL_GREETING_TTL_MS,
 };
 
 function runSelfTests() {

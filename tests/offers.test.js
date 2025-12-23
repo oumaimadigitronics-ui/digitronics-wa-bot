@@ -25,6 +25,10 @@ import {
   tryDirectOfferAnswer,
   tryWebsiteCatalogAnswer,
   processIncomingMedia,
+  maybeSendInitialGreeting,
+  getCtxForTest,
+  setCtxForTest,
+  INITIAL_GREETING_TTL_MS,
 } from "../server.js";
 
 const ORIGINAL_VISION_ANALYZER = analyzeProductImage;
@@ -56,6 +60,11 @@ function mockWcFetch(pages) {
     const idx = page - 1;
     return pages[idx] || [];
   };
+}
+
+function countQuestions(text) {
+  const matches = String(text || "").match(/[؟?]/g);
+  return matches ? matches.length : 0;
 }
 
 (function testTvPriorityBrandsWin() {
@@ -104,6 +113,37 @@ function mockWcFetch(pages) {
   const cleaned = stripQuestions("Wash bghiti?\nChno size?\n\n");
   assert.ok(!cleaned.includes("?"));
   assert.strictEqual(cleaned, "");
+})();
+
+(function testInitialGreetingFirstMessage() {
+  const key = "greet-key-1";
+  const reply = maybeSendInitialGreeting({ key, lang: "fr" });
+  assert.ok(reply.includes("Comment puis-je vous aider aujourd’hui ?"));
+  assert.strictEqual(countQuestions(reply), 1);
+  const ctx = getCtxForTest(key);
+  assert.strictEqual(ctx.didSendInitialGreeting, true);
+})();
+
+(function testInitialGreetingSecondMessageSkips() {
+  const key = "greet-key-2";
+  const first = maybeSendInitialGreeting({ key, lang: "dzl" });
+  assert.ok(first && first.length > 0);
+  const second = maybeSendInitialGreeting({ key, lang: "dzl" });
+  assert.strictEqual(second, null);
+  const cleaned = ensureNoQuestion("Wash lprix?");
+  assert.strictEqual(cleaned.includes("?"), false);
+})();
+
+(function testInitialGreetingTtlAllowsRepeat() {
+  const key = "greet-key-ttl";
+  const first = maybeSendInitialGreeting({ key, lang: "ar" });
+  assert.ok(first);
+  setCtxForTest(key, {
+    didSendInitialGreeting: true,
+    initialGreetingAt: Date.now() - INITIAL_GREETING_TTL_MS - 1000,
+  });
+  const again = maybeSendInitialGreeting({ key, lang: "ar" });
+  assert.ok(again);
 })();
 
 (function testForcedIntentResolver() {
