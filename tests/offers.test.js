@@ -1,4 +1,7 @@
 import assert from "assert";
+import fs from "fs";
+import os from "os";
+import path from "path";
 
 import {
   ensureNoQuestion,
@@ -13,13 +16,18 @@ import {
   setOffersForTest,
   setMediaFetcherForTest,
   setVisionAnalyzerForTest,
+  setAudioDownloaderForTest,
+  setAudioTranscriberForTest,
   setWcFetchJsonForTest,
   isAudioMime,
   extFromAudioMime,
   stripQuestions,
   tryDirectOfferAnswer,
   tryWebsiteCatalogAnswer,
+  processIncomingMedia,
 } from "../server.js";
+
+const ORIGINAL_VISION_ANALYZER = analyzeProductImage;
 
 const TEST_OFFERS = {
   COOL: [{ price: 3500, stock: 3, model: "AC-1", category: "Climatiseur", url: "http://x/AC-1" }],
@@ -235,6 +243,83 @@ await (async function testVisionRoutingUsesOffers() {
 
   setVisionAnalyzerForTest(analyzeProductImage);
   setMediaFetcherForTest(null);
+})();
+
+await (async function testAudioMediaTranscribesToTextFlow() {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "audio-test-"));
+  const tmpFile = path.join(dir, "audio.mp3");
+  fs.writeFileSync(tmpFile, "dummy");
+
+  setAudioDownloaderForTest(() => ({ filePath: tmpFile, mimeType: "audio/mp3", tmpDir: dir }));
+  setAudioTranscriberForTest(() => "ثلاجة");
+  setOffersForTest(TEST_OFFERS);
+
+  const res = await processIncomingMedia({
+    mediaInfo: { url: "http://example.com/a", mimeType: "audio/mp3" },
+    msgType: "audio",
+    lang: "dzl",
+    key: "k-audio",
+    reqId: "req-audio",
+  });
+
+  assert.strictEqual(res.path, "audio");
+  assert.strictEqual(res.userText, "ثلاجة");
+  const reply = tryDirectOfferAnswer(res.userText, [], "dzl", "k-audio");
+  assert.ok(reply.includes("FR-1"));
+
+  setAudioDownloaderForTest(null);
+  setAudioTranscriberForTest(null);
+  try {
+    fs.rmSync(dir, { recursive: true, force: true });
+  } catch {}
+})();
+
+await (async function testImageMediaRoutesToVision() {
+  setOffersForTest(TEST_OFFERS);
+  setMediaFetcherForTest(() => ({ buffer: Buffer.from("img"), mimeType: "image/jpeg" }));
+  setVisionAnalyzerForTest(() => ({
+    category: "tv",
+    brand: "TCL",
+    size_inches: 55,
+    capacity_liters: null,
+    confidence: 0.9,
+  }));
+
+  const res = await processIncomingMedia({
+    mediaInfo: { url: "http://example.com/pic.jpg", mimeType: "image/jpeg" },
+    msgType: "image",
+    lang: "dzl",
+    key: "k-img",
+    reqId: "req-img",
+  });
+
+  assert.strictEqual(res.path, "image");
+  assert.ok(res.reply);
+
+  setMediaFetcherForTest(null);
+  setVisionAnalyzerForTest(ORIGINAL_VISION_ANALYZER);
+})();
+
+await (async function testOtherMediaSkipsVision() {
+  let visionCalled = false;
+  setVisionAnalyzerForTest(() => {
+    visionCalled = true;
+    return {};
+  });
+
+  const res = await processIncomingMedia({
+    mediaInfo: { url: "http://example.com/file.pdf", mimeType: "application/pdf" },
+    msgType: "document",
+    lang: "dzl",
+    key: "k-doc",
+    reqId: "req-doc",
+  });
+
+  assert.strictEqual(res.path, "other");
+  assert.ok(res.reply.includes("I received a file"));
+  assert.strictEqual(visionCalled, false);
+
+  setVisionAnalyzerForTest(ORIGINAL_VISION_ANALYZER);
 })();
 
 await (async function testWebsiteCatalogTvRanking() {
