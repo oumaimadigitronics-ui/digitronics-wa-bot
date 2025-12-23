@@ -3,9 +3,11 @@ import express from "express";
 import crypto from "crypto";
 import fs from "fs";
 import path from "path";
+import os from "os";
 import http from "http";
 import https from "https";
 import assert from "assert";
+import axios from "axios";
 import { fileURLToPath } from "url";
 import OpenAI from "openai";
 
@@ -609,6 +611,26 @@ function extractMediaFromBody(body) {
   return null;
 }
 
+function extractMessageType(body) {
+  const b = body || {};
+  const p = [
+    ["type"],
+    ["message_type"],
+    ["messageType"],
+    ["data", "type"],
+    ["data", "message_type"],
+    ["data", "messageType"],
+  ];
+  for (let i = 0; i < p.length; i += 1) {
+    const v = safeGet(b, p[i]);
+    if (v !== undefined && v !== null) {
+      const t = String(v || "").trim().toLowerCase();
+      if (t) return t;
+    }
+  }
+  return null;
+}
+
 function normalizePhone(raw) {
   if (raw === null || raw === undefined) return null;
   let s = arabicIndicToAsciiDigits(String(raw)).trim();
@@ -788,6 +810,7 @@ function normalizeIncoming(body, req) {
     phone: phone || "unknown",
     text: String(textRaw || "").trim(),
     media,
+    type: extractMessageType(b),
   };
 }
 
@@ -1965,6 +1988,64 @@ async function downloadMediaBuffer(mediaInput) {
     mimeType: m.mimeType || ct || "application/octet-stream",
     filename: m.filename || null,
   };
+}
+
+function isAudioMime(mime) {
+  const m = String(mime || "").toLowerCase();
+  return m.startsWith("audio/");
+}
+
+function extFromAudioMime(mime) {
+  const m = String(mime || "").toLowerCase();
+  if (m.indexOf("audio/ogg") === 0 || m.indexOf("audio/opus") === 0) return ".ogg";
+  if (m.indexOf("audio/mpeg") === 0 || m.indexOf("audio/mp3") === 0) return ".mp3";
+  if (m.indexOf("audio/mp4") === 0 || m.indexOf("audio/aac") === 0) return ".m4a";
+  return ".mp3";
+}
+
+async function downloadAudioBuffer(mediaInput, reqId) {
+  const m = mediaInput || {};
+  const baseUrl = String(CFG.wanotifierMediaUrl || "").replace(/\/$/, "");
+  const url = m.url || (m.id && baseUrl ? `${baseUrl}/${m.id}` : "");
+  if (!url) throw new Error("audio_url_missing");
+
+  const resp = await axios.get(url, { responseType: "arraybuffer" });
+  const buf = Buffer.isBuffer(resp.data) ? resp.data : Buffer.from(resp.data);
+  const ctRaw = (resp.headers && (resp.headers["content-type"] || resp.headers["Content-Type"])) || "";
+  const mimeType = m.mimeType || String(ctRaw || "").trim() || "application/octet-stream";
+
+  console.log(
+    JSON.stringify({
+      level: "info",
+      msg: "audio_download",
+      sizeBytes: buf.length,
+      contentType: mimeType,
+      reqId,
+    })
+  );
+
+  return { buffer: buf, mimeType, filename: m.filename || null };
+}
+
+async function transcribeAudio(buffer, mimeType) {
+  const mime = String(mimeType || "").toLowerCase();
+  const ext = extFromAudioMime(mime);
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "wanote-"));
+  const tmpFile = path.join(dir, `audio${ext}`);
+
+  await fs.promises.writeFile(tmpFile, buffer);
+  try {
+    const resp = await getOpenAIClient().audio.transcriptions.create({
+      file: fs.createReadStream(tmpFile),
+      model: "gpt-4o-transcribe",
+      response_format: "text",
+    });
+    return String(resp || "").trim();
+  } finally {
+    try {
+      fs.rmSync(dir, { recursive: true, force: true });
+    } catch {}
+  }
 }
 
 function parseVisionJson(rawText) {
@@ -3863,7 +3944,30 @@ app.post("/wanotifier", async (req, res) => {
     const incoming = normalizeIncoming(req.body || {}, req);
     const key = incoming.key;
     const phone = incoming.phone;
-    const userTextRaw = String(incoming.text || "").slice(0, 2000);
+    let userTextRaw = String(incoming.text || "").slice(0, 2000);
+    const mediaInfo = normalizeMediaInput(incoming.media);
+    const msgType = String(incoming.type || "").toLowerCase();
+
+    const audioLikely = Boolean(msgType === "audio" || msgType === "voice" || (mediaInfo && isAudioMime(mediaInfo.mimeType)));
+
+    if (audioLikely && mediaInfo) {
+      try {
+        const audio = await downloadAudioBuffer(mediaInfo, reqId);
+        const transcriptText = await transcribeAudio(audio.buffer, audio.mimeType);
+        if (!transcriptText) throw new Error("transcription_empty");
+
+        userTextRaw = String(transcriptText || "").slice(0, 2000);
+        const preview = userTextRaw.slice(0, 120);
+        console.log(JSON.stringify({ level: "info", msg: "audio_transcribed", reqId, textPreview: preview }));
+      } catch (e) {
+        const reply = "I couldn’t read the voice note. Please type your request.";
+        memory.push(key, "assistant", reply);
+        resetStrikes(key);
+        console.error(JSON.stringify({ level: "error", msg: "audio_failed", reqId, error: (e && e.message) || String(e) }));
+        return res.json({ ok: true, reply });
+      }
+    }
+
     const lang = detectLang(userTextRaw);
     const ip = String(req.ip || "");
 
@@ -3886,8 +3990,7 @@ app.post("/wanotifier", async (req, res) => {
       return res.json({ ok: true, reply });
     }
 
-    const mediaInfo = normalizeMediaInput(incoming.media);
-    if (mediaInfo) {
+    if (mediaInfo && !audioLikely) {
       try {
         const visionReply = await handleVisionMedia(mediaInfo, lang, key);
         const reply = shortenNoQuestion(visionReply.reply, 520);
@@ -4175,6 +4278,8 @@ export {
   setVisionAnalyzerForTest,
   setMediaFetcherForTest,
   handleVisionMediaForTest,
+  isAudioMime,
+  extFromAudioMime,
 };
 
 function runSelfTests() {
