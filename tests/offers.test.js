@@ -14,6 +14,8 @@ import {
   setMediaFetcherForTest,
   setVisionAnalyzerForTest,
   setWcFetchJsonForTest,
+  isAudioMime,
+  extFromAudioMime,
   stripQuestions,
   tryDirectOfferAnswer,
   tryWebsiteCatalogAnswer,
@@ -205,6 +207,13 @@ await (async function testWebsiteCatalogCuisiniereAliases() {
   assert.ok(!bad.ok);
   const normalizedBad = normalizeVisionResult(null);
   assert.strictEqual(normalizedBad.confidence, 0);
+})();
+
+(function testAudioMimeHelpers() {
+  assert.ok(isAudioMime("audio/ogg"));
+  assert.strictEqual(extFromAudioMime("audio/aac"), ".m4a");
+  assert.strictEqual(extFromAudioMime("audio/mpeg"), ".mp3");
+  assert.strictEqual(extFromAudioMime("unknown/type"), ".mp3");
 })();
 
 await (async function testVisionRoutingUsesOffers() {
