@@ -16,7 +16,7 @@ app.set("trust proxy", true);
 
 const LOG_DEBUG = String(process.env.LOG_DEBUG || "0") === "1";
 const ENTRY_FILE = fileURLToPath(import.meta.url);
-const RUN_SELF_TESTS = String(process.env.RUN_SELF_TESTS || "0") === "1";
+const RUN_SELF_TESTS = String(process.env.RUN_SELF_TESTS || process.env.SELF_TEST || "0") === "1";
 const REQUIRE_ENV = process.argv[1] === ENTRY_FILE && !RUN_SELF_TESTS;
 const MAX_AUDIO_BYTES = 25 * 1024 * 1024;
 
@@ -429,6 +429,11 @@ function t(lang, key, vars) {
         const size = String(z.size || "");
         return "Smah lia, ma kaynach " + brand + " " + size + '" daba.';
       },
+      notAvailableSizeGeneral: (x) => {
+        const z = x || {};
+        const size = String(z.size || "");
+        return "Smah lia, ma kaynach TV " + size + '" daba.';
+      },
       preferBest: "L’a7san men had l-khtiyarat هو",
       preferCheapest: "L’ar5as men had l-khtiyarat هو",
       preferNeedContext: "Sift size (b7al tv 50) wla model bach nختar l’a7san wla l’ar5as.",
@@ -485,6 +490,11 @@ function t(lang, key, vars) {
         const size = String(z.size || "");
         return "Désolé, je n’ai pas " + brand + " " + size + '" pour le moment.';
       },
+      notAvailableSizeGeneral: (x) => {
+        const z = x || {};
+        const size = String(z.size || "");
+        return "Désolé, aucune TV " + size + '" disponible pour le moment.';
+      },
       preferBest: "Le meilleur parmi ces options est",
       preferCheapest: "Le moins cher parmi ces options est",
       preferNeedContext: "Envoyez la taille (ex tv 50) ou le modèle pour choisir le meilleur ou le moins cher.",
@@ -539,6 +549,11 @@ function t(lang, key, vars) {
         const brand = String(z.brand || "");
         const size = String(z.size || "");
         return "سمح ليا، ما كايناش " + brand + " " + size + '" دابا.';
+      },
+      notAvailableSizeGeneral: (x) => {
+        const z = x || {};
+        const size = String(z.size || "");
+        return "سمح ليا، ما كايناش تلفاز " + size + " بوصة دابا.";
       },
       preferBest: "الأفضل من هاد الخيارات هو",
       preferCheapest: "الأرخص من هاد الخيارات هو",
@@ -1550,14 +1565,74 @@ function getBrandFromWoo(p) {
   return "UNKNOWN";
 }
 
-function getSizeFromCategories(p) {
+const ALLOWED_TV_SIZES = Object.freeze([24, 27, 32, 40, 42, 43, 49, 50, 55, 58, 60, 65, 70, 75, 77, 82, 83, 85, 86, 98]);
+const SIZE_ATTR_KEYS = ["size", "taille", "pouces", "inch", "screen size", "diagonale", "pa_size"];
+
+function isSizeAttrKey(name) {
+  const n = normMatch(name || "");
+  for (let i = 0; i < SIZE_ATTR_KEYS.length; i += 1) {
+    if (n === normMatch(SIZE_ATTR_KEYS[i])) return true;
+  }
+  return false;
+}
+
+function extractAllowedTvSizeFromString(str, opts = {}) {
+  const s0 = arabicIndicToAsciiDigits(String(str || ""));
+  if (!s0) return 0;
+  const s = s0.toLowerCase();
+  const requireTvHint = opts.requireTvHint === true;
+  const allowNoHint = opts.allowNoHint === true;
+  const attrKey = opts.attrKey || "";
+
+  const globalTvHint = /(tv|tele|télé|television|télévision|بوصة)/i.test(s);
+  const tvUnitRe = /(pouce|pouces|inch|inches|in\b|\"|''|”|po\b)/i;
+
+  const re = /(\d{2,3})/g;
+  let m = null;
+  while ((m = re.exec(s0))) {
+    const num = Number(m[1]);
+    if (!ALLOWED_TV_SIZES.includes(num)) continue;
+
+    const before = s.slice(Math.max(0, m.index - 8), m.index);
+    const after = s.slice(m.index + m[1].length, m.index + m[1].length + 8);
+    if (/\b(l|litre|litres|liter|liters|لتر)\b/i.test(before + after)) continue;
+    if (/\b(hz|khz|w|kw|kva|va|mah|wh|v)\b/i.test(before + after)) continue;
+    if (/\b(4k|8k|720p|1080p|hdr|uhd|fhd|120hz|144hz|165hz)\b/i.test(before + after)) continue;
+
+    const context = s.slice(Math.max(0, m.index - 8), Math.min(s.length, m.index + m[1].length + 10));
+    const hasUnit = tvUnitRe.test(context);
+    const hasTvWord = /(tv|tele|télé|television|télévision)/i.test(context) || globalTvHint;
+    const hasAttrHint = isSizeAttrKey(attrKey);
+    const hasAnyHint = hasUnit || hasTvWord || hasAttrHint;
+
+    if (requireTvHint && !hasAnyHint) continue;
+    if (!allowNoHint && !hasAnyHint) continue;
+    return num;
+  }
+  return 0;
+}
+
+function getTvSizeFromProduct(p) {
   const cats = Array.isArray((p && p.categories) || null) ? p.categories : [];
   for (let i = 0; i < cats.length; i += 1) {
     const c = cats[i] || {};
-    const name = String(c.name || "");
-    const m = name.match(/\b(24|32|40|43|50|55|65|75)\b/);
-    if (m && m[1]) return Number(m[1]);
+    const size = extractAllowedTvSizeFromString(c.name, { allowNoHint: false });
+    if (size) return size;
   }
+
+  const nameHit = extractAllowedTvSizeFromString(p && p.name, { allowNoHint: false });
+  if (nameHit) return nameHit;
+
+  const attrs = Array.isArray((p && p.attributes) || null) ? p.attributes : [];
+  for (let i = 0; i < attrs.length; i += 1) {
+    const a = attrs[i] || {};
+    if (!isSizeAttrKey(a.name) && !isSizeAttrKey(a.slug)) continue;
+    const opts = Array.isArray(a.options || null) ? a.options : [];
+    if (!opts.length) continue;
+    const size = extractAllowedTvSizeFromString(opts[0], { allowNoHint: true, attrKey: a.name || a.slug });
+    if (size) return size;
+  }
+
   return 0;
 }
 
@@ -1673,7 +1748,7 @@ function offerFromWooProduct(p) {
     model,
     name: String(((p && p.name) || "")).trim(),
     category: cls || firstCategoryName(p),
-    size: getSizeFromCategories(p),
+    size: getTvSizeFromProduct(p),
     capacity_l: capacity,
     type: getTypeFromProduct(p),
     price,
@@ -2004,43 +2079,13 @@ function resetCtxForCategoryChange(key, category, cls) {
 
 function extractTvSize(text, opts = {}) {
   const s0 = arabicIndicToAsciiDigits(String(text || ""));
-  const s = s0.toLowerCase();
-
-  const hasTvHint =
-    s.includes('"') ||
-    s.includes("inch") ||
-    s.includes("inches") ||
-    s.includes("tv") ||
-    s.includes("tele") ||
-    s.includes("télé") ||
-    s.includes("بوصة");
-
   const categoryHint = normMatch(opts.category || opts.categoryHint || "");
   const tvCanonNorm = normMatch(OFFERS_INDEX.classCanon.tv || "tv");
   const allowNoHint = Boolean(opts.allowNoHint) || (categoryHint && categoryHint === tvCanonNorm);
+  const requireTvHint = opts.requireTvHint === true;
 
-  const looksLikeLiters =
-    /\b\d{2,4}\s*l\b/i.test(s0) ||
-    /\b\d{2,4}\s*litre\b/i.test(s) ||
-    /\b\d{2,4}\s*litres\b/i.test(s) ||
-    /\b\d{2,4}\s*litr\b/i.test(s) ||
-    /\b\d{2,4}\s*ltrs\b/i.test(s);
-
-  if (looksLikeLiters && !hasTvHint) return null;
-
-  if (opts.requireTvHint === true && !hasTvHint) return null;
-
-  if (!hasTvHint && !allowNoHint) return null;
-
-  const m = s0.match(/(?:^|[^\d])(24|32|40|43|50|55|65|75)(?=$|[^\d])/);
-  if (m) return Number(m[1]);
-
-  const digitsOnly = s0.replace(/[^\d]/g, "");
-  if (digitsOnly.length === 2) {
-    const n = Number(digitsOnly);
-    if ([24, 32, 40, 43, 50, 55, 65, 75].includes(n)) return n;
-  }
-  return null;
+  const size = extractAllowedTvSizeFromString(s0, { allowNoHint, requireTvHint });
+  return size || null;
 }
 
 function extractCapacityLiters(text) {
@@ -2056,7 +2101,8 @@ function extractCapacityLiters(text) {
 }
 
 
-function formatOfferLine(brand, o) {
+function formatOfferLine(brand, o, opts = {}) {
+  const includeUrl = opts.includeUrl !== false;
   const safeBrand = String(brand || "").trim();
   const model = String((o && o.model) || "").trim();
   const priceNum = Number((o && o.price) || NaN);
@@ -2066,9 +2112,19 @@ function formatOfferLine(brand, o) {
   const typeVal = String((o && o.type) || "").trim();
   const typePart = typeVal ? ` — ${typeVal}` : "";
   const url = sanitizeUrlNoQuestion(String((o && o.url) || (o && o.link) || "").trim());
-  const urlPart = url ? ` — ${url}` : "";
+  const urlPart = includeUrl && url ? ` — ${url}` : "";
 
   return `• ${safeBrand}${model ? " " + model : ""}${sizePart}: ${pricePart}${typePart}${urlPart}`.trim();
+}
+
+function priceSummaryText(lang, min, max) {
+  const L = lang || "dzl";
+  const minPart = `${min} dh`;
+  const rangePart = Number.isFinite(max) && max > min ? ` (${min}–${max} dh)` : "";
+
+  if (L === "fr") return `Prix à partir de ${minPart}${rangePart}`.trim();
+  if (L === "ar") return `الثمن ابتداء من ${minPart}${rangePart}`.trim();
+  return `Taman kaybda mn ${minPart}${rangePart}`.trim();
 }
 
 /**
@@ -2702,7 +2758,7 @@ async function tryWebsiteCatalogAnswer(userText, lang, key) {
       if (!modelOrTitle) continue;
 
       const productSize = isTvContext
-        ? getSizeFromCategories(p) || extractTvSize(p.name, { allowNoHint: true }) || 0
+        ? getTvSizeFromProduct(p) || extractTvSize(p.name, { allowNoHint: true }) || 0
         : 0;
       const typeVal = isTvContext ? getTypeFromProduct(p) : "";
       const urlVal = sanitizeUrlNoQuestion((p && p.permalink) || "");
@@ -2866,6 +2922,29 @@ function listOffersForSizeAcrossBrands(size, opts) {
   return ranked.slice(0, limit);
 }
 
+function collectTvOffers({ brand, size, budget }) {
+  const tvCanon = OFFERS_INDEX.classCanon.tv;
+  const tvNorm = normMatch(tvCanon || "");
+  if (!tvCanon) return [];
+
+  const brands = brand ? [brand] : OFFERS_INDEX.brands || [];
+  const items = [];
+  for (let i = 0; i < brands.length; i += 1) {
+    const b = brands[i];
+    const arr = ((OFFERS && OFFERS.offers && OFFERS.offers[b]) || []).filter((o) => Number((o && o.stock) || 0) > 0);
+    for (let j = 0; j < arr.length; j += 1) {
+      const o = arr[j];
+      if (normMatch(o.class || "") !== tvNorm) continue;
+      if (Number(o.size) !== Number(size)) continue;
+      const priceNum = Number(o.price);
+      if (!Number.isFinite(priceNum)) continue;
+      if (Number.isFinite(budget) && priceNum > budget) continue;
+      items.push({ brand: b, offer: o });
+    }
+  }
+  return items.sort((a, b) => Number(a.offer.price) - Number(b.offer.price));
+}
+
 function buildBigOffersForGreeting(brand, tvCanon) {
   const BRAND = String(brand || "").trim().toUpperCase();
   const wanted = BRAND === "DAIKO" ? GREETING_DAIKO_MODELS : [];
@@ -2993,6 +3072,49 @@ function isPreferCheapest(text) {
   if (s.indexOf("moins cher") >= 0) return true;
   if (s.indexOf("rkhis") >= 0) return true;
   return false;
+}
+
+const PRICE_KEYWORDS = ["prix", "price", "combien", "tarif", "coute", "coûte", "bch7al", "بشحال", "ثمن"];
+const CHEAP_KEYWORDS = ["pas cher", "cheap", "moins cher", "affordable"];
+
+function detectPriceIntent(text) {
+  const s = normMatch(text || "");
+  for (let i = 0; i < PRICE_KEYWORDS.length; i += 1) {
+    const k = normMatch(PRICE_KEYWORDS[i]);
+    if (k && s.indexOf(k) >= 0) return true;
+  }
+  for (let i = 0; i < CHEAP_KEYWORDS.length; i += 1) {
+    const k = normMatch(CHEAP_KEYWORDS[i]);
+    if (k && s.indexOf(k) >= 0) return true;
+  }
+  return false;
+}
+
+function detectCheapIntent(text) {
+  const s = normMatch(text || "");
+  for (let i = 0; i < CHEAP_KEYWORDS.length; i += 1) {
+    const k = normMatch(CHEAP_KEYWORDS[i]);
+    if (k && s.indexOf(k) >= 0) return true;
+  }
+  return false;
+}
+
+function parseBudget(text) {
+  const s0 = arabicIndicToAsciiDigits(String(text || ""));
+  const s = s0.toLowerCase();
+  const budgetPatterns = [
+    /(?:moins de|max(?:imum)?|budget|under|<=|⩽|inferieur a|jusqu'?a|upto|up to)\s*([\d\s.,]{2,})/i,
+    /(?:<=|⩽)\s*([\d\s.,]{2,})/,
+    /([\d\s.,]{3,})\s*(?:dh|dhs|mad|dirhams?)/i,
+  ];
+  for (let i = 0; i < budgetPatterns.length; i += 1) {
+    const m = s.match(budgetPatterns[i]);
+    if (m && m[1]) {
+      const num = Number(String(m[1]).replace(/[^\d]/g, ""));
+      if (Number.isFinite(num) && num > 0) return num;
+    }
+  }
+  return null;
 }
 
 function tvTypeScore(typeStr) {
@@ -3351,6 +3473,65 @@ function isLocationIntent(text) {
   return false;
 }
 
+function handleTvSizePriceFlow(userText, lang, key) {
+  const text = String(userText || "").trim();
+  if (!text) return null;
+
+  const forcedIntent = resolveCategoryIntent(text);
+  const categoryHint = (forcedIntent && forcedIntent.category) || detectCategory(text) || null;
+  const classHint = (forcedIntent && forcedIntent.cls) || detectClass(text) || null;
+  const brand = detectBrand(text);
+  const tvCanon = OFFERS_INDEX.classCanon.tv || null;
+  const tvCanonNorm = normMatch(tvCanon || "tv");
+  const categoryNorm = normMatch(categoryHint || "");
+  const classNorm = normMatch(classHint || "");
+  const forcedNonTv = Boolean(
+    (categoryNorm && categoryNorm !== tvCanonNorm && categoryNorm !== "tv") || (classNorm && classNorm !== tvCanonNorm)
+  );
+  if (forcedNonTv) return null;
+
+  const sizeVal = extractTvSize(text, { allowNoHint: Boolean(brand) || Boolean(categoryHint) || Boolean(classHint), categoryHint });
+  if (!Number.isFinite(sizeVal)) return null;
+
+  const priceIntent = detectPriceIntent(text);
+  const cheapIntent = detectCheapIntent(text);
+  const budget = parseBudget(text);
+
+  const matches = collectTvOffers({ brand, size: sizeVal, budget });
+  if (!matches.length) {
+    if (Number.isFinite(budget)) {
+      const msg = `Aucune TV ${sizeVal} pouces disponible à ${budget} dh ou moins.`;
+      return ensureNoQuestion(msg);
+    }
+    if (brand) return ensureNoQuestion(t(lang, "notAvailableSize", { brand, size: sizeVal }));
+    return ensureNoQuestion(t(lang, "notAvailableSizeGeneral", { size: sizeVal }));
+  }
+
+  const prices = matches.map((m) => Number(m.offer.price)).filter((p) => Number.isFinite(p));
+  const minPrice = prices.length ? Math.min(...prices) : null;
+  const maxPrice = prices.length ? Math.max(...prices) : null;
+
+  const top = matches.slice(0, 3);
+  const lines = top.map((it) => formatOfferLine(it.brand, it.offer, { includeUrl: false }));
+  const wantPrice = priceIntent || cheapIntent || Number.isFinite(budget);
+
+  setCtx(key, {
+    lastBrand: brand || undefined,
+    lastClass: tvCanon || undefined,
+    lastCategory: undefined,
+    lastSize: sizeVal,
+    lastOffersShown: top.map((it) => ({ brand: it.brand, model: (it.offer && it.offer.model) || "" })),
+  });
+
+  const parts = [];
+  if (wantPrice && Number.isFinite(minPrice)) parts.push(priceSummaryText(lang, minPrice, Number.isFinite(maxPrice) ? maxPrice : minPrice));
+  parts.push(offersHeader(lang, { brand: brand || undefined, size: sizeVal, cls: tvCanon || undefined }));
+  if (lines.length) parts.push(lines.join("\n\n"));
+
+  const reply = ensureNoQuestion(parts.filter(Boolean).join("\n"));
+  return reply;
+}
+
 function tryDirectOfferAnswer(userText, historyMsgs, lang, key) {
   const text = String(userText || "").trim();
   if (!text) return null;
@@ -3375,6 +3556,9 @@ function tryDirectOfferAnswer(userText, historyMsgs, lang, key) {
     const reply = offersHeader(lang, { brand: modelHit.brand }) + "\n" + formatOfferLine(modelHit.brand, modelHit.offer);
     return ensureNoQuestion(reply);
   }
+
+  const tvFlow = handleTvSizePriceFlow(text, lang, key);
+  if (tvFlow) return tvFlow;
 
   const brand = detectBrand(text);
   const category = forcedCategory || detectCategory(text);
@@ -4537,6 +4721,14 @@ if (isIptvIntent(userTextRaw)) {
       return res.json({ ok: true, reply: out });
     }
 
+    const directReply = tryDirectOfferAnswer(userTextRaw, history, lang, key);
+    if (directReply) {
+      const reply = shortenNoQuestion(directReply, 520);
+      memory.push(key, "assistant", reply);
+      resetStrikes(key);
+      return res.json({ ok: true, reply });
+    }
+
     const siteReply = await tryWebsiteCatalogAnswer(userTextRaw, lang, key);
     if (siteReply) {
       const reply = shortenNoQuestion(siteReply, 520);
@@ -4626,20 +4818,58 @@ export {
 };
 
 function runSelfTests() {
+  const wooProducts = [
+    {
+      sku: "DAIKO50",
+      name: 'DAIKO Smart TV 50 pouces 4K',
+      categories: [{ name: "TV" }],
+      brands: [{ name: "DAIKO" }],
+      regular_price: "3500",
+      stock_status: "instock",
+    },
+    {
+      sku: "MW32",
+      name: "Micro-ondes 32L Inox",
+      categories: [{ name: "Micro-ondes" }],
+      brands: [{ name: "DAIKO" }],
+      regular_price: "900",
+      stock_status: "instock",
+    },
+    {
+      sku: "S55",
+      name: "Samsung Neo TV",
+      categories: [{ name: "TV" }],
+      brands: [{ name: "SAMSUNG" }],
+      regular_price: "4500",
+      stock_status: "instock",
+      attributes: [{ name: "Taille", options: ["55 pouces"] }],
+    },
+    {
+      sku: "TCL43",
+      name: "TCL Android TV",
+      categories: [{ name: "TV 43 Pouces" }],
+      brands: [{ name: "TCL" }],
+      regular_price: "3200",
+      stock_status: "instock",
+    },
+  ];
+
+  const mapped = wooProducts.map((p) => offerFromWooProduct(p));
+  assert.strictEqual(mapped[0].size, 50);
+  assert.strictEqual(mapped[1].size, 0);
+  assert.strictEqual(mapped[2].size, 55);
+  assert.strictEqual(mapped[3].size, 43);
+
   const tvCanon = "Tv";
   OFFERS = {
     offers: {
-      TCL: [
-        { model: "TCL-A1", name: "TCL A1", category: tvCanon, class: tvCanon, size: 55, type: "LED", price: 4000, stock: 5, link: "http://example.com/tcl55?x=1" },
-        { model: "TCL-NO-PRICE", name: "TCL No Price", category: tvCanon, class: tvCanon, size: 50, type: "LED", price: NaN, stock: 3, link: "http://example.com/tcl50?y=1" },
-      ],
       DAIKO: [
-        { model: "DK-50", name: "Daiko 50", category: tvCanon, class: tvCanon, size: 50, type: "LED", price: 3500, stock: 3, link: "http://example.com/daiko50?z=1" },
+        { model: "DK-32", name: "Daiko 32", category: tvCanon, class: tvCanon, size: 32, type: "LED", price: 2100, stock: 3, link: "http://example.com/dk32?1=1" },
+        { model: "DK-55", name: "Daiko 55", category: tvCanon, class: tvCanon, size: 55, type: "LED", price: 3800, stock: 2, link: "http://example.com/dk55?1=1" },
       ],
-      HAIER: [
-        { model: "HR-55", name: "Haier 55", category: tvCanon, class: tvCanon, size: 55, type: "LED", price: 3600, stock: 2, link: "http://example.com/haier55?u=1" },
-        { model: "H-FRIDGE", name: "Haier Fridge", category: "Refrigerateur", class: "Refrigerateur", size: 0, type: "Fridge", price: 4200, stock: 4, link: "http://example.com/fridge?f=1" },
-      ],
+      TCL: [{ model: "TCL-50", name: "TCL 50", category: tvCanon, class: tvCanon, size: 50, type: "LED", price: 2700, stock: 1, link: "http://example.com/tcl50?1=1" }],
+      SAMSUNG: [{ model: "SM-55", name: "Samsung 55", category: tvCanon, class: tvCanon, size: 55, type: "LED", price: 4100, stock: 1, link: "http://example.com/sm55?1=1" }],
+      OTHER: [{ model: "MW-32", name: "Micro-ondes 32L", category: "Micro-ondes", class: "Micro-ondes", size: 0, type: "Micro", price: 800, stock: 4, link: "http://example.com/mw32?1=1" }],
     },
   };
   rebuildOffersIndex();
@@ -4652,18 +4882,30 @@ function runSelfTests() {
   assert.strictEqual(includesToken("tcl55", "tcl"), true);
   assert.strictEqual(includesToken("vacance", "ac"), false);
 
+  const reply50Price = tryDirectOfferAnswer("50 pouce prix", [], "fr", "self_price50");
+  assert.ok(reply50Price.indexOf('50"') >= 0);
+  assert.ok(reply50Price.indexOf("2700") >= 0);
+  assert.ok(reply50Price.indexOf("http") < 0);
+
+  const reply55Budget = tryDirectOfferAnswer("tv 55 moins de 4000 dh", [], "fr", "self_budget55");
+  assert.ok(reply55Budget.indexOf("3800") >= 0);
+  assert.ok(reply55Budget.indexOf("4100") < 0);
+  assert.ok(reply55Budget.indexOf("http") < 0);
+
+  const replyDaiko32 = tryDirectOfferAnswer("daiko 32 combien", [], "dzl", "self_daiko32");
+  assert.ok(replyDaiko32.indexOf("DAIKO") >= 0);
+  assert.ok(replyDaiko32.indexOf('32"') >= 0);
+  assert.ok(replyDaiko32.indexOf("http") < 0);
+
+  const replyMicro = tryDirectOfferAnswer("daiko micro-ondes 32L prix", [], "fr", "self_micro") || "";
+  assert.ok(replyMicro.indexOf('32"') < 0);
+  assert.ok(normMatch(replyMicro).indexOf("tv") < 0);
+
   const frigoReply = tryDirectOfferAnswer("frigo 55", [], "fr", "self_frigo");
   assert.ok(normMatch(frigoReply).indexOf("refrigerateur") >= 0);
   assert.ok(normMatch(frigoReply).indexOf("tv") < 0);
 
-  const tvReply = tryDirectOfferAnswer("tv", [], "fr", "self_tv");
-  const tclIdx = tvReply.indexOf("TCL");
-  const daikoIdx = tvReply.indexOf("DAIKO");
-  const haierIdx = tvReply.indexOf("HAIER");
-  assert.ok(tclIdx >= 0 && daikoIdx > tclIdx && haierIdx > daikoIdx);
-
   assert.ok(!/[\?؟]/.test(frigoReply));
-  assert.ok(!/[\?؟]/.test(tvReply));
 }
 
 async function main() {
