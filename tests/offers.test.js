@@ -11,6 +11,8 @@ import {
   limitOffersForPromptPayload,
   rankOffers,
   resolveCategoryIntent,
+  buildConversationKey,
+  normalizeIncoming,
   normalizeVisionResult,
   parseVisionJson,
   setOffersForTest,
@@ -27,6 +29,8 @@ import {
   tryWebsiteCatalogAnswer,
   processIncomingMedia,
   maybeSendInitialGreeting,
+  handleGreetingMessage,
+  isGreetingLikeOpener,
   extractMediaMetaFromBody,
   getCtxForTest,
   setCtxForTest,
@@ -157,6 +161,22 @@ function countQuestions(text) {
   const ctx = getCtxForTest(key);
   assert.strictEqual(ctx.greeted, true);
   assert.ok(ctx.greetedAt);
+})();
+
+(function testGreetingLikeOpenerTriggersGreeting() {
+  const key = "greet-like-opener";
+  const opener = "Hello! Can I get more info on this?";
+  const reply = handleGreetingMessage({ key, lang: "fr", text: opener });
+  assert.ok(reply);
+  assert.ok(reply.includes("Comment puis-je vous aider aujourd’hui ?"));
+  const ctx = getCtxForTest(key);
+  assert.strictEqual(ctx.hasGreeted, true);
+  const again = handleGreetingMessage({ key, lang: "fr", text: opener });
+  assert.strictEqual(again, null);
+})();
+
+(function testGreetingLikeOpenerArabicMatch() {
+  assert.ok(isGreetingLikeOpener("مرحبًا! هل يمكنني الحصول على مزيد من المعلومات حول هذا؟"));
 })();
 
 (function testForcedIntentResolver() {
@@ -399,6 +419,35 @@ await (async function testOtherMediaSkipsVision() {
   assert.strictEqual(visionCalled, false);
 
   setVisionAnalyzerForTest(ORIGINAL_VISION_ANALYZER);
+})();
+
+(function testConversationKeyUniquenessAndOrder() {
+  const keyJid = buildConversationKey({ remoteJid: "123@wa" });
+  const keyFrom = buildConversationKey({ from: "user-a" });
+  const keySender = buildConversationKey({ sender: "user-b" });
+  const keyPhone = buildConversationKey({ phone: "+21260000000" });
+  const keyFallback1 = buildConversationKey({}, { headers: {} }, {});
+  const keyFallback2 = buildConversationKey({}, { headers: {} }, {});
+
+  assert.ok(keyJid.startsWith("jid:"));
+  assert.ok(keyFrom.startsWith("from:"));
+  assert.ok(keySender.startsWith("sender:"));
+  assert.ok(keyPhone.startsWith("phone:"));
+  assert.notStrictEqual(keyFrom, keySender);
+  assert.strictEqual(keyFallback1, keyFallback2);
+  assert.notStrictEqual(keyFallback1, keyFrom);
+})();
+
+(function testNoCrossChatBleed() {
+  setOffersForTest({
+    TVBRAND: [{ model: "TV-1", class: "Tv", category: "Tv", size: 50, price: 1000, stock: 5 }],
+    FRIDGE: [{ model: "FR-1", class: "Refrigerateur", category: "Refrigerateur", price: 2000, stock: 3 }],
+  });
+
+  tryDirectOfferAnswer("tv 50", [], "fr", "chat-tv");
+  const fridgeReply = tryDirectOfferAnswer("Refrigerateur", [], "fr", "chat-fridge");
+  assert.ok(fridgeReply.toLowerCase().includes("fr-1"));
+  assert.ok(!fridgeReply.toLowerCase().includes("tv-1"));
 })();
 
 await (async function testWebsiteCatalogTvRanking() {
