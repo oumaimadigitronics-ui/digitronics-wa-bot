@@ -1246,6 +1246,10 @@ function getFetch() {
                   },
                 },
                 text: async () => text,
+                arrayBuffer: async () => {
+                  const ab = buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength);
+                  return ab;
+                },
                 json: async () => {
                   try {
                     return JSON.parse(text || "{}");
