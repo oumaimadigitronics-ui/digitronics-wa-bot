@@ -716,8 +716,18 @@ function looksLikeMediaOrEmpty(body) {
   return false;
 }
 
+const MAX_RATE_STORE_SIZE = 50000;
 const rateStore = new Map();
 const ipRateStore = new Map();
+
+function pruneMapSize(store, maxSize) {
+  const limit = Math.max(1000, Number(maxSize) || MAX_RATE_STORE_SIZE);
+  while (store.size > limit) {
+    const oldestKey = store.keys().next().value;
+    if (oldestKey === undefined) break;
+    store.delete(oldestKey);
+  }
+}
 
 function rateLimitOk(key, ip) {
   const now = Date.now();
@@ -729,6 +739,7 @@ function rateLimitOk(key, ip) {
   }
   entry.count += 1;
   rateStore.set(key, entry);
+  pruneMapSize(rateStore, MAX_RATE_STORE_SIZE);
 
   let ipOk = true;
   if (ip) {
@@ -739,6 +750,7 @@ function rateLimitOk(key, ip) {
     }
     ie.count += 1;
     ipRateStore.set(ip, ie);
+    pruneMapSize(ipRateStore, MAX_RATE_STORE_SIZE);
     ipOk = ie.count <= Math.max(10, CFG.rateMax * 3);
   }
 
@@ -1892,11 +1904,13 @@ function isGreeting(text) {
 }
 
 function isCallMeIntent(text) {
-  const s = normMatch(text);
+  const raw = String(text || "");
+  const s = normMatch(raw);
+  const words = s.split(/\s+/).filter(Boolean);
   if (s.indexOf("3ayet") >= 0) return true;
   if (s.indexOf("3ayt") >= 0) return true;
   if (s.indexOf("call me") >= 0) return true;
-  if (/\bcall\b/i.test(s)) return true;
+  if (words.includes("call")) return true;
   if (s.indexOf("t3ayet") >= 0) return true;
   if (s.indexOf("اتصل") >= 0) return true;
   if (s.indexOf("عيط") >= 0) return true;
@@ -1946,9 +1960,10 @@ function isSupportIntent(text) {
 
 function isBankTransferIntent(text) {
   const s = normMatch(text);
+  if (!s) return false;
   if (s.indexOf("virement") >= 0) return true;
   if (s.indexOf("bank transfer") >= 0) return true;
-  if (s.indexOf("transfer") >= 0) return true;
+  if (/\btransfer\b/.test(s) && (s.indexOf("bank") >= 0 || s.indexOf("banque") >= 0)) return true;
   if (s.indexOf("rib") >= 0) return true;
   if (s.indexOf("iban") >= 0) return true;
   if (s.indexOf("تحويل") >= 0) return true;
@@ -2317,6 +2332,61 @@ function tryDirectOfferAnswer(userText, historyMsgs, lang, key) {
   return null;
 }
 
+const MAX_OFFERS_FOR_PROMPT = 20;
+
+const OFFER_SCHEMA_HINT = {
+  description:
+    "Each offer has brand, model, price (dh), size (inches if TV), type, category, class, and optional link for photos when available.",
+};
+
+function trimOffersForPrompt(arr, opts) {
+  const o = opts || {};
+  const targetSize = Number(o.size);
+  const hasTargetSize = Number.isFinite(targetSize);
+  const scored = (Array.isArray(arr) ? arr : [])
+    .filter((x) => Number((x && x.stock) || 0) > 0)
+    .map((x) => {
+      const sizeNum = Number((x && x.size) || 0);
+      const sizeScore = hasTargetSize && Number.isFinite(sizeNum) ? Math.abs(sizeNum - targetSize) : Number.MAX_SAFE_INTEGER;
+      const priceScore = Number((x && x.price) || Number.MAX_SAFE_INTEGER);
+      const modelStr = String((x && x.model) || "");
+      return { offer: x, sizeScore, priceScore, modelStr };
+    })
+    .sort((a, b) => {
+      if (a.sizeScore !== b.sizeScore) return a.sizeScore - b.sizeScore;
+      if (a.priceScore !== b.priceScore) return a.priceScore - b.priceScore;
+      return a.modelStr.localeCompare(b.modelStr);
+    })
+    .map((x) => x.offer);
+
+  return scored.slice(0, MAX_OFFERS_FOR_PROMPT);
+}
+
+function limitOffersForPromptPayload(data) {
+  const src = data || {};
+  const meta = src.meta || {};
+
+  if (meta && meta.hint === "no_match") {
+    return { offers: { OFFER_SCHEMA: OFFER_SCHEMA_HINT }, meta };
+  }
+
+  const offersObj = src.offers || {};
+  const outOffers = {};
+  let remaining = MAX_OFFERS_FOR_PROMPT;
+
+  for (const brand of Object.keys(offersObj)) {
+    if (remaining <= 0) break;
+    const arr = Array.isArray(offersObj[brand]) ? offersObj[brand] : [];
+    const trimmed = trimOffersForPrompt(arr, { size: (src.meta && src.meta.size) || null }).slice(0, remaining);
+    if (trimmed.length) {
+      outOffers[brand] = trimmed;
+      remaining -= trimmed.length;
+    }
+  }
+
+  return { offers: outOffers, meta };
+}
+
 function buildOffersSubsetForPrompt(userText, historyMsgs, key) {
   const hist = Array.isArray(historyMsgs) ? historyMsgs : [];
   const parts = [String(userText || "")];
@@ -2327,8 +2397,8 @@ function buildOffersSubsetForPrompt(userText, historyMsgs, key) {
   const modelHit = detectModel(combined);
   if (modelHit) {
     const offers = {};
-    offers[modelHit.brand] = [modelHit.offer];
-    return { offers, meta: { model: (modelHit.offer && modelHit.offer.model) || "" } };
+    offers[modelHit.brand] = trimOffersForPrompt([modelHit.offer]);
+    return limitOffersForPromptPayload({ offers, meta: { model: (modelHit.offer && modelHit.offer.model) || "" } });
   }
 
   let brand = detectBrand(combined) || ctx.lastBrand || null;
@@ -2345,17 +2415,13 @@ function buildOffersSubsetForPrompt(userText, historyMsgs, key) {
     category = null;
   }
 
-  function cap(arr, n) {
-    return arr.slice(0, n);
-  }
-
   if (brand && cls) {
     const arr = ((OFFERS && OFFERS.offers && OFFERS.offers[brand]) || [])
       .filter((o) => Number((o && o.stock) || 0) > 0)
       .filter((o) => normMatch((o && o.class) || "") === normMatch(cls));
     const offers = {};
-    offers[brand] = cap(arr, 60);
-    return { offers, meta: { brand, class: cls, size: sizeVal || null } };
+    offers[brand] = trimOffersForPrompt(arr, { size: sizeVal });
+    return limitOffersForPromptPayload({ offers, meta: { brand, class: cls, size: sizeVal || null } });
   }
 
   if (brand && category) {
@@ -2363,30 +2429,25 @@ function buildOffersSubsetForPrompt(userText, historyMsgs, key) {
       .filter((o) => Number((o && o.stock) || 0) > 0)
       .filter((o) => normMatch((o && o.category) || "") === normMatch(category));
     const offers = {};
-    offers[brand] = cap(arr, 60);
-    return { offers, meta: { brand, category } };
+    offers[brand] = trimOffersForPrompt(arr, { size: sizeVal });
+    return limitOffersForPromptPayload({ offers, meta: { brand, category } });
   }
 
   if (brand) {
     const arr = ((OFFERS && OFFERS.offers && OFFERS.offers[brand]) || []).filter((o) => Number((o && o.stock) || 0) > 0);
     const offers = {};
-    offers[brand] = cap(arr, 60);
-    return { offers, meta: { brand, size: sizeVal || null } };
+    offers[brand] = trimOffersForPrompt(arr, { size: sizeVal });
+    return limitOffersForPromptPayload({ offers, meta: { brand, size: sizeVal || null } });
   }
 
-  return {
-    offers: {
-      AVAILABLE_CATEGORIES: (OFFERS_INDEX.categories || []).slice(0, 40).map((c) => ({ category: c })),
-      AVAILABLE_CLASSES: (OFFERS_INDEX.classes || []).slice(0, 30).map((c) => ({ class: c })),
-      AVAILABLE_BRANDS: (OFFERS_INDEX.brands || []).slice(0, 30).map((b) => ({ brand: b })),
-    },
-    meta: { hint: "no_match" },
-  };
+  return limitOffersForPromptPayload({ offers: {}, meta: { hint: "no_match" } });
 }
 
 function buildSystemPrompt(offersSubset, lang) {
   const L = lang || "dzl";
   const rulesForLang = RULES_I18N[L] || RULES_I18N.dzl;
+
+  const slimOffers = limitOffersForPromptPayload(offersSubset);
 
   return (
     "You are DigiBot for Digitronics.ma.\n\n" +
@@ -2416,7 +2477,7 @@ function buildSystemPrompt(offersSubset, lang) {
     JSON.stringify(rulesForLang, null, 2) +
     "\n\n" +
     "Offers JSON (subset):\n" +
-    JSON.stringify(offersSubset, null, 2)
+    JSON.stringify(slimOffers, null, 2)
   ).trim();
 }
 
@@ -2528,6 +2589,9 @@ const maintenanceTimer = setInterval(() => {
     if (!v || !v.windowStart || now - v.windowStart > CFG.rateWindowMs * 2) ipRateStore.delete(k);
   }
 
+  pruneMapSize(rateStore, MAX_RATE_STORE_SIZE);
+  pruneMapSize(ipRateStore, MAX_RATE_STORE_SIZE);
+
   for (const [k, v] of fallbackStrikeStore.entries()) {
     if (!v || !v.at || now - v.at > FALLBACK_TTL_MS) fallbackStrikeStore.delete(k);
   }
@@ -2637,8 +2701,14 @@ app.post("/wanotifier", async (req, res) => {
   res.setHeader("x-request-id", reqId);
 
   try {
-    if (!validateWanotifierToken(req)) return res.status(401).json({ ok: false, error: "Unauthorized" });
-    if (!validateWanotifierHmac(req)) return res.status(401).json({ ok: false, error: "Unauthorized" });
+    if (!validateWanotifierToken(req)) {
+      console.warn(`[AUTH FAIL][${reqId}] wanotifier token mismatch`);
+      return res.status(401).json({ ok: false, error: "Unauthorized" });
+    }
+    if (!validateWanotifierHmac(req)) {
+      console.warn(`[AUTH FAIL][${reqId}] wanotifier hmac invalid`);
+      return res.status(401).json({ ok: false, error: "Unauthorized" });
+    }
 
     const incoming = normalizeIncoming(req.body || {}, req);
     const key = incoming.key;
@@ -2679,7 +2749,7 @@ if (isIptvIntent(userTextRaw)) {
       const extras =
         "✅ TV DAIKO: Garantie 2 ans.\n" + "✅ Kayjiw b 2 télécommandes.\n" + "✅ Taman kaychmel support/bracket mural.\n" + "✅ Livraison gratuite.";
 
-      const reply = shortenNoQuestion(t("dzl", "greeting", { daikoLines, extras }), 1000);
+      const reply = shortenNoQuestion(t(lang, "greeting", { daikoLines, extras }), 1000);
       memory.push(key, "assistant", reply);
       resetStrikes(key);
       return res.json({ ok: true, reply });
