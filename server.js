@@ -1402,6 +1402,40 @@ function getSizeFromCategories(p) {
   return 0;
 }
 
+function getCapacityFromProduct(p) {
+  const name = String((p && p.name) || "");
+  const sku = String((p && p.sku) || "");
+  const attrNames = ["capacity", "capacite", "capacité", "litres", "volume", "pa_capacity"];
+  for (let i = 0; i < attrNames.length; i += 1) {
+    const v = getAttr(p, attrNames[i]);
+    const parsed = extractCapacityLiters(v);
+    if (parsed) return parsed;
+  }
+
+  const catHit = (() => {
+    const cats = Array.isArray((p && p.categories) || null) ? p.categories : [];
+    for (let i = 0; i < cats.length; i += 1) {
+      const c = cats[i] || {};
+      const n = String(c.name || "");
+      const m = n.match(/(\d{2,4})\s*l/gi);
+      if (m && m[0]) {
+        const parsed = extractCapacityLiters(m[0]);
+        if (parsed) return parsed;
+      }
+    }
+    return null;
+  })();
+  if (catHit) return catHit;
+
+  const nameSku = [name, sku];
+  for (let i = 0; i < nameSku.length; i += 1) {
+    const parsed = extractCapacityLiters(nameSku[i]);
+    if (parsed) return parsed;
+  }
+
+  return 0;
+}
+
 function getClassFromCategories(p) {
   const cats = Array.isArray((p && p.categories) || null) ? p.categories : [];
   const names = [];
@@ -1474,12 +1508,14 @@ function offerFromWooProduct(p) {
   if (!Number.isFinite(price)) return null;
 
   const cls = getClassFromCategories(p);
+  const capacity = cls && normMatch(cls) === normMatch(OFFERS_INDEX.classCanon.tv || "tv") ? 0 : getCapacityFromProduct(p);
 
   return {
     model,
     name: String(((p && p.name) || "")).trim(),
     category: cls || firstCategoryName(p),
     size: getSizeFromCategories(p),
+    capacity_l: capacity,
     type: getTypeFromProduct(p),
     price,
     class: cls,
@@ -1660,6 +1696,7 @@ const CATEGORY_ALIASES = Object.freeze({
     "ريفريجيراتور",
     "ثلاجة",
     "ثلاج",
+    "refrigirateur",
   ],
   Congelateur: ["congelateur", "congélateur", "freezer", "فريزر"],
   "Chauffe-eau": ["chauffe-eau", "chauffe eau", "water heater", "سخان"],
@@ -1676,6 +1713,7 @@ const CATEGORY_ALIASES = Object.freeze({
     "four",
     "forn",
     "فران",
+    "فورنو",
     "kuzina",
     "kouzina",
     "kوزينة",
@@ -1690,7 +1728,7 @@ const CATEGORY_ALIASES = Object.freeze({
 const CATEGORY_CLASS_KEYWORDS = Object.freeze([
   {
     category: "Refrigerateur",
-    keywords: ["ثلاجة", "ثلاج", "fridge", "frigo", "réfrigérateur", "refrigerator", "refrigerateur"],
+    keywords: ["ثلاجة", "ثلاج", "fridge", "frigo", "réfrigérateur", "refrigerator", "refrigerateur", "refrigirateur"],
   },
   {
     category: "Tv",
@@ -1716,6 +1754,7 @@ const CATEGORY_CLASS_KEYWORDS = Object.freeze([
       "four",
       "forn",
       "فران",
+      "فورنو",
       "kuzina",
       "kouzina",
       "kوزينة",
@@ -1845,6 +1884,18 @@ function extractTvSize(text, opts = {}) {
   return null;
 }
 
+function extractCapacityLiters(text) {
+  const s0 = arabicIndicToAsciiDigits(String(text || ""));
+  const s = s0.toLowerCase();
+  const hasLiterHint = /\b(l|litre|litres|liter|liters|لتر)\b/.test(s);
+  const m = s0.match(/(?:^|[^\d])(\d{2,4})\s*(?:l|litre|litres|liter|liters|لتر)(?=$|[^\d])/i);
+  if (m && m[1]) return Number(m[1]);
+  if (!hasLiterHint) return null;
+  const digitsOnly = s0.replace(/[^\d]/g, "");
+  if (digitsOnly.length >= 2 && digitsOnly.length <= 4) return Number(digitsOnly);
+  return null;
+}
+
 
 function formatOfferLine(brand, o) {
   const safeBrand = String(brand || "").trim();
@@ -1855,18 +1906,22 @@ function formatOfferLine(brand, o) {
   const sizePart = Number.isFinite(sizeNum) ? ` ${sizeNum}"` : "";
   const typeVal = String((o && o.type) || "").trim();
   const typePart = typeVal ? ` — ${typeVal}` : "";
+  const url = String((o && o.url) || (o && o.link) || "").trim();
+  const urlPart = url ? ` — ${url}` : "";
 
-  return `• ${safeBrand}${model ? " " + model : ""}${sizePart}: ${pricePart}${typePart}`.trim();
+  return `• ${safeBrand}${model ? " " + model : ""}${sizePart}: ${pricePart}${typePart}${urlPart}`.trim();
 }
 
 function normalizeOfferItem(brand, offer, originalIdx) {
   const priceNum = Number((offer && offer.price) || NaN);
   const sizeNum = Number((offer && offer.size) || NaN);
+  const capacityNum = Number((offer && offer.capacity_l) || NaN);
   return {
     brand: String(brand || "").trim(),
     offer,
     price: Number.isFinite(priceNum) ? priceNum : Number.POSITIVE_INFINITY,
     size: Number.isFinite(sizeNum) ? sizeNum : null,
+    capacity: Number.isFinite(capacityNum) ? capacityNum : null,
     stock: Number((offer && offer.stock) || 0),
     originalIdx: Number.isInteger(originalIdx) ? originalIdx : 0,
   };
@@ -1876,6 +1931,8 @@ function rankOffers(items, opts) {
   const o = opts || {};
   const size = Number(o.size);
   const hasSize = Number.isFinite(size);
+  const capacityLiters = Number(o.capacityLiters);
+  const hasCapacity = Number.isFinite(capacityLiters);
   const className = o.className || null;
   const limitVal = Number(o.limit);
   const limit = Number.isInteger(limitVal) && limitVal >= 0 ? limitVal : null;
@@ -1889,7 +1946,7 @@ function rankOffers(items, opts) {
   };
 
   const tvClassNorm = normMatch(tvClassCanon || "");
-  const isTvContext = Boolean((className && normMatch(className) === tvClassNorm) || hasSize);
+  const isTvContext = Boolean(className && normMatch(className) === tvClassNorm);
 
   let arr = (Array.isArray(items) ? items : [])
     .map((it, idx) => normalizeOfferItem((it && it.brand) || "", (it && it.offer) || {}, (it && it.originalIdx) ?? idx))
@@ -1900,17 +1957,21 @@ function rankOffers(items, opts) {
     arr = arr.filter((it) => Number.isFinite(rankForBrand(it.brand)));
   }
 
-  const ranked = arr
-    .map((it, idx) => {
-      const sizeScore = hasSize && Number.isFinite(it.size) ? Math.abs(it.size - size) : Number.POSITIVE_INFINITY;
-      return Object.assign({}, it, { sizeScore, idx });
-    })
+    const ranked = arr
+      .map((it, idx) => {
+        const sizeScore = hasSize && Number.isFinite(it.size) ? Math.abs(it.size - size) : Number.POSITIVE_INFINITY;
+        const capacityScore = hasCapacity && Number.isFinite(it.capacity)
+          ? Math.abs(it.capacity - capacityLiters)
+          : Number.POSITIVE_INFINITY;
+        return Object.assign({}, it, { sizeScore, capacityScore, idx });
+      })
     .sort((a, b) => {
       const ra = isTvContext ? rankForBrand(a.brand) : Number.POSITIVE_INFINITY;
       const rb = isTvContext ? rankForBrand(b.brand) : Number.POSITIVE_INFINITY;
       if (ra !== rb) return ra - rb;
 
       if (a.sizeScore !== b.sizeScore) return a.sizeScore - b.sizeScore;
+      if (capacityScoreCmp(a, b) !== 0) return capacityScoreCmp(a, b);
       if (a.price !== b.price) return a.price - b.price;
       const brandCmp = String(a.brand || "").localeCompare(String(b.brand || ""));
       if (brandCmp !== 0) return brandCmp;
@@ -1926,6 +1987,13 @@ function rankOffers(items, opts) {
     });
 
   return limit !== null ? ranked.slice(0, limit) : ranked;
+}
+
+function capacityScoreCmp(a, b) {
+  const aScore = Number.isFinite(a.capacityScore) ? a.capacityScore : Number.POSITIVE_INFINITY;
+  const bScore = Number.isFinite(b.capacityScore) ? b.capacityScore : Number.POSITIVE_INFINITY;
+  if (aScore === bScore) return 0;
+  return aScore - bScore;
 }
 
 function pickCheapestPerBrand(items) {
@@ -2106,6 +2174,7 @@ async function tryWebsiteCatalogAnswer(userText, lang, key) {
         ? getSizeFromCategories(p) || extractTvSize(p.name, { allowNoHint: true }) || 0
         : 0;
       const typeVal = isTvContext ? getTypeFromProduct(p) : "";
+      const urlVal = sanitizeUrlNoQuestion((p && p.permalink) || "");
 
       const bucket = brandNormProduct && brandNormProduct === brandNorm ? brandMatches : matches;
       bucket.push({
@@ -2114,6 +2183,7 @@ async function tryWebsiteCatalogAnswer(userText, lang, key) {
         price,
         size: Number(productSize) || 0,
         type: typeVal,
+        url: urlVal,
         className: productClassRaw,
         categoryName: productCategory,
       });
@@ -2167,7 +2237,8 @@ async function tryWebsiteCatalogAnswer(userText, lang, key) {
     const brandPart = it.brand && it.brand !== "UNKNOWN" ? it.brand + " " : "";
     const sizePart = isTvContext && Number(it.size) > 0 ? ` ${it.size}\"` : "";
     const typePart = isTvContext && it.type ? ` — ${it.type}` : "";
-    return `• ${brandPart}${it.model}${sizePart}: ${it.price} dh${typePart}`.trim();
+    const urlPart = it.url ? ` — ${it.url}` : "";
+    return `• ${brandPart}${it.model}${sizePart}: ${it.price} dh${typePart}${urlPart}`.trim();
   });
 
   const reply = ensureNoQuestion([header, ...lines].filter(Boolean).join("\n"));
@@ -2205,6 +2276,8 @@ function listOffersForBrand(brand, opts) {
   const category = o.category || null;
   const sizeNum = Number(o.size);
   const hasSize = Number.isFinite(sizeNum);
+  const capacityNum = Number(o.capacityLiters);
+  const hasCapacity = Number.isFinite(capacityNum);
   const limit = Number(o.limit) || 3;
   const withOffers = Boolean(o.withOffers);
 
@@ -2218,7 +2291,12 @@ function listOffersForBrand(brand, opts) {
       return true;
     });
 
-  const ranked = rankOffers(filtered, { size: hasSize ? sizeNum : null, className: cls, limit });
+  const ranked = rankOffers(filtered, {
+    size: hasSize ? sizeNum : null,
+    capacityLiters: hasCapacity ? capacityNum : null,
+    className: cls,
+    limit,
+  });
   const offers = ranked.map((r) => r.offer);
   const lines = ranked.map((r) => formatOfferLine(r.brand, r.offer));
   debugLog("rank_offers_for_brand", { brand, cls, category, size: hasSize ? sizeNum : null, count: ranked.length });
@@ -2721,6 +2799,7 @@ function tryDirectOfferAnswer(userText, historyMsgs, lang, key) {
   const isTvClass = clsNorm === tvCanonNorm;
   const isNonTvSignal = Boolean((category && !isTvCategory) || (cls && !isTvClass));
   const sizeVal = extractTvSize(text, { requireTvHint: isNonTvSignal });
+  const capacityVal = extractCapacityLiters(text);
 
   if (category) resetCtxForCategoryChange(key, category, cls);
 
@@ -2730,6 +2809,10 @@ function tryDirectOfferAnswer(userText, historyMsgs, lang, key) {
   const cls2 =
     Number.isFinite(sizeVal) && (isTvClass || isTvCategory || hasTvHint) ? tvCanon || cls : cls;
   const category2 = Number.isFinite(sizeVal) && (isTvClass || isTvCategory || hasTvHint) ? null : category;
+  const capacityHint =
+    capacityVal && (category2 || isNonTvSignal || (ctx.lastCategory && normMatch(ctx.lastCategory) !== tvCanonNorm))
+      ? capacityVal
+      : ctx.lastCapacity || null;
 
   if (sizeVal && !brand) {
     const picks = listOffersForSizeAcrossBrands(sizeVal, { cls: tvCanon, limit: 3 }) || [];
@@ -2787,13 +2870,14 @@ function tryDirectOfferAnswer(userText, historyMsgs, lang, key) {
   }
 
   if (brand && category2) {
-    const pack = listOffersForBrand(brand, { category: category2, limit: 3, withOffers: true });
+      const pack = listOffersForBrand(brand, { category: category2, limit: 3, withOffers: true, capacityLiters: capacityHint });
     if (pack.lines.length) {
       setCtx(key, {
         lastBrand: brand,
         lastCategory: category2 || undefined,
         lastClass: undefined,
         lastSize: undefined,
+        lastCapacity: capacityHint || undefined,
         lastOffersShown: (pack.offers || []).map((o) => ({ brand, model: o.model })),
       });
       const base = offersHeader(lang, { brand, category: category2 }) + "\n" + pack.lines.join("\n\n");
@@ -2820,7 +2904,20 @@ function tryDirectOfferAnswer(userText, historyMsgs, lang, key) {
 
   if (!brand && category2) {
     const k = normMatch(category2);
-    const items0 = OFFERS_INDEX.categoryToOffers.get(k) || [];
+    let items0 = OFFERS_INDEX.categoryToOffers.get(k) || [];
+    if (!items0.length && OFFERS && OFFERS.offers) {
+      const brandsAll = Object.keys(OFFERS.offers);
+      const rebuilt = [];
+      for (let i = 0; i < brandsAll.length; i += 1) {
+        const b = brandsAll[i];
+        const arr = OFFERS.offers[b] || [];
+        for (let j = 0; j < arr.length; j += 1) {
+          const o = arr[j];
+          if (normMatch(o.category || "") === k) rebuilt.push({ brand: b, offer: o, originalIdx: j });
+        }
+      }
+      items0 = rebuilt;
+    }
     const items = items0
       .map((it, idx) => Object.assign({}, it, { originalIdx: idx }))
       .filter((it) => Number(((it.offer || {}).stock) || 0) > 0);
@@ -2845,7 +2942,7 @@ function tryDirectOfferAnswer(userText, historyMsgs, lang, key) {
             );
           })
           .slice(0, 3)
-      : rankOffers(items, { limit: 3 });
+      : rankOffers(items, { limit: 3, capacityLiters: capacityHint });
 
     if (sorted.length) {
       setCtx(key, {
@@ -2853,6 +2950,7 @@ function tryDirectOfferAnswer(userText, historyMsgs, lang, key) {
         lastCategory: category2 || undefined,
         lastClass: undefined,
         lastSize: undefined,
+        lastCapacity: capacityHint || undefined,
         lastOffersShown: sorted.map((it) => ({ brand: it.brand, model: (it.offer && it.offer.model) || "" })),
       });
       const lines = sorted.map((it) => formatOfferLine(it.brand, it.offer)).join("\n\n");
@@ -2889,7 +2987,7 @@ function tryDirectOfferAnswer(userText, historyMsgs, lang, key) {
             );
           })
           .slice(0, 3)
-      : rankOffers(items, { limit: 3 });
+      : rankOffers(items, { limit: 3, capacityLiters: capacityHint });
 
     if (sorted.length) {
       setCtx(key, {
@@ -2897,6 +2995,7 @@ function tryDirectOfferAnswer(userText, historyMsgs, lang, key) {
         lastClass: cls2 || undefined,
         lastCategory: undefined,
         lastSize: undefined,
+        lastCapacity: capacityHint || undefined,
         lastOffersShown: sorted.map((it) => ({ brand: it.brand, model: (it.offer && it.offer.model) || "" })),
       });
       const lines = sorted.map((it) => formatOfferLine(it.brand, it.offer)).join("\n\n");
@@ -2924,6 +3023,28 @@ function tryDirectOfferAnswer(userText, historyMsgs, lang, key) {
         const base = offersHeader(lang, { brand }) + "\n" + pack.lines.join("\n\n");
         return ensureNoQuestion(base);
       }
+    }
+  }
+
+  if (capacityHint && ctx.lastCategory) {
+    const k = normMatch(ctx.lastCategory);
+    const items0 = OFFERS_INDEX.categoryToOffers.get(k) || [];
+    const items = items0
+      .map((it, idx) => Object.assign({}, it, { originalIdx: typeof it.originalIdx === "number" ? it.originalIdx : idx }))
+      .filter((it) => Number(((it.offer || {}).stock) || 0) > 0);
+    const ranked = rankOffers(items, { limit: 3, capacityLiters: capacityHint });
+    if (ranked.length) {
+      setCtx(key, {
+        lastBrand: undefined,
+        lastCategory: ctx.lastCategory,
+        lastClass: ctx.lastClass || undefined,
+        lastSize: undefined,
+        lastCapacity: capacityHint,
+        lastOffersShown: ranked.map((it) => ({ brand: it.brand, model: (it.offer && it.offer.model) || "" })),
+      });
+      const lines = ranked.map((it) => formatOfferLine(it.brand, it.offer)).join("\n\n");
+      const base = offersHeader(lang, { category: ctx.lastCategory });
+      return ensureNoQuestion(base + "\n" + lines);
     }
   }
 
@@ -2963,13 +3084,19 @@ function bestGuessOffers(lang, key, limit = 3) {
       .map((it, idx) => Object.assign({}, it, { originalIdx: typeof it.originalIdx === "number" ? it.originalIdx : idx }))
       .filter((it) => Number(((it.offer || {}).stock) || 0) > 0);
 
-    const ranked = rankOffers(items, { limit: max });
+    const ranked = rankOffers(items, {
+      limit: max,
+      className: ctx.lastClass || null,
+      tvClassCanon: tvCanon,
+      capacityLiters: ctx.lastCapacity || null,
+    });
     if (ranked.length) {
       setCtx(key, {
         lastBrand: undefined,
         lastCategory: ctx.lastCategory,
-        lastClass: undefined,
+        lastClass: ctx.lastClass || undefined,
         lastSize: undefined,
+        lastCapacity: ctx.lastCapacity || undefined,
         lastOffersShown: ranked.map((it) => ({ brand: it.brand, model: (it.offer && it.offer.model) || "" })),
       });
       const lines = ranked.map((it) => formatOfferLine(it.brand, it.offer)).join("\n\n");
@@ -3161,6 +3288,7 @@ function buildOffersSubsetForPrompt(userText, historyMsgs, key) {
   const isTvClass = clsNorm === tvCanonNorm;
   const isNonTvSignal = Boolean((category && !isTvCategory) || (cls && !isTvClass));
   const sizeVal = extractTvSize(combined, { requireTvHint: isNonTvSignal });
+  const capacityVal = extractCapacityLiters(combined);
   if (Number.isFinite(sizeVal) && (isTvClass || isTvCategory || hasTvHint) && !forcedCategory && !category) {
     cls = tvCanon;
   }
@@ -3188,6 +3316,38 @@ function buildOffersSubsetForPrompt(userText, historyMsgs, key) {
     const offers = {};
     offers[brand] = trimOffersForPrompt(arr, { size: sizeVal }, brand);
     return limitOffersForPromptPayload({ offers, meta: { brand, size: sizeVal || null } });
+  }
+
+  if (category) {
+    const k = normMatch(category);
+    const items0 = OFFERS_INDEX.categoryToOffers.get(k) || [];
+    const items = items0
+      .map((it, idx) => Object.assign({}, it, { originalIdx: typeof it.originalIdx === "number" ? it.originalIdx : idx }))
+      .filter((it) => Number(((it.offer || {}).stock) || 0) > 0);
+    const ranked = rankOffers(items, { limit: 6, capacityLiters: capacityVal || null });
+    const offers = {};
+    for (let i = 0; i < ranked.length; i += 1) {
+      const r = ranked[i];
+      if (!offers[r.brand]) offers[r.brand] = [];
+      offers[r.brand].push(r.offer);
+    }
+    return limitOffersForPromptPayload({ offers, meta: { category, capacity_l: capacityVal || null } });
+  }
+
+  if (cls) {
+    const k = normMatch(cls);
+    const items0 = OFFERS_INDEX.classToOffers.get(k) || [];
+    const items = items0
+      .map((it, idx) => Object.assign({}, it, { originalIdx: typeof it.originalIdx === "number" ? it.originalIdx : idx }))
+      .filter((it) => Number(((it.offer || {}).stock) || 0) > 0);
+    const ranked = rankOffers(items, { limit: 6, className: cls, tvClassCanon: tvCanon, capacityLiters: capacityVal || null });
+    const offers = {};
+    for (let i = 0; i < ranked.length; i += 1) {
+      const r = ranked[i];
+      if (!offers[r.brand]) offers[r.brand] = [];
+      offers[r.brand].push(r.offer);
+    }
+    return limitOffersForPromptPayload({ offers, meta: { class: cls, capacity_l: capacityVal || null } });
   }
 
   if (forcedCategory || forcedClass) {
@@ -3780,6 +3940,7 @@ export {
   formatOfferLine,
   stripQuestions,
   ensureNoQuestion,
+  extractCapacityLiters,
   resolveCategoryIntent,
   tryWebsiteCatalogAnswer,
   tryDirectOfferAnswer,
