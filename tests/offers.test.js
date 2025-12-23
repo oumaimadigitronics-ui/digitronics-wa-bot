@@ -7,8 +7,10 @@ import {
   rankOffers,
   resolveCategoryIntent,
   setOffersForTest,
+  setWcFetchJsonForTest,
   stripQuestions,
   tryDirectOfferAnswer,
+  tryWebsiteCatalogAnswer,
 } from "../server.js";
 
 const TEST_OFFERS = {
@@ -26,6 +28,15 @@ const TV_CLASS = "Tv";
 
 function makeItem(brand, { price = 0, stock = 1, size = 50, cls = TV_CLASS } = {}) {
   return { brand, offer: { price, stock, size, class: cls, model: `${brand}-${size}` } };
+}
+
+function mockWcFetch(pages) {
+  return (url) => {
+    const u = new URL(url);
+    const page = Number(u.searchParams.get("page") || "1");
+    const idx = page - 1;
+    return pages[idx] || [];
+  };
 }
 
 (function testTvPriorityBrandsWin() {
@@ -109,5 +120,91 @@ function makeItem(brand, { price = 0, stock = 1, size = 50, cls = TV_CLASS } = {
   assert.ok(!reply.includes("TV-50"));
   assertNoQuestionMarks(reply);
 })();
+
+await (async function testWebsiteCatalogFridge() {
+  const fridge = {
+    name: "Réfrigerateur 300L",
+    sku: "FR-300",
+    price: "3200",
+    stock_status: "instock",
+    categories: [{ name: "Refrigerateur" }],
+    brands: [{ name: "COOLBRAND" }],
+  };
+  const tv = {
+    name: "TV 50\"",
+    sku: "TV-50",
+    price: "4500",
+    stock_status: "instock",
+    categories: [{ name: "Tv" }],
+    brands: [{ name: "OTHER" }],
+  };
+
+  setWcFetchJsonForTest(mockWcFetch([[fridge, tv], []]));
+  const reply = await tryWebsiteCatalogAnswer("ثلاجة refrigerateur", "fr", "k-fridge-site");
+  assert.ok(reply.includes("FR-300"));
+  assert.ok(!reply.toLowerCase().includes("tv 50"));
+  assertNoQuestionMarks(reply);
+})();
+
+await (async function testWebsiteCatalogCuisiniereAliases() {
+  const cooker = {
+    name: "Cuisinière 4 feux",
+    sku: "CK-4",
+    price: "2100",
+    stock_status: "instock",
+    categories: [{ name: "Cuisiniere" }],
+    brands: [{ name: "HOT" }],
+  };
+  setWcFetchJsonForTest(mockWcFetch([[cooker]]));
+  const reply = await tryWebsiteCatalogAnswer("كوزينة", "dzl", "k-cooker-site");
+  assert.ok(reply.includes("CK-4"));
+  assertNoQuestionMarks(reply);
+})();
+
+await (async function testWebsiteCatalogTvRanking() {
+  const tvs = [
+    {
+      name: "LCD 50\"",
+      sku: "XYZ-50",
+      price: "3000",
+      stock_status: "instock",
+      categories: [{ name: "Tv" }],
+      brands: [{ name: "XYZ" }],
+    },
+    {
+      name: "DAIKO 50\"",
+      sku: "DAIKO-50",
+      price: "5200",
+      stock_status: "instock",
+      categories: [{ name: "Tv" }],
+      brands: [{ name: "DAIKO" }],
+    },
+    {
+      name: "TCL 50\"",
+      sku: "TCL-50",
+      price: "5400",
+      stock_status: "instock",
+      categories: [{ name: "Tv" }],
+      brands: [{ name: "TCL" }],
+    },
+    {
+      name: "LG 50\"",
+      sku: "LG-50",
+      price: "4000",
+      stock_status: "instock",
+      categories: [{ name: "Tv" }],
+      brands: [{ name: "LG" }],
+    },
+  ];
+
+  setWcFetchJsonForTest(mockWcFetch([tvs]));
+  const reply = await tryWebsiteCatalogAnswer('TV 50"', "fr", "k-tv-site");
+  const lines = reply.split(/\r?\n/).filter((l) => l.trim().startsWith("•"));
+  const brands = lines.map((l) => l.replace(/^•\s*/, "").split(" ")[0]);
+  assert.deepStrictEqual(brands.slice(0, 3), ["TCL", "DAIKO", "LG"]);
+  assertNoQuestionMarks(reply);
+})();
+
+setWcFetchJsonForTest(null);
 
 console.log("All tests passed");

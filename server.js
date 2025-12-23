@@ -1159,7 +1159,8 @@ function wcAuthHeader() {
 }
 
 function buildWooUrl(pth, params) {
-  const u = new URL(CFG.wcBase + pth);
+  const base = CFG.wcBase || "https://example.com";
+  const u = new URL(base + pth);
   const obj = params || {};
   const keys = Object.keys(obj);
   for (let i = 0; i < keys.length; i += 1) {
@@ -1305,6 +1306,11 @@ async function wcFetchJson(url) {
 
   if (lastErr) throw lastErr;
   throw new Error("Woo fetch failed");
+}
+
+let wcFetchJsonOverride = null;
+function setWcFetchJsonForTest(fn) {
+  wcFetchJsonOverride = typeof fn === "function" ? fn : null;
 }
 
 function firstCategoryName(product) {
@@ -1618,6 +1624,7 @@ const CATEGORY_ALIASES = Object.freeze({
     "réfrigérateur",
     "refrigerator",
     "frigo",
+    "ريفريجيراتور",
     "ثلاجة",
     "ثلاج",
   ],
@@ -1630,12 +1637,20 @@ const CATEGORY_ALIASES = Object.freeze({
   Cuisiniere: [
     "cuisiniere",
     "cuisinière",
-    "cooker",
-    "cuisiniere gaz",
-    "cuisinière gaz",
-    "gaz",
+    "cuisinier",
+    "gaziniere",
+    "gazinière",
+    "four",
+    "forn",
+    "فران",
+    "kuzina",
+    "kouzina",
+    "kوزينة",
     "كوزينة",
     "كوجينة",
+    "cooker",
+    "stove",
+    "range",
   ],
 });
 
@@ -1659,7 +1674,24 @@ const CATEGORY_CLASS_KEYWORDS = Object.freeze([
   },
   {
     category: "Cuisiniere",
-    keywords: ["cuisiniere", "cuisinière", "cooker", "gaz", "كوزينة", "كوجينة"],
+    keywords: [
+      "cuisiniere",
+      "cuisinière",
+      "cuisinier",
+      "gaziniere",
+      "gazinière",
+      "four",
+      "forn",
+      "فران",
+      "kuzina",
+      "kouzina",
+      "kوزينة",
+      "كوزينة",
+      "كوجينة",
+      "cooker",
+      "stove",
+      "range",
+    ],
   },
 ]);
 
@@ -1739,7 +1771,7 @@ function resetCtxForCategoryChange(key, category, cls) {
   });
 }
 
-function extractTvSize(text) {
+function extractTvSize(text, opts = {}) {
   const s0 = arabicIndicToAsciiDigits(String(text || ""));
   const s = s0.toLowerCase();
 
@@ -1752,6 +1784,10 @@ function extractTvSize(text) {
     s.includes("télé") ||
     s.includes("بوصة");
 
+  const categoryHint = normMatch(opts.category || opts.categoryHint || "");
+  const tvCanonNorm = normMatch(OFFERS_INDEX.classCanon.tv || "tv");
+  const allowNoHint = Boolean(opts.allowNoHint) || (categoryHint && categoryHint === tvCanonNorm);
+
   const looksLikeLiters =
     /\b\d{2,4}\s*l\b/i.test(s0) ||
     /\b\d{2,4}\s*litre\b/i.test(s) ||
@@ -1760,6 +1796,8 @@ function extractTvSize(text) {
     /\b\d{2,4}\s*ltrs\b/i.test(s);
 
   if (looksLikeLiters && !hasTvHint) return null;
+
+  if (!hasTvHint && !allowNoHint) return null;
 
   const m = s0.match(/(?:^|[^\d])(24|32|40|43|50|55|65|75)(?=$|[^\d])/);
   if (m) return Number(m[1]);
@@ -1881,6 +1919,188 @@ function offersHeader(lang, ctx) {
   if (cls) return "Options (" + cls + ") :";
   if (brand) return "Options dyal " + brand + " :";
   return "Options:";
+}
+
+function catalogHeader(lang, ctx) {
+  const L = lang || "dzl";
+  const c = ctx || {};
+  const brand = c.brand;
+  const category = c.category;
+  const cls = c.cls;
+  const size = c.size;
+  const label = category || cls || null;
+
+  if (L === "fr") {
+    if (size) return 'TV ' + size + '" recommandées :';
+    if (brand && label) return "Produits " + brand + " (" + label + ") :";
+    if (label) return "Produits (" + label + ") :";
+    if (brand) return "Produits " + brand + " :";
+    return "Produits disponibles:";
+  }
+
+  if (L === "ar") {
+    if (size) return "تلفازات " + size + " بوصة:";
+    if (brand && label) return "منتجات " + brand + " (" + label + "):";
+    if (label) return "منتجات (" + label + "):";
+    if (brand) return "منتجات " + brand + ":";
+    return "منتجات متوفرة:";
+  }
+
+  if (size) return 'TV ' + size + '" disponibles :';
+  if (brand && label) return "Produits dyal " + brand + " (" + label + ") :";
+  if (label) return "Produits (" + label + ") :";
+  if (brand) return "Produits dyal " + brand + " :";
+  return "Produits disponibles:";
+}
+
+async function tryWebsiteCatalogAnswer(userText, lang, key) {
+  const text = String(userText || "").trim();
+  if (!text) return null;
+
+  const forcedIntent = resolveCategoryIntent(text);
+  const detectedCategory = (forcedIntent && forcedIntent.category) || detectCategory(text) || null;
+  const detectedClass = (forcedIntent && forcedIntent.cls) || (!detectedCategory ? detectClass(text) : null) || null;
+  const detectedBrand = detectBrand(text) || null;
+  const detectedModel = detectModel(text) || null;
+  const sizeVal = extractTvSize(text, { categoryHint: detectedCategory || detectedClass });
+
+  const hasShoppingSignal = Boolean(
+    detectedCategory ||
+      detectedClass ||
+      detectedBrand ||
+      detectedModel ||
+      Number.isFinite(sizeVal)
+  );
+  if (!hasShoppingSignal) return null;
+
+  const tvCanonNorm = normMatch(OFFERS_INDEX.classCanon.tv || "tv");
+  const categoryNorm = normMatch(detectedCategory || "");
+  const classNorm = normMatch(detectedClass || "");
+  const brandNorm = normMatch(detectedBrand || "");
+  const isTvContext = categoryNorm === tvCanonNorm || classNorm === tvCanonNorm || Number.isFinite(sizeVal);
+
+  const perPage = CFG.wcPerPage;
+  const status = CFG.wcStatus;
+  const maxPages = 3;
+  const matches = [];
+  const fetchJson = wcFetchJsonOverride || wcFetchJson;
+
+  const brandPriorityRank = new Map(TV_BRAND_PRIORITY.map((b, idx) => [normMatch(b), idx]));
+
+  const brandMatches = [];
+
+  for (let page = 1; page <= maxPages; page += 1) {
+    const url = buildWooUrl("/wp-json/wc/v3/products", { per_page: perPage, page, status, stock_status: "instock" });
+    const arr = await fetchJson(url);
+    if (!Array.isArray(arr) || arr.length === 0) break;
+
+    for (let i = 0; i < arr.length; i += 1) {
+      const p = arr[i];
+      if (!p) continue;
+      const price = wcPrice(p);
+      if (!Number.isFinite(price)) continue;
+      if (!wcInStock(p)) continue;
+
+      const productClassRaw = getClassFromCategories(p) || firstCategoryName(p) || "";
+      const productCategory = firstCategoryName(p) || productClassRaw || "";
+      const productClassNorm = normMatch(productClassRaw);
+      const productCategoryNorm = normMatch(productCategory);
+
+      const categoryMatch = (() => {
+        if (!detectedCategory && !detectedClass && !isTvContext) return true;
+        if (detectedCategory && productCategoryNorm && productCategoryNorm === categoryNorm) return true;
+        if (detectedClass && productClassNorm && productClassNorm === classNorm) return true;
+        if (isTvContext && productClassNorm === tvCanonNorm) return true;
+        const nameCategory = detectCategory(p.name || "");
+        if (detectedCategory && nameCategory && normMatch(nameCategory) === categoryNorm) return true;
+        return false;
+      })();
+
+      if (!categoryMatch) continue;
+
+      const brand = (getBrandFromWoo(p) || "").toUpperCase();
+      const brandNormProduct = normMatch(brand || "");
+
+      const modelOrTitle = (() => {
+        const sku = String((p && p.sku) || "").trim();
+        if (sku) return sku;
+        const nm = String((p && p.name) || "").trim();
+        if (nm.length > 70) return nm.slice(0, 70).trim();
+        return nm;
+      })();
+
+      if (!modelOrTitle) continue;
+
+      const productSize = isTvContext
+        ? getSizeFromCategories(p) || extractTvSize(p.name, { allowNoHint: true }) || 0
+        : 0;
+      const typeVal = isTvContext ? getTypeFromProduct(p) : "";
+
+      const bucket = brandNormProduct && brandNormProduct === brandNorm ? brandMatches : matches;
+      bucket.push({
+        brand: brand || "UNKNOWN",
+        model: modelOrTitle,
+        price,
+        size: Number(productSize) || 0,
+        type: typeVal,
+        className: productClassRaw,
+        categoryName: productCategory,
+      });
+    }
+
+    if (matches.length + brandMatches.length >= 3) break;
+  }
+
+  const pool = brandMatches.length ? brandMatches : matches;
+  if (!pool.length) return null;
+
+  const sortTv = (a, b) => {
+    const ra = brandPriorityRank.has(normMatch(a.brand)) ? brandPriorityRank.get(normMatch(a.brand)) : Number.POSITIVE_INFINITY;
+    const rb = brandPriorityRank.has(normMatch(b.brand)) ? brandPriorityRank.get(normMatch(b.brand)) : Number.POSITIVE_INFINITY;
+    if (ra !== rb) return ra - rb;
+    if (a.price !== b.price) return a.price - b.price;
+    return a.model.localeCompare(b.model);
+  };
+
+  const sortNonTv = (a, b) => {
+    if (a.price !== b.price) return a.price - b.price;
+    return a.model.localeCompare(b.model);
+  };
+
+  let sorted = isTvContext ? pool.sort(sortTv) : pool.sort(sortNonTv);
+
+  if (isTvContext) {
+    const priorityOnly = sorted.filter((it) => brandPriorityRank.has(normMatch(it.brand)));
+    if (priorityOnly.length) sorted = priorityOnly.sort(sortTv);
+  }
+
+  const picks = sorted.slice(0, 3);
+  if (!picks.length) return null;
+
+  setCtx(key, {
+    lastBrand: detectedBrand || undefined,
+    lastCategory: detectedCategory || undefined,
+    lastClass: isTvContext ? OFFERS_INDEX.classCanon.tv || detectedClass || undefined : detectedClass || undefined,
+    lastSize: Number.isFinite(sizeVal) ? sizeVal : undefined,
+    lastOffersShown: undefined,
+  });
+
+  const header = catalogHeader(lang, {
+    brand: detectedBrand || undefined,
+    category: detectedCategory || undefined,
+    cls: detectedClass || undefined,
+    size: isTvContext && Number.isFinite(sizeVal) ? sizeVal : undefined,
+  });
+
+  const lines = picks.map((it) => {
+    const brandPart = it.brand && it.brand !== "UNKNOWN" ? it.brand + " " : "";
+    const sizePart = isTvContext && Number(it.size) > 0 ? ` ${it.size}\"` : "";
+    const typePart = isTvContext && it.type ? ` — ${it.type}` : "";
+    return `• ${brandPart}${it.model}${sizePart}: ${it.price} dh${typePart}`.trim();
+  });
+
+  const reply = ensureNoQuestion([header, ...lines].filter(Boolean).join("\n"));
+  return shortenNoQuestion(reply, 520);
 }
 
 function salesIntro(lang, ctx) {
@@ -2814,8 +3034,6 @@ function buildSystemPrompt(offersSubset, lang, opts) {
   const L = lang || "dzl";
   const rulesForLang = RULES_I18N[L] || RULES_I18N.dzl;
 
-  const slimOffers = opts && opts.alreadyLimited ? offersSubset : limitOffersForPromptPayload(offersSubset);
-
   return (
     "You are DigiBot for Digitronics.ma.\n\n" +
     "STRICT STYLE:\n" +
@@ -2826,6 +3044,7 @@ function buildSystemPrompt(offersSubset, lang, opts) {
     "- Do NOT suggest out-of-stock products (stock <= 0).\n" +
     "- Do NOT mention stock quantity.\n" +
     "- Mention delivery/payment/warranty ONLY if the client asks (except greeting handled outside).\n" +
+    "- If client asks about products/prices/options, DO NOT invent or use OFFERS. Catalog replies are handled separately. Provide only short helpful text if needed.\n" +
     "- If client asks for photo/picture/image: ONLY provide product link if present, else write ONE short instruction sentence without question marks.\n" +
     "- Recommend at most 3 options.\n" +
     "- Do NOT output any URL in normal replies. Only output a product link in the photo flow handled outside.\n" +
@@ -2841,10 +3060,7 @@ function buildSystemPrompt(offersSubset, lang, opts) {
     CONTACTS.calls.join(" / ") +
     "\n\n" +
     "Standard rules (localized):\n" +
-    JSON.stringify(rulesForLang, null, 2) +
-    "\n\n" +
-    "Offers JSON (subset):\n" +
-    JSON.stringify(slimOffers, null, 2)
+    JSON.stringify(rulesForLang, null, 2)
   ).trim();
 }
 
@@ -2868,11 +3084,9 @@ async function callOpenAIChat(messages, maxOut) {
 }
 
 async function digibotLLMReply(userText, historyMsgs, lang, key) {
-  const offersSubset = buildOffersSubsetForPrompt(userText, historyMsgs, key);
   const hist = Array.isArray(historyMsgs) ? historyMsgs : [];
-  const slimOffers = limitOffersForPromptPayload(offersSubset);
 
-  const messages = [{ role: "system", content: buildSystemPrompt(slimOffers, lang, { alreadyLimited: true }) }];
+  const messages = [{ role: "system", content: buildSystemPrompt({}, lang, { alreadyLimited: true }) }];
   const maxHist = CFG.memoryMaxMessages;
   const slice = hist.slice(Math.max(0, hist.length - maxHist));
   for (let i = 0; i < slice.length; i += 1) messages.push({ role: slice[i].role, content: slice[i].content });
@@ -3313,17 +3527,9 @@ if (isIptvIntent(userTextRaw)) {
       return res.json({ ok: true, reply: out });
     }
 
-    const direct = tryDirectOfferAnswer(userTextRaw, history, lang, key);
-    if (direct) {
-      const reply = shortenNoQuestion(direct, 520);
-      memory.push(key, "assistant", reply);
-      resetStrikes(key);
-      return res.json({ ok: true, reply });
-    }
-
-    const bestGuess = bestGuessOffers(lang, key, 3);
-    if (bestGuess) {
-      const reply = shortenNoQuestion(bestGuess, 520);
+    const siteReply = await tryWebsiteCatalogAnswer(userTextRaw, lang, key);
+    if (siteReply) {
+      const reply = shortenNoQuestion(siteReply, 520);
       memory.push(key, "assistant", reply);
       resetStrikes(key);
       return res.json({ ok: true, reply });
@@ -3378,8 +3584,10 @@ export {
   stripQuestions,
   ensureNoQuestion,
   resolveCategoryIntent,
+  tryWebsiteCatalogAnswer,
   tryDirectOfferAnswer,
   setOffersForTest,
+  setWcFetchJsonForTest,
 };
 
 async function main() {
