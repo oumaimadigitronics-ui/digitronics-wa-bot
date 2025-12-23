@@ -1613,19 +1613,36 @@ const CATEGORY_ALIASES = Object.freeze({
   Tv: ["tv", "tele", "télé", "television", "تلفاز", "تلفزيون"],
   Climatiseur: ["clim", "climatiseur", "air conditioner", "ac", "مكيف"],
   "Machine A Laver": ["machine a laver", "machine à laver", "washing machine", "غسالة"],
-  Refrigerateur: ["refrigerateur", "réfrigérateur", "frigo", "ثلاجة"],
+  Refrigerateur: [
+    "refrigerateur",
+    "réfrigérateur",
+    "refrigerator",
+    "frigo",
+    "ثلاجة",
+    "ثلاج",
+  ],
   Congelateur: ["congelateur", "congélateur", "freezer", "فريزر"],
   "Chauffe-eau": ["chauffe-eau", "chauffe eau", "water heater", "سخان"],
   "Micro-ondes": ["micro-ondes", "microwave", "ميكرو"],
   "Lave Vaisselle": ["lave vaisselle", "dishwasher", "غسالة صحون"],
   "Air Fryer": ["air fryer", "airfryer", "قلاية هوائية", "اير فراير", "ايرفراير"],
   "Barre De Son": ["barre de son", "soundbar", "ساندبار"],
+  Cuisiniere: [
+    "cuisiniere",
+    "cuisinière",
+    "cooker",
+    "cuisiniere gaz",
+    "cuisinière gaz",
+    "gaz",
+    "كوزينة",
+    "كوجينة",
+  ],
 });
 
 const CATEGORY_CLASS_KEYWORDS = Object.freeze([
   {
     category: "Refrigerateur",
-    keywords: ["ثلاجة", "ثلاج", "fridge", "frigo", "réfrigérateur", "refrigerator"],
+    keywords: ["ثلاجة", "ثلاج", "fridge", "frigo", "réfrigérateur", "refrigerator", "refrigerateur"],
   },
   {
     category: "Tv",
@@ -1634,11 +1651,15 @@ const CATEGORY_CLASS_KEYWORDS = Object.freeze([
   },
   {
     category: "Machine A Laver",
-    keywords: ["غسالة", "lavage", "machine a laver", "machine à laver", "washing machine"],
+    keywords: ["غسالة", "lavage", "machine a laver", "machine à laver", "washing machine", "machine a laver"],
   },
   {
     category: "Climatiseur",
     keywords: ["مكيف", "climatiseur", "clim", "air conditioner", "ac"],
+  },
+  {
+    category: "Cuisiniere",
+    keywords: ["cuisiniere", "cuisinière", "cooker", "gaz", "كوزينة", "كوجينة"],
   },
 ]);
 
@@ -2370,15 +2391,17 @@ function tryDirectOfferAnswer(userText, historyMsgs, lang, key) {
   }
 
   const brand = detectBrand(text);
-  const cls = forcedClass || detectClass(text);
   const category = forcedCategory || detectCategory(text);
+  const cls = forcedClass || (!category ? detectClass(text) : null);
   const sizeVal = extractTvSize(text);
+
+  if (category) resetCtxForCategoryChange(key, category, cls);
 
   const ctx = getCtx(key);
   const tvCanon = OFFERS_INDEX.classCanon.tv;
 
-  const cls2 = sizeVal && !forcedCategory ? tvCanon || cls : cls;
-  const category2 = sizeVal && !forcedCategory ? null : category;
+  const cls2 = sizeVal && !category && !forcedCategory ? tvCanon || cls : cls;
+  const category2 = category;
 
   if (sizeVal && !brand) {
     const picks = listOffersForSizeAcrossBrands(sizeVal, { cls: tvCanon, limit: 3 }) || [];
@@ -2743,17 +2766,16 @@ function buildOffersSubsetForPrompt(userText, historyMsgs, key) {
   }
 
   let brand = detectBrand(combined) || ctx.lastBrand || null;
-  let cls = forcedClass || detectClass(combined) || ctx.lastClass || null;
   let category = forcedCategory || detectCategory(combined) || ctx.lastCategory || null;
+  let cls = forcedClass || (!category ? detectClass(combined) : null) || ctx.lastClass || null;
 
   if (!brand && hasFocusBrand() && FOCUS.mode === "preferred") brand = FOCUS.brand;
   if (brand && !(OFFERS && OFFERS.offers && OFFERS.offers[brand])) brand = null;
 
   const sizeVal = extractTvSize(combined);
   const tvCanon = OFFERS_INDEX.classCanon.tv;
-  if (sizeVal && tvCanon && !forcedCategory) {
+  if (sizeVal && tvCanon && !forcedCategory && !category) {
     cls = tvCanon;
-    category = null;
   }
 
   if (brand && cls) {
