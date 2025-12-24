@@ -284,6 +284,27 @@ function shortenNoQuestion(text, max) {
   return shorten(ensureNoQuestion(cleaned), max || 520);
 }
 
+function sniffImageMime(buf) {
+  if (!Buffer.isBuffer(buf)) return "";
+  if (buf.length >= 3 && buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff) return "image/jpeg";
+  if (
+    buf.length >= 8 &&
+    buf[0] === 0x89 &&
+    buf[1] === 0x50 &&
+    buf[2] === 0x4e &&
+    buf[3] === 0x47 &&
+    buf[4] === 0x0d &&
+    buf[5] === 0x0a &&
+    buf[6] === 0x1a &&
+    buf[7] === 0x0a
+  )
+    return "image/png";
+  if (buf.length >= 12 && buf.slice(0, 4).toString("ascii") === "RIFF" && buf.slice(8, 12).toString("ascii") === "WEBP")
+    return "image/webp";
+  if (buf.length >= 4 && buf.slice(0, 4).toString("ascii") === "GIF8") return "image/gif";
+  return "";
+}
+
 function formatSize(lang, size) {
   const num = Number(size);
   if (!Number.isFinite(num) || num <= 0) return "";
@@ -2188,6 +2209,8 @@ function normalizeMediaSingle(mediaVal) {
       const kind = guessMediaKind({ url: str });
       return { kind, url: str, raw: mediaVal };
     }
+    const base64ish = /^[a-z0-9+/=\s]+$/i.test(str) && str.length > 100;
+    if (base64ish) return { kind: "image", base64: str, raw: { base64: str } };
     return null;
   }
 
@@ -2217,8 +2240,9 @@ function normalizeMediaSingle(mediaVal) {
     ).trim();
     const mime = String(mediaVal.mime || mediaVal.mimetype || mediaVal.mimeType || mediaVal.contentType || "").trim();
     const filename = String(mediaVal.filename || mediaVal.fileName || mediaVal.name || "").trim();
+    const base64 = mediaVal.base64 || mediaVal.payload || mediaVal.data || null;
     const kind = guessMediaKind({ mime, type: mediaVal.type, kind: mediaVal.kind, filename, url });
-    return { kind, url, mime, filename, raw: mediaVal };
+    return { kind, url, mime, filename, base64, raw: mediaVal };
   }
 
   return null;
@@ -2237,8 +2261,9 @@ function normalizeMediaInput(mediaVal) {
     id: String(raw.id || raw.mediaId || raw.media_id || "").trim(),
     mimeType: norm.mime || String(raw.mimeType || raw.contentType || "").trim(),
     filename: norm.filename || String(raw.filename || raw.fileName || raw.name || "").trim(),
-    base64: raw.base64 || null,
+    base64: norm.base64 || raw.base64 || raw.payload || raw.data || null,
     kind: norm.kind || raw.kind || null,
+    raw,
   };
 }
 
@@ -2268,7 +2293,8 @@ async function fetchMedia(url, opts = {}) {
     if (!m || !m[2]) throw new Error("media_data_invalid");
     const buf = Buffer.from(m[2], "base64");
     if (buf.length > maxBytes) throw new Error("media_too_large");
-    return { buffer: buf, mimeType: m[1] || "application/octet-stream", sizeBytes: buf.length };
+    const sniffedMime = sniffImageMime(buf) || m[1] || "application/octet-stream";
+    return { buffer: buf, mimeType: sniffedMime, sizeBytes: buf.length, sniffedMime };
   }
 
   let currentUrl = url;
@@ -2301,7 +2327,10 @@ async function fetchMedia(url, opts = {}) {
 
       const mimeType = String((resp.headers && resp.headers.get && resp.headers.get("content-type")) || "").trim();
       const contentLength = Number((resp.headers && resp.headers.get && resp.headers.get("content-length")) || NaN);
-      if (Number.isFinite(contentLength) && contentLength > maxBytes) throw new Error("media_too_large");
+      if (Number.isFinite(contentLength) && contentLength > maxBytes) {
+        console.warn(JSON.stringify({ level: "warn", msg: "media_blocked_size_header", sizeBytes: contentLength, maxBytes, host: u.hostname }));
+        throw new Error("media_too_large");
+      }
 
       const chunks = [];
       let sizeBytes = 0;
@@ -2312,7 +2341,10 @@ async function fetchMedia(url, opts = {}) {
           if (done) break;
           if (value) {
             sizeBytes += value.length;
-            if (sizeBytes > maxBytes) throw new Error("media_too_large");
+            if (sizeBytes > maxBytes) {
+              console.warn(JSON.stringify({ level: "warn", msg: "media_blocked_size_stream", sizeBytes, maxBytes, host: u.hostname }));
+              throw new Error("media_too_large");
+            }
             chunks.push(Buffer.from(value));
           }
         }
@@ -2327,7 +2359,22 @@ async function fetchMedia(url, opts = {}) {
       }
 
       const buffer = Buffer.concat(chunks);
-      return { buffer, mimeType: mimeType || "application/octet-stream", sizeBytes };
+      const sniffedMime = sniffImageMime(buffer);
+      const finalMime =
+        sniffedMime || mimeType || (path.extname(u.pathname || "").match(/\.jpe?g|\.png|\.webp|\.gif/i) ? "image/jpeg" : "application/octet-stream");
+
+      console.log(
+        JSON.stringify({
+          level: "info",
+          msg: "media_fetched",
+          host: u.hostname,
+          sizeBytes,
+          contentType: mimeType || null,
+          sniffedMime: sniffedMime || null,
+        })
+      );
+
+      return { buffer, mimeType: finalMime, sizeBytes, sniffedMime };
     } finally {
       if (timeoutId) clearTimeout(timeoutId);
     }
@@ -2342,7 +2389,14 @@ async function downloadMediaBuffer(mediaInput) {
 
   const baseUrl = String(CFG.wanotifierMediaUrl || "").replace(/\/$/, "");
   const url = m.url || (m.id && baseUrl ? `${baseUrl}/${m.id}` : "");
-  if (!url) throw new Error("media_url_missing");
+  if (!url && !m.base64) throw new Error("media_url_missing");
+
+  if (m.base64 && !url) {
+    const buf = Buffer.from(String(m.base64 || ""), "base64");
+    if (buf.length > CFG.mediaMaxBytesImage) throw new Error("media_too_large");
+    const sniffedMime = sniffImageMime(buf) || m.mimeType || "application/octet-stream";
+    return { buffer: buf, mimeType: sniffedMime, filename: m.filename || null };
+  }
 
   const fetched = await fetchMedia(url, {
     maxBytes: CFG.mediaMaxBytesImage,
@@ -2352,7 +2406,7 @@ async function downloadMediaBuffer(mediaInput) {
 
   return {
     buffer: fetched.buffer,
-    mimeType: m.mimeType || fetched.mimeType || "application/octet-stream",
+    mimeType: m.mimeType || fetched.sniffedMime || fetched.mimeType || "application/octet-stream",
     filename: m.filename || null,
   };
 }
@@ -2472,15 +2526,26 @@ async function transcribeAudio(filePath, mimeType) {
 }
 
 function parseVisionJson(rawText) {
+  if (rawText && typeof rawText === "object") return { ok: true, obj: rawText };
   const txt = String(rawText || "").trim();
   if (!txt) return { ok: false, raw: "" };
   const cleaned = txt.replace(/^```json\s*/i, "").replace(/```$/g, "").trim();
   try {
     const obj = JSON.parse(cleaned);
     return { ok: true, obj };
-  } catch {
-    return { ok: false, raw: cleaned };
+  } catch {}
+
+  const start = cleaned.indexOf("{");
+  const end = cleaned.lastIndexOf("}");
+  if (start >= 0 && end > start) {
+    const slice = cleaned.slice(start, end + 1);
+    try {
+      const obj = JSON.parse(slice);
+      return { ok: true, obj };
+    } catch {}
   }
+
+  return { ok: false, raw: cleaned };
 }
 
 function normalizeVisionResult(obj) {
@@ -2505,7 +2570,7 @@ function normalizeVisionResult(obj) {
 async function describeImage({ image, model }, openaiClient) {
   const client = openaiClient || getOpenAIClient();
   const resp = await client.responses.create({
-    model: model || CFG.openaiVisionModel || OPENAI_MODEL,
+    model: model || pickVisionModel(),
     input: [
       {
         role: "user",
@@ -2531,36 +2596,62 @@ async function describeImage({ image, model }, openaiClient) {
   return String(outText || "").trim();
 }
 
+function isVisionCapableModel(modelName) {
+  const m = String(modelName || "").toLowerCase();
+  return /gpt-4o|gpt-4\.1|o3|vision/.test(m);
+}
+
+function pickVisionModel() {
+  if (CFG.openaiVisionModel && isVisionCapableModel(CFG.openaiVisionModel)) return CFG.openaiVisionModel;
+  if (OPENAI_MODEL && isVisionCapableModel(OPENAI_MODEL)) return OPENAI_MODEL;
+  // Default to a known vision-capable model if none provided
+  return "gpt-4o-mini";
+}
+
 async function analyzeProductImage(imageBytes, mimeType) {
   const imgBuf = Buffer.isBuffer(imageBytes) ? imageBytes : Buffer.from(imageBytes || []);
-  const safeMime = String(mimeType || "image/jpeg");
+  const safeMime = sniffImageMime(imgBuf) || String(mimeType || "image/jpeg");
   const b64 = imgBuf.toString("base64");
-  const messages = [
-    {
-      role: "system",
-      content:
-        "You extract appliance details (brand/model/size/capacity) from a single product photo. " +
-        "Always respond with strict JSON only.",
-    },
-    {
-      role: "user",
-      content: [
-        {
-          type: "text",
-          text:
-            "Identify the product. Reply with JSON only using keys: category (tv|refrigerateur|cuisiniere|lave_linge|other), brand, model, size_inches, capacity_liters, confidence (0..1).",
-        },
-        { type: "image_url", image_url: { url: `data:${safeMime};base64,${b64}` } },
-      ],
-    },
-  ];
+  const model = pickVisionModel();
 
-  const model = CFG.openaiVisionModel || OPENAI_MODEL;
-  const resp = await getOpenAIClient().chat.completions.create({ model, messages, temperature: 0 });
-  const raw = resp && resp.choices && resp.choices[0] && resp.choices[0].message ? resp.choices[0].message.content : "";
-  const parsed = parseVisionJson(raw);
-  if (!parsed.ok) return normalizeVisionResult({ confidence: 0 });
-  return normalizeVisionResult(parsed.obj);
+  const client = getOpenAIClient();
+  const resp = await client.responses.create({
+    model,
+    temperature: 0,
+    response_format: { type: "json_object" },
+    input: [
+      {
+        role: "user",
+        content: [
+          {
+            type: "input_text",
+            text:
+              "Identify the product and output strict JSON only with keys: category (tv|refrigerateur|cuisiniere|lave_linge|other), brand, model, size_inches, capacity_liters, confidence (0..1).",
+          },
+          { type: "input_image", image_url: { url: `data:${safeMime};base64,${b64}` } },
+        ],
+      },
+    ],
+  });
+
+  let rawOut = "";
+  if (resp && typeof resp.output_text === "string") rawOut = resp.output_text;
+  else if (resp && typeof resp.text === "string") rawOut = resp.text;
+  else if (resp && Array.isArray(resp.output)) rawOut = resp.output.map((it) => (typeof it === "string" ? it : it?.content || it?.text || "")).join("\n");
+
+  const parsed = parseVisionJson(rawOut);
+  const norm = parsed.ok ? normalizeVisionResult(parsed.obj) : normalizeVisionResult({ confidence: 0 });
+
+  console.log(
+    JSON.stringify({
+      level: "info",
+      msg: "vision_analyzed",
+      modelUsed: model,
+      confidence: norm.confidence,
+    })
+  );
+
+  return norm;
 }
 
 function selectOffersFromVision(hints) {
@@ -2611,12 +2702,12 @@ function selectOffersFromVision(hints) {
   return { offers: ranked.map((r) => r.offer), lines: ranked.map((r) => formatOfferLine(r.brand, r.offer)) };
 }
 
-async function handleVisionMedia(mediaInput, lang, key) {
+async function handleVisionMedia(mediaInput, lang, key, opts = {}) {
   const normalizedMedia = normalizeMediaInput(mediaInput);
   if (!normalizedMedia) throw new Error("media_missing");
 
   const mime = String(normalizedMedia.mimeType || "").toLowerCase();
-  if (mime && !mime.startsWith("image/")) {
+  if (mime && mime.startsWith("audio/")) {
     console.warn(
       JSON.stringify({ level: "warn", msg: "vision_blocked_non_image", mimeType: normalizedMedia.mimeType || null })
     );
@@ -2624,45 +2715,140 @@ async function handleVisionMedia(mediaInput, lang, key) {
   }
 
   const downloaded = await downloadMediaBuffer(normalizedMedia);
+  const sniffedMime = sniffImageMime(downloaded.buffer);
   const downloadedMime = String(downloaded.mimeType || "").toLowerCase();
-  if (downloadedMime && !downloadedMime.startsWith("image/")) {
-    console.warn(JSON.stringify({ level: "warn", msg: "vision_blocked_after_download", mimeType: downloaded.mimeType || null }));
-    throw new Error("vision_non_image");
+  const finalMime = (sniffedMime || downloadedMime || mime || "").toLowerCase();
+
+  if (!finalMime.startsWith("image/")) {
+    const ext = path.extname(normalizedMedia.filename || normalizedMedia.url || "").toLowerCase();
+    const extLooksImage = [".jpg", ".jpeg", ".png", ".gif", ".webp"].includes(ext);
+    if (!extLooksImage && !sniffedMime) {
+      console.warn(
+        JSON.stringify({
+          level: "warn",
+          msg: "vision_blocked_after_download",
+          mimeType: downloaded.mimeType || null,
+          sniffedMime: sniffedMime || null,
+        })
+      );
+      throw new Error("vision_non_image");
+    }
   }
 
-  const vision = await visionAnalyzer(downloaded.buffer, downloaded.mimeType);
-  const mapped = VISION_CATEGORY_MAP[vision.category] || {};
-  const cls = mapped.cls || null;
-  const category = mapped.category || null;
-  const brand = vision.brand ? String(vision.brand).toUpperCase() : null;
-  const sizeNum = vision.size_inches ? Number(vision.size_inches) : null;
-  const capNum = vision.capacity_liters ? Number(vision.capacity_liters) : null;
+  const logBase = {
+    level: "info",
+    msg: "vision_media",
+    mimeProvided: normalizedMedia.mimeType || null,
+    mimeDownloaded: downloaded.mimeType || null,
+    sniffedMime: sniffedMime || null,
+    sizeBytes: downloaded.buffer.length,
+    reqId: opts.reqId || null,
+  };
+  console.log(JSON.stringify(logBase));
 
-  const offers = selectOffersFromVision({
-    category: vision.category,
-    cls,
-    categoryReadable: category,
-    brand,
-    size_inches: sizeNum,
-    capacity_liters: capNum,
-  });
+  let vision = null;
+  try {
+    vision = await visionAnalyzer(downloaded.buffer, finalMime || downloaded.mimeType || "image/jpeg");
+  } catch (err) {
+    console.error(
+      JSON.stringify({
+        level: "error",
+        msg: "vision_call_failed",
+        reqId: opts.reqId || null,
+        error: (err && err.message) || String(err),
+      })
+    );
+  }
 
-  const header = offersHeader(lang, { brand, cls: cls || category || undefined, category: category || undefined, size: sizeNum || undefined });
-  const lines = Array.isArray(offers.lines) ? offers.lines : [];
-  const body = lines.length ? header + "\n" + lines.join("\n") : t(lang, "needDetails");
-  const reply = shortenNoQuestion(body, CFG.maxReplyChars);
+  if (vision && vision.confidence !== undefined) {
+    console.log(
+      JSON.stringify({
+        level: "info",
+        msg: "vision_result",
+        reqId: opts.reqId || null,
+        confidence: vision.confidence,
+        category: vision.category || null,
+        brand: vision.brand || null,
+        size: vision.size_inches || null,
+        capacity: vision.capacity_liters || null,
+      })
+    );
+  }
 
+  let offerReply = null;
+  if (vision) {
+    const mapped = VISION_CATEGORY_MAP[vision.category] || {};
+    const cls = mapped.cls || null;
+    const category = mapped.category || null;
+    const brand = vision.brand ? String(vision.brand).toUpperCase() : null;
+    const sizeNum = vision.size_inches ? Number(vision.size_inches) : null;
+    const capNum = vision.capacity_liters ? Number(vision.capacity_liters) : null;
+
+    const offers = selectOffersFromVision({
+      category: vision.category,
+      cls,
+      categoryReadable: category,
+      brand,
+      size_inches: sizeNum,
+      capacity_liters: capNum,
+    });
+
+    const header = offersHeader(lang, {
+      brand,
+      cls: cls || category || undefined,
+      category: category || undefined,
+      size: sizeNum || undefined,
+    });
+    const lines = Array.isArray(offers.lines) ? offers.lines : [];
+    const body = lines.length ? header + "\n" + lines.join("\n") : t(lang, "needDetails");
+    offerReply = {
+      reply: shortenNoQuestion(body, CFG.maxReplyChars),
+      confidence: vision.confidence || 0,
+      ctx: { brand, cls, category, sizeNum, offers },
+    };
+  }
+
+  if (!offerReply) {
+    try {
+      const mimeType = finalMime || downloaded.mimeType || "image/jpeg";
+      const dataUrl = `data:${mimeType};base64,${downloaded.buffer.toString("base64")}`;
+      const desc = await describeImage({ image: dataUrl, model: pickVisionModel() }, getOpenAIClient());
+      const safeDesc = ensureNoQuestion(sanitizeDerivedText(desc)).slice(0, 1800);
+      if (safeDesc) {
+        const direct = tryDirectOfferAnswer(safeDesc, [], lang, key);
+        if (direct) {
+          offerReply = { reply: shortenNoQuestion(direct, CFG.maxReplyChars), confidence: 0 };
+        }
+      }
+    } catch (err) {
+      console.error(
+        JSON.stringify({
+          level: "error",
+          msg: "vision_fallback_failed",
+          reqId: opts.reqId || null,
+          error: (err && err.message) || String(err),
+        })
+      );
+    }
+  }
+
+  if (!offerReply) {
+    const ask = shortenNoQuestion(t(lang, "askTextInsteadMedia"), 420);
+    return { reply: ask, confidence: 0 };
+  }
+
+  const ctxData = offerReply.ctx || {};
   setCtx(key, {
-    lastBrand: brand || undefined,
-    lastClass: cls || undefined,
-    lastCategory: category || undefined,
-    lastSize: sizeNum || undefined,
-    lastOffersShown: Array.isArray(offers.offers)
-      ? offers.offers.map((o) => ({ brand: brand || (o && o.brand) || "", model: (o && o.model) || "" }))
+    lastBrand: ctxData.brand || undefined,
+    lastClass: ctxData.cls || undefined,
+    lastCategory: ctxData.category || undefined,
+    lastSize: ctxData.sizeNum || undefined,
+    lastOffersShown: Array.isArray(ctxData.offers && ctxData.offers.offers)
+      ? ctxData.offers.offers.map((o) => ({ brand: ctxData.brand || (o && o.brand) || "", model: (o && o.model) || "" }))
       : undefined,
   });
 
-  return { reply, confidence: vision.confidence || 0 };
+  return { reply: offerReply.reply, confidence: offerReply.confidence || 0 };
 }
 
 function setVisionAnalyzerForTest(fn) {
@@ -4761,6 +4947,20 @@ app.post("/wanotifier", async (req, res) => {
     const lang = detectLang(userTextRaw || incoming.lang || "");
     const ip = String(req.ip || "");
 
+    // Immediate image handling with vision before deriving text
+    if (mediaInfo && (mediaInfo.kind === "image" || guessMediaKind(mediaInfo) === "image")) {
+      try {
+        const visionOut = await handleVisionMedia(mediaInfo, lang, key, { reqId });
+        const reply = shortenNoQuestion(visionOut.reply, 520);
+        memory.push(key, "assistant", reply);
+        resetStrikes(key);
+        console.log(JSON.stringify({ level: "info", msg: "vision_reply_sent", reqId, confidence: visionOut.confidence || 0 }));
+        return res.json({ ok: true, reply });
+      } catch (e) {
+        console.error(JSON.stringify({ level: "error", msg: "vision_entry_failed", reqId, error: (e && e.message) || String(e) }));
+      }
+    }
+
     let mediaResult = null;
     let mediaDerivedText = "";
     if (normalizedMedia) {
@@ -5321,7 +5521,7 @@ async function processIncomingMedia({ mediaInfo, mediaMeta, msgType, lang, key, 
 
   if (route.imageLikely && normalizedMedia) {
     try {
-      const visionReply = await handleVisionMedia(normalizedMedia, lang, key);
+      const visionReply = await handleVisionMedia(normalizedMedia, lang, key, { reqId });
       const reply = shortenNoQuestion(visionReply.reply, 520);
       return { ...route, reply };
     } catch (e) {
