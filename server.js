@@ -745,8 +745,6 @@ function extractConversationId(body) {
   const p = [
     ["conversation_id"],
     ["conversationId"],
-    ["chat_id"],
-    ["chatId"],
     ["thread_id"],
     ["threadId"],
     ["ticket_id"],
@@ -757,8 +755,6 @@ function extractConversationId(body) {
     ["sessionId"],
     ["data", "conversation_id"],
     ["data", "conversationId"],
-    ["data", "chat_id"],
-    ["data", "chatId"],
   ];
   let cand = null;
   for (let i = 0; i < p.length; i += 1) {
@@ -811,23 +807,33 @@ function findPhoneInObject(obj, maxDepth) {
 function buildConversationKey(fields, req, body) {
   const f = fields || {};
   const remoteJid = String(f.remoteJid || "").trim();
+  const waId = String(f.waId || "").trim();
   const from = String(f.from || "").trim();
   const sender = String(f.sender || "").trim();
   const phone = String(f.phone || "").trim();
+  const chatId = String(f.chatId || "").trim();
   const convId = String(f.convId || "").trim();
 
   const logPayload = {
     used: null,
     remoteJid: remoteJid || null,
+    waId: waId || null,
     from: from || null,
     sender: sender || null,
     phone: phone || null,
+    chatId: chatId || null,
     convId: convId || null,
   };
 
   if (remoteJid) {
     const key = "jid:" + remoteJid.slice(0, 120);
     debugLog("conversation_key", Object.assign({}, logPayload, { used: "remoteJid", key }));
+    return key;
+  }
+
+  if (waId) {
+    const key = "wa:" + stableHash(waId);
+    debugLog("conversation_key", Object.assign({}, logPayload, { used: "waId", key }));
     return key;
   }
 
@@ -849,6 +855,12 @@ function buildConversationKey(fields, req, body) {
     return key;
   }
 
+  if (chatId) {
+    const key = "chat:" + chatId.slice(0, 120);
+    debugLog("conversation_key", Object.assign({}, logPayload, { used: "chatId", key }));
+    return key;
+  }
+
   if (convId) {
     const key = "conv:" + convId.slice(0, 120);
     debugLog("conversation_key", Object.assign({}, logPayload, { used: "convId", key }));
@@ -856,14 +868,13 @@ function buildConversationKey(fields, req, body) {
   }
 
   const ua = String((req && req.headers && req.headers["user-agent"]) || "").slice(0, 120);
+  const ip = String((req && (req.ip || req.connection?.remoteAddress)) || "").slice(0, 120);
+  const tsBucket = Math.floor(getNowMs() / (15 * 60 * 1000));
   const fallbackHint = {
     ua,
-    waId:
-      safeGet(body || {}, ["wa_id"]) ||
-      safeGet(body || {}, ["waId"]) ||
-      safeGet(body || {}, ["data", "wa_id"]) ||
-      safeGet(body || {}, ["data", "waId"]) ||
-      null,
+    ip,
+    ts: tsBucket,
+    textHash: stableHash(String((body && body.text) || "")),
     contactId:
       safeGet(body || {}, ["contact_id"]) ||
       safeGet(body || {}, ["contactId"]) ||
@@ -878,7 +889,9 @@ function buildConversationKey(fields, req, body) {
       null,
   };
   const key = "anon:" + stableHash(JSON.stringify(fallbackHint));
-  debugLog("conversation_key", Object.assign({}, logPayload, { used: "fallback", key }));
+  const logLine = Object.assign({}, logPayload, { used: "fallback", key });
+  debugLog("conversation_key", logLine);
+  console.warn(JSON.stringify({ level: "warn", msg: "conversation_key_fallback", key, hint: fallbackHint }));
   return key;
 }
 
@@ -926,13 +939,18 @@ function normalizeIncoming(body, req) {
   if (!phone) phone = findPhoneInObject(b, 4);
 
   const convId = extractConversationId(b);
+  const chatId =
+    safeGet(b, ["chat_id"]) || safeGet(b, ["chatId"]) || safeGet(b, ["data", "chat_id"]) || safeGet(b, ["data", "chatId"]);
+  const waId =
+    safeGet(b, ["wa_id"]) || safeGet(b, ["waId"]) || safeGet(b, ["data", "wa_id"]) || safeGet(b, ["data", "waId"]);
 
   const key = buildConversationKey(
     {
       phone,
       convId,
+      waId,
+      chatId,
       remoteJid: safeGet(b, ["remoteJid"]) || safeGet(b, ["data", "remoteJid"]),
-      chatId: safeGet(b, ["chat_id"]) || safeGet(b, ["chatId"]) || safeGet(b, ["data", "chat_id"]) || safeGet(b, ["data", "chatId"]),
       from: safeGet(b, ["from"]) || safeGet(b, ["data", "from"]),
       sender: safeGet(b, ["sender"]) || safeGet(b, ["data", "sender"]),
     },
@@ -1490,7 +1508,9 @@ function getBrandFromWoo(p) {
   return "UNKNOWN";
 }
 
-const ALLOWED_TV_SIZES = Object.freeze([24, 27, 32, 40, 42, 43, 49, 50, 55, 58, 60, 65, 70, 75, 77, 82, 83, 85, 86, 98]);
+const MIN_TV_SIZE = 24;
+const MAX_TV_SIZE = 85;
+const ALLOWED_TV_SIZES = Object.freeze([24, 27, 32, 40, 42, 43, 49, 50, 55, 58, 60, 65, 70, 75, 77, 82, 83, 85]);
 const SIZE_ATTR_KEYS = ["size", "taille", "pouces", "inch", "screen size", "diagonale", "pa_size"];
 
 function isSizeAttrKey(name) {
@@ -1512,11 +1532,13 @@ function extractAllowedTvSizeFromString(str, opts = {}) {
 
   const globalTvHint = /(tv|tele|télé|television|télévision|بوصة|smart\s*tv|google\s*tv|android\s*tv)/i.test(s);
   const tvUnitRe = /(pouce|pouces|inch|inches|in\b|\"|''|”|po\b|diagonale)/i;
+  const moroccanSizeHintRe = /(النمرة|نمرة|رقم|num(?:ero)?|numero|taille)/i;
 
   const re = /(\d{2,3})/g;
   let m = null;
   while ((m = re.exec(s0))) {
     const num = Number(m[1]);
+    if (num < MIN_TV_SIZE || num > MAX_TV_SIZE) continue;
     if (!ALLOWED_TV_SIZES.includes(num)) continue;
 
     const before = s.slice(Math.max(0, m.index - 8), m.index);
@@ -1530,9 +1552,10 @@ function extractAllowedTvSizeFromString(str, opts = {}) {
     const context = s.slice(Math.max(0, m.index - 12), Math.min(s.length, m.index + m[1].length + 12));
     const hasUnit = tvUnitRe.test(context);
     const hasTvWord = /(tv|tele|télé|television|télévision|تلفاز|تلفزيون)/i.test(context) || globalTvHint;
+    const hasSizeCue = moroccanSizeHintRe.test(context);
     const hasAttrHint = isSizeAttrKey(attrKey);
     const hasExternal = externalTvContext === true;
-    const hasAnyHint = hasUnit || hasTvWord || hasAttrHint || hasExternal;
+    const hasAnyHint = hasUnit || hasTvWord || hasAttrHint || hasExternal || hasSizeCue;
 
     if (requireTvHint && !hasAnyHint) continue;
     if (!allowNoHint && !hasAnyHint) continue;
@@ -3405,6 +3428,121 @@ function detectCheapIntent(text) {
   return false;
 }
 
+function normalizeMoroccoPhone(raw) {
+  const digitsOnly = arabicIndicToAsciiDigits(String(raw || "")).replace(/[^\d]/g, "");
+  let d = digitsOnly;
+  if (d.startsWith("212")) d = d.slice(3);
+  if (d.startsWith("0")) d = d.slice(1);
+  if (d.length !== 9) return null;
+  if (d[0] !== "6" && d[0] !== "7") return null;
+  return "+212" + d;
+}
+
+function detectContactInfo(text, ctx = {}) {
+  const raw = String(text || "").trim();
+  const ascii = arabicIndicToAsciiDigits(raw);
+  const lower = normMatch(raw);
+  const prev = ctx.customer || { name: null, phone: null, address: null };
+  const sameVal = (a, b) => {
+    const aa = String(a || "").trim().toLowerCase();
+    const bb = String(b || "").trim().toLowerCase();
+    return aa && bb ? aa === bb : !aa && !bb;
+  };
+
+  let phone = null;
+  const phoneRe = /(?:\+?\s*212\s*|\b0)\s*(6|7)(?:[\s-]*\d){8}/g;
+  let pm = null;
+  while ((pm = phoneRe.exec(ascii))) {
+    const cand = normalizeMoroccoPhone(pm[0]);
+    if (cand) {
+      phone = cand;
+      break;
+    }
+  }
+
+  let name = null;
+  const namePatterns = [
+    /(?:سميتي|الاسم|انا اسمي|أنا اسمي|أنا|انا)\s*[:\-]?\s*([\p{L}]{2,}(?:\s+[\p{L}]{2,}){0,3})/iu,
+    /(?:je m'appelle|mon nom est|je suis)\s*[:\-]?\s*([^,.;\n]{2,60})/iu,
+    /(?:my name is|i am|i'm)\s*[:\-]?\s*([^,.;\n]{2,60})/iu,
+  ];
+  for (let i = 0; i < namePatterns.length; i += 1) {
+    const m = ascii.match(namePatterns[i]);
+    if (m && m[1]) {
+      const candidate = String(m[1]).trim();
+      if (candidate && !/\d/.test(candidate)) {
+        name = candidate.slice(0, 80);
+        break;
+      }
+    }
+  }
+  if (!name) {
+    const tokens = raw.split(/\s+/).filter(Boolean);
+    const shortName = tokens.length >= 1 && tokens.length <= 4 && tokens.every((w) => /^[\p{L}]{2,}$/u.test(w));
+    if (shortName && !/\d/.test(raw) && lower.length <= 80) name = raw;
+  }
+
+  let address = null;
+  const addressMatch = ascii.match(
+    /(?:العنوان|ساكن\s*ف?|حي|زنقة|شارع|اقامة|إقامة|شقة|residence|quartier|adresse|address|rue|immeuble|apartment|appartement)[:\-\s]*([^\n]{6,120})/i
+  );
+  if (addressMatch && addressMatch[1]) {
+    address = String(addressMatch[1]).trim();
+  }
+
+  const hasName = Boolean(name);
+  const hasPhone = Boolean(phone);
+  const hasAddress = Boolean(address);
+
+  const isNewInfo =
+    (hasName && !sameVal(name, prev.name)) ||
+    (hasPhone && !sameVal(phone, prev.phone)) ||
+    (hasAddress && !sameVal(address, prev.address));
+
+  return {
+    hasName,
+    hasPhone,
+    hasAddress,
+    extracted: { name: name || null, phone: phone || null, address: address || null },
+    isNewInfo,
+  };
+}
+
+function contactCtaMessage(lang) {
+  const form = ORDER_FORM_URL_SAFE;
+  if (lang === "fr")
+    return (
+      "Merci 🙏\n" +
+      "Merci de remplir le formulaire d’achat pour finaliser la commande ✅\n" +
+      form +
+      "\n\nNotre équipe vous appellera pour confirmer 📞"
+    );
+  if (lang === "en")
+    return (
+      "Thank you 🙏\n" +
+      "Please fill in the purchase form to finalize your order ✅\n" +
+      form +
+      "\n\nOur team will call you to confirm 📞"
+    );
+  return (
+    "شكراً بزاف 🙏\n" +
+    "من فضلك عمّر فورم ديال الشراء باش نكمّلو الطلب ✅\n" +
+    form +
+    "\n\nوغادي يتّاصلوا بيك الفريق ديالنا لتأكيد الطلب 📞"
+  );
+}
+
+function hasProductInquirySignal(text) {
+  const raw = String(text || "");
+  return (
+    detectPriceIntent(raw) ||
+    Boolean(detectBrand(raw)) ||
+    Boolean(detectCategory(raw)) ||
+    Boolean(detectClass(raw)) ||
+    Number.isFinite(extractTvSize(raw, { allowNoHint: true }))
+  );
+}
+
 function parseBudget(text) {
   const s0 = arabicIndicToAsciiDigits(String(text || ""));
   const s = s0.toLowerCase();
@@ -3440,6 +3578,7 @@ function hasTvSizeContext(text) {
   if (/(pouce|pouces|inch|inches|\"\s*$|''\s*$|diagonale|\"|''|po\b)/i.test(lower)) return true;
   if (/(بوصة|بوص|بوس)/i.test(raw)) return true;
   if (/\d{2,3}\s*(بوصة|بوص|بوس)/i.test(raw)) return true;
+  if (/(النمرة|نمرة|رقم|num(?:ero)?|numero|taille)\s*\d{2,3}/i.test(arabicIndicToAsciiDigits(raw))) return true;
   return false;
 }
 
@@ -4825,12 +4964,31 @@ app.post("/wanotifier", async (req, res) => {
 
     memory.push(key, "user", userTextRaw);
     const history = memory.get(key);
-if (isIptvIntent(userTextRaw)) {
-  const out = shortenNoQuestion(t(lang, "iptvCall"), 220);
-  memory.push(key, "assistant", out);
-  resetStrikes(key);
-  return res.json({ ok: true, reply: out });
-}
+    const ctxData = getCtx(key);
+
+    const contactInfo = detectContactInfo(userTextRaw, ctxData);
+    if (contactInfo && contactInfo.isNewInfo) {
+      const prevCustomer = ctxData.customer || { name: null, phone: null, address: null };
+      const nextCustomer = {
+        name: contactInfo.extracted.name || prevCustomer.name || null,
+        phone: contactInfo.extracted.phone || prevCustomer.phone || null,
+        address: contactInfo.extracted.address || prevCustomer.address || null,
+        updatedAt: getNowMs(),
+      };
+      setCtx(key, Object.assign({}, ctxData, { customer: nextCustomer }));
+
+      const followUp = hasProductInquirySignal(userTextRaw) ? "\n\nشنو هو الموديل/الحجم اللي بغيتي؟" : "";
+      const reply = shortenNoQuestion(contactCtaMessage(lang) + followUp, 520);
+      memory.push(key, "assistant", reply);
+      resetStrikes(key);
+      return res.json({ ok: true, reply });
+    }
+    if (isIptvIntent(userTextRaw)) {
+      const out = shortenNoQuestion(t(lang, "iptvCall"), 220);
+      memory.push(key, "assistant", out);
+      resetStrikes(key);
+      return res.json({ ok: true, reply: out });
+    }
 
     if (isLocationIntent(userTextRaw)) {
       const reply = shortenNoQuestion(t(lang, "address"), 420);
