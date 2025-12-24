@@ -440,10 +440,11 @@ test("conversation key generation is stable", () => {
   const keyFallback1 = buildConversationKey({}, { headers: {} }, {});
   const keyFallback2 = buildConversationKey({}, { headers: {} }, {});
 
-  assert.ok(keyJid.startsWith("jid:"));
-  assert.ok(keyFrom.startsWith("from:"));
-  assert.ok(keySender.startsWith("sender:"));
-  assert.ok(keyPhone.startsWith("phone:"));
+  assert.ok(keyJid.startsWith("wa:"));
+  assert.ok(keyFrom.startsWith("wa:"));
+  assert.ok(keySender.startsWith("wa:"));
+  assert.ok(keyPhone.startsWith("wa:"));
+  assert.ok(keyFallback1.startsWith("anon:"));
   assert.notStrictEqual(keyFrom, keySender);
   assert.strictEqual(keyFallback1, keyFallback2);
   assert.notStrictEqual(keyFallback1, keyFrom);
