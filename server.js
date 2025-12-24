@@ -1216,6 +1216,8 @@ function normalizeClassName(name) {
 const fallbackStrikeStore = new Map();
 const FALLBACK_TTL_MS = 2 * 60 * 60 * 1000;
 
+const INITIAL_GREETING_TTL_MS = 2 * 60 * 60 * 1000;
+
 function resetStrikes(key) {
   fallbackStrikeStore.delete(String(key || ""));
 }
@@ -1232,6 +1234,51 @@ function addStrike(key) {
   v.at = now;
   fallbackStrikeStore.set(k, v);
   return v.count;
+}
+
+function initialGreetingText(lang) {
+  const L = String(lang || "dzl").trim().toLowerCase();
+  if (L === "fr") return "Bonjour ! Comment puis-je vous aider aujourd’hui ?";
+  if (L === "ar") return "مرحبا! كيفاش نعاونك اليوم؟";
+  return "Salam! kifach n3awnk lyoom?";
+}
+
+function isGreetingLikeOpener(text) {
+  const raw = String(text || "");
+  const s = normMatch(raw);
+  if (!s) return false;
+  if (hasArabicScript(raw) && (/مرحب/.test(s) || /سلام/.test(s) || /كيفاش/.test(s) || /اهلا/.test(s))) return true;
+  if (/(^|\s)(bonjour|salut|hello)/i.test(raw)) return true;
+  if (/kifach n3awnk/i.test(raw)) return true;
+  return false;
+}
+
+function maybeSendInitialGreeting({ key, lang }) {
+  const k = String(key || "");
+  const ctx = getCtx(k);
+  const now = Date.now();
+
+  if (ctx.didSendInitialGreeting && ctx.initialGreetingAt && now - ctx.initialGreetingAt < INITIAL_GREETING_TTL_MS)
+    return null;
+
+  const reply = initialGreetingText(lang);
+  setCtx(k, {
+    didSendInitialGreeting: true,
+    initialGreetingAt: now,
+    greeted: true,
+    greetedAt: now,
+  });
+  return reply;
+}
+
+function handleGreetingMessage({ key, lang, text }) {
+  if (!isGreetingLikeOpener(text)) return null;
+
+  const reply = maybeSendInitialGreeting({ key, lang });
+  if (!reply) return null;
+
+  setCtx(key, { hasGreeted: true });
+  return reply;
 }
 
 const pendingOrderStore = new Map();
@@ -2488,8 +2535,9 @@ async function downloadAudioBuffer(mediaInput, reqId) {
 
 async function transcribeAudioOpenAI({ filePath, model }, openaiClient) {
   const client = openaiClient || getOpenAIClient();
+  const fileData = fs.readFileSync(filePath);
   const resp = await client.audio.transcriptions.create({
-    file: fs.createReadStream(filePath),
+    file: fileData,
     model: model || CFG.openaiTranscribeModel || "gpt-4o-mini-transcribe",
     response_format: "text",
   });
@@ -5340,6 +5388,9 @@ export {
   resolveCategoryIntent,
   buildConversationKey,
   normalizeIncoming,
+  maybeSendInitialGreeting,
+  handleGreetingMessage,
+  isGreetingLikeOpener,
   tryWebsiteCatalogAnswer,
   tryDirectOfferAnswer,
   setOffersForTest,
@@ -5368,6 +5419,7 @@ export {
   offerFromWooProduct,
   createServerForTests,
   t,
+  INITIAL_GREETING_TTL_MS,
   describeImage,
 };
 
