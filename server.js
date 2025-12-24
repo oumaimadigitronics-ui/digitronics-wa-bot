@@ -7,6 +7,7 @@ import os from "os";
 import assert from "assert";
 import { fileURLToPath } from "url";
 import { getFetch, getOpenAI, getNowMs, setDepsForTests } from "./src/deps.js";
+import { toFile } from "openai/uploads";
 
 const app = express();
 app.set("trust proxy", true);
@@ -2469,6 +2470,7 @@ function extFromAudioMime(mime) {
   if (m.indexOf("audio/ogg") === 0 || m.indexOf("audio/opus") === 0) return ".ogg";
   if (m.indexOf("audio/mpeg") === 0 || m.indexOf("audio/mp3") === 0) return ".mp3";
   if (m.indexOf("audio/mp4") === 0 || m.indexOf("audio/aac") === 0) return ".m4a";
+  if (m.indexOf("audio/wav") === 0) return ".wav";
   return ".mp3";
 }
 
@@ -2533,16 +2535,53 @@ async function downloadAudioBuffer(mediaInput, reqId) {
   }
 }
 
-async function transcribeAudioOpenAI({ filePath, model }, openaiClient) {
+async function transcribeAudioOpenAI({ filePath, model, mimeType = "", filename = "", reqId = null }, openaiClient) {
   const client = openaiClient || getOpenAIClient();
   const fileData = fs.readFileSync(filePath);
-  const resp = await client.audio.transcriptions.create({
-    file: fileData,
-    model: model || CFG.openaiTranscribeModel || "gpt-4o-mini-transcribe",
-    response_format: "text",
-  });
-  if (resp && typeof resp === "object" && (resp.text || resp.output_text)) return String(resp.text || resp.output_text || "").trim();
-  return String(resp || "").trim();
+  const bufferSize = fileData.length;
+  const inferredMime = inferMimeFromPath(filePath, mimeType || "") || "audio/mpeg";
+  const ext = path.extname(filename || filePath) || extFromAudioMime(inferredMime || "");
+  const normalizedExt = ext || extFromAudioMime(inferredMime || "");
+  const chosenFilename = filename || `voice${normalizedExt || ".mp3"}`;
+  const chosenModel = model || CFG.openaiTranscribeModel || "gpt-4o-mini-transcribe";
+
+  console.log(
+    JSON.stringify({
+      level: "info",
+      msg: "audio_transcribe_request",
+      mimeType: inferredMime,
+      bufferBytes: bufferSize,
+      filename: chosenFilename,
+      model: chosenModel,
+      reqId,
+    })
+  );
+
+  try {
+    const file = await toFile(fileData, chosenFilename, { type: inferredMime });
+    const resp = await client.audio.transcriptions.create({
+      file,
+      model: chosenModel,
+      response_format: "text",
+    });
+    if (resp && typeof resp === "object" && (resp.text || resp.output_text)) return String(resp.text || resp.output_text || "").trim();
+    return String(resp || "").trim();
+  } catch (err) {
+    console.error(
+      JSON.stringify({
+        level: "error",
+        msg: "audio_transcribe_error",
+        reqId,
+        mimeType: inferredMime,
+        filename: chosenFilename,
+        model: chosenModel,
+        status: (err && (err.status || err.statusCode)) || null,
+        error: (err && err.message) || String(err),
+        openaiError: err && typeof err === "object" ? err.response || err.error || null : null,
+      })
+    );
+    throw err;
+  }
 }
 
 async function transcribeAudioFile(filePath, mimeType) {
@@ -2552,7 +2591,7 @@ async function transcribeAudioFile(filePath, mimeType) {
   const ext = path.extname(filePath) || extFromAudioMime(mime);
   const finalPath = filePath || path.join(os.tmpdir(), `audio-fallback${ext}`);
   return transcribeAudioOpenAI(
-    { filePath: finalPath, model: CFG.openaiTranscribeModel || "gpt-4o-mini-transcribe" },
+    { filePath: finalPath, model: CFG.openaiTranscribeModel || "gpt-4o-mini-transcribe", mimeType },
     getOpenAIClient()
   );
 }
@@ -3032,7 +3071,13 @@ async function deriveMediaText(mediaInput, lang, reqId) {
       }
 
       const transcript = await transcribeAudioOpenAI(
-        { filePath: tmpFile, model: CFG.openaiTranscribeModel || "gpt-4o-mini-transcribe" },
+        {
+          filePath: tmpFile,
+          model: CFG.openaiTranscribeModel || "gpt-4o-mini-transcribe",
+          mimeType: mimeType || normalized.mime || raw.mime || "",
+          filename: normalized.filename || null,
+          reqId,
+        },
         getOpenAIClient()
       );
       const safe = ensureNoQuestion(sanitizeDerivedText(transcript));
