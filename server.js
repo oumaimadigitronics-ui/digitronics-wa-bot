@@ -806,13 +806,51 @@ function findPhoneInObject(obj, maxDepth) {
 
 function buildConversationKey(fields, req, body) {
   const f = fields || {};
-  const remoteJid = String(f.remoteJid || "").trim();
-  const waId = String(f.waId || "").trim();
-  const from = String(f.from || "").trim();
-  const sender = String(f.sender || "").trim();
+  const b = body || {};
+  const pickFirst = (arr) => {
+    for (let i = 0; i < arr.length; i += 1) {
+      const v = arr[i];
+      const s = String(v || "").trim();
+      if (s) return s;
+    }
+    return "";
+  };
+
+  const remoteJid = pickFirst([
+    f.remoteJid,
+    safeGet(b, ["remoteJid"]),
+    safeGet(b, ["data", "remoteJid"]),
+    safeGet(b, ["messages", 0, "key", "remoteJid"]),
+    safeGet(b, ["messages", 0, "key", "remote_jid"]),
+  ]);
+  const waId = pickFirst([
+    f.waId,
+    safeGet(b, ["waId"]),
+    safeGet(b, ["wa_id"]),
+    safeGet(b, ["messages", 0, "wa_id"]),
+    safeGet(b, ["messages", 0, "from"]),
+    safeGet(b, ["data", "waId"]),
+    safeGet(b, ["data", "wa_id"]),
+  ]);
+  const from = pickFirst([f.from, safeGet(b, ["from"]), safeGet(b, ["messages", 0, "from"]), safeGet(b, ["data", "from"])]);
+  const sender = pickFirst([f.sender, safeGet(b, ["sender"]), safeGet(b, ["data", "sender"])]);
   const phone = String(f.phone || "").trim();
-  const chatId = String(f.chatId || "").trim();
-  const convId = String(f.convId || "").trim();
+  const chatId = pickFirst([
+    f.chatId,
+    safeGet(b, ["chatId"]),
+    safeGet(b, ["chat_id"]),
+    safeGet(b, ["messages", 0, "chatId"]),
+    safeGet(b, ["messages", 0, "chat_id"]),
+    safeGet(b, ["data", "chatId"]),
+    safeGet(b, ["data", "chat_id"]),
+  ]);
+  const convId = pickFirst([
+    f.convId,
+    safeGet(b, ["conversationId"]),
+    safeGet(b, ["conversation_id"]),
+    safeGet(b, ["data", "conversationId"]),
+    safeGet(b, ["data", "conversation_id"]),
+  ]);
 
   const logPayload = {
     used: null,
@@ -2558,31 +2596,76 @@ function pickVisionModel() {
   return "gpt-4o-mini";
 }
 
-async function analyzeProductImage(imageBytes, mimeType) {
+async function analyzeProductImage(imageBytes, mimeType, opts = {}) {
   const imgBuf = Buffer.isBuffer(imageBytes) ? imageBytes : Buffer.from(imageBytes || []);
   const safeMime = sniffImageMime(imgBuf) || String(mimeType || "image/jpeg");
   const b64 = imgBuf.toString("base64");
   const model = pickVisionModel();
-
   const client = getOpenAIClient();
-  const resp = await client.responses.create({
-    model,
-    temperature: 0,
-    response_format: { type: "json_object" },
-    input: [
-      {
-        role: "user",
-        content: [
-          {
-            type: "input_text",
-            text:
-              "Identify the product and output strict JSON only with keys: category (tv|refrigerateur|cuisiniere|lave_linge|other), brand, model, size_inches, capacity_liters, confidence (0..1).",
-          },
-          { type: "input_image", image_url: { url: `data:${safeMime};base64,${b64}` } },
-        ],
-      },
-    ],
-  });
+  const formattingInstruction =
+    "Identify the product and output strict JSON only with keys: category (tv|refrigerateur|cuisiniere|lave_linge|other), brand, model, size_inches, capacity_liters, confidence (0..1).";
+
+  let resp = null;
+  let formattingEnabled = true;
+  let lastError = null;
+
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const enforceJsonNote = formattingEnabled
+      ? ""
+      : " Respond with JSON only. Do not add explanations, code fences, or non-JSON text.";
+    const payload = {
+      model,
+      temperature: 0,
+      input: [
+        {
+          role: "user",
+          content: [
+            {
+              type: "input_text",
+              text: formattingInstruction + enforceJsonNote,
+            },
+            { type: "input_image", image_url: { url: `data:${safeMime};base64,${b64}` } },
+          ],
+        },
+      ],
+    };
+
+    if (formattingEnabled) {
+      payload.text = { format: { type: "json_object" } };
+    }
+
+    try {
+      resp = await client.responses.create(payload);
+      break;
+    } catch (err) {
+      lastError = err;
+      const msg = (err && (err.message || err.toString())) || "unknown_error";
+      console.error(
+        JSON.stringify({
+          level: "error",
+          msg: "vision_openai_call_failed",
+          reqId: opts.reqId || null,
+          model,
+          formatting: formattingEnabled,
+          error: msg,
+        })
+      );
+
+      const lowerMsg = String(msg || "").toLowerCase();
+      const formattingUnsupported =
+        formattingEnabled &&
+        (lowerMsg.includes("text.format") || lowerMsg.includes("response_format") || lowerMsg.includes("unsupported"));
+
+      if (formattingUnsupported && attempt === 0) {
+        formattingEnabled = false;
+        continue;
+      }
+
+      throw err;
+    }
+  }
+
+  if (!resp) throw lastError || new Error("vision_no_response");
 
   let rawOut = "";
   if (resp && typeof resp.output_text === "string") rawOut = resp.output_text;
@@ -2590,7 +2673,23 @@ async function analyzeProductImage(imageBytes, mimeType) {
   else if (resp && Array.isArray(resp.output)) rawOut = resp.output.map((it) => (typeof it === "string" ? it : it?.content || it?.text || "")).join("\n");
 
   const parsed = parseVisionJson(rawOut);
-  const norm = parsed.ok ? normalizeVisionResult(parsed.obj) : normalizeVisionResult({ confidence: 0 });
+  if (!parsed.ok) {
+    console.error(
+      JSON.stringify({
+        level: "error",
+        msg: "vision_invalid_json",
+        reqId: opts.reqId || null,
+        model,
+        formatting: formattingEnabled,
+        raw: rawOut,
+      })
+    );
+    const e = new Error("vision_invalid_json");
+    e.rawOutput = rawOut;
+    throw e;
+  }
+
+  const norm = normalizeVisionResult(parsed.obj);
 
   console.log(
     JSON.stringify({
@@ -2698,7 +2797,9 @@ async function handleVisionMedia(mediaInput, lang, key, opts = {}) {
 
   let vision = null;
   try {
-    vision = await visionAnalyzer(downloaded.buffer, finalMime || downloaded.mimeType || "image/jpeg");
+    vision = await visionAnalyzer(downloaded.buffer, finalMime || downloaded.mimeType || "image/jpeg", {
+      reqId: opts.reqId || null,
+    });
   } catch (err) {
     console.error(
       JSON.stringify({
