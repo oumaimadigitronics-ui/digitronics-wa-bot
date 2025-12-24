@@ -1,7 +1,9 @@
-import assert from "assert";
-import fs from "fs";
-import os from "os";
-import path from "path";
+import assert from "node:assert/strict";
+import crypto from "node:crypto";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { test, beforeEach, afterEach } from "node:test";
 
 import {
   ensureNoQuestion,
@@ -35,6 +37,12 @@ import {
   getCtxForTest,
   setCtxForTest,
   INITIAL_GREETING_TTL_MS,
+  normalizeMedia,
+  getSizeFromNameSku,
+  formatSize,
+  createServerForTests,
+  t,
+  offerFromWooProduct,
 } from "../server.js";
 
 const ORIGINAL_VISION_ANALYZER = analyzeProductImage;
@@ -73,7 +81,20 @@ function countQuestions(text) {
   return matches ? matches.length : 0;
 }
 
-(function testTvPriorityBrandsWin() {
+beforeEach(() => {
+  setOffersForTest(null);
+});
+
+afterEach(() => {
+  setOffersForTest(null);
+  setMediaFetcherForTest(null);
+  setVisionAnalyzerForTest(ORIGINAL_VISION_ANALYZER);
+  setAudioDownloaderForTest(null);
+  setAudioTranscriberForTest(null);
+  setWcFetchJsonForTest(null);
+});
+
+test("rankOffers prioritizes TV priority brands", () => {
   const ranked = rankOffers(
     [
       makeItem("XYZ", { price: 3000 }),
@@ -84,9 +105,9 @@ function countQuestions(text) {
   );
 
   assert.deepStrictEqual(ranked.map((r) => r.brand), ["TCL", "LG"]);
-})();
+});
 
-(function testStableRankingOrder() {
+test("rankOffers is stable across calls", () => {
   const items = [
     { brand: "A", offer: { price: 1000, stock: 2, model: "X" }, originalIdx: 0 },
     { brand: "B", offer: { price: 1000, stock: 2, model: "Y" }, originalIdx: 1 },
@@ -96,41 +117,41 @@ function countQuestions(text) {
   const second = rankOffers(items, { limit: 2 });
 
   assert.deepStrictEqual(first.map((r) => r.brand), second.map((r) => r.brand));
-})();
+});
 
-(function testNoMatchHintPassThrough() {
+test("limitOffersForPromptPayload preserves no_match hint", () => {
   const res = limitOffersForPromptPayload({ offers: {}, meta: { hint: "no_match" } });
   assert.strictEqual(res.meta.hint, "no_match");
   assert.ok(res.offers.OFFER_SCHEMA);
-})();
+});
 
-(function testFormatOfferLineSafeValues() {
+test("formatOfferLine handles missing values", () => {
   const line = formatOfferLine("BrandX", { model: "ModelY" });
   assert.ok(!line.includes("undefined"));
   assert.ok(line.includes("Prix sur demande"));
-})();
+});
 
-(function testFormatOfferLineUrl() {
+test("formatOfferLine includes sanitized URL", () => {
   const line = formatOfferLine("BrandX", { model: "ModelY", price: 10, url: "http://example.com/p" });
   assert.ok(line.includes("example.com"));
-})();
+});
 
-(function testStripQuestions() {
+test("stripQuestions removes trailing questions", () => {
   const cleaned = stripQuestions("Wash bghiti?\nChno size?\n\n");
   assert.ok(!cleaned.includes("?"));
   assert.strictEqual(cleaned, "");
-})();
+});
 
-(function testInitialGreetingFirstMessage() {
+test("maybeSendInitialGreeting greets once", () => {
   const key = "greet-key-1";
   const reply = maybeSendInitialGreeting({ key, lang: "fr" });
   assert.ok(reply.includes("Comment puis-je vous aider aujourd’hui ?"));
   assert.strictEqual(countQuestions(reply), 1);
   const ctx = getCtxForTest(key);
   assert.strictEqual(ctx.didSendInitialGreeting, true);
-})();
+});
 
-(function testInitialGreetingSecondMessageSkips() {
+test("maybeSendInitialGreeting skips repeat within ttl", () => {
   const key = "greet-key-2";
   const first = maybeSendInitialGreeting({ key, lang: "dzl" });
   assert.ok(first && first.length > 0);
@@ -138,9 +159,9 @@ function countQuestions(text) {
   assert.strictEqual(second, null);
   const cleaned = ensureNoQuestion("Wash lprix?");
   assert.strictEqual(cleaned.includes("?"), false);
-})();
+});
 
-(function testInitialGreetingTtlAllowsRepeat() {
+test("maybeSendInitialGreeting allows repeat after ttl", () => {
   const key = "greet-key-ttl";
   const first = maybeSendInitialGreeting({ key, lang: "ar" });
   assert.ok(first);
@@ -152,18 +173,18 @@ function countQuestions(text) {
   });
   const again = maybeSendInitialGreeting({ key, lang: "ar" });
   assert.ok(again);
-})();
+});
 
-(function testGreetingCtxFlagSet() {
+test("maybeSendInitialGreeting sets context flags", () => {
   const key = "greet-ctx";
   const out = maybeSendInitialGreeting({ key, lang: "dzl" });
   assert.ok(out.includes("kifach n3awnk") || out.includes("كيفاش نعاونك") || out.length > 0);
   const ctx = getCtxForTest(key);
   assert.strictEqual(ctx.greeted, true);
   assert.ok(ctx.greetedAt);
-})();
+});
 
-(function testGreetingLikeOpenerTriggersGreeting() {
+test("handleGreetingMessage triggers greeting for opener", () => {
   const key = "greet-like-opener";
   const opener = "Hello! Can I get more info on this?";
   const reply = handleGreetingMessage({ key, lang: "fr", text: opener });
@@ -173,53 +194,53 @@ function countQuestions(text) {
   assert.strictEqual(ctx.hasGreeted, true);
   const again = handleGreetingMessage({ key, lang: "fr", text: opener });
   assert.strictEqual(again, null);
-})();
+});
 
-(function testGreetingLikeOpenerArabicMatch() {
+test("isGreetingLikeOpener matches Arabic greeting-like text", () => {
   assert.ok(isGreetingLikeOpener("مرحبًا! هل يمكنني الحصول على مزيد من المعلومات حول هذا؟"));
-})();
+});
 
-(function testForcedIntentResolver() {
+test("resolveCategoryIntent detects refrigerator", () => {
   const intent = resolveCategoryIntent("ثلاجة ممتازة");
   assert.ok(intent);
   assert.strictEqual(intent.category, "Refrigerateur");
-})();
+});
 
-(function testFridgeOffersOnly() {
+test("direct offers respond with fridge products", () => {
   setOffersForTest(TEST_OFFERS);
   const reply = tryDirectOfferAnswer("ثلاجة", [], "dzl", "k-fridge");
   assert.ok(reply.includes("FR-1"));
   assert.ok(!reply.includes("TV-50"));
   assert.ok(reply.includes("http://x/FR-1"));
   assertNoQuestionMarks(reply);
-})();
+});
 
-(function testWasherOffersOnly() {
+test("direct offers respond with washer products", () => {
   setOffersForTest(TEST_OFFERS);
   const reply = tryDirectOfferAnswer("غسالة", [], "dzl", "k-wash");
   assert.ok(reply.includes("WM-1"));
   assert.ok(!reply.includes("TV-50"));
   assertNoQuestionMarks(reply);
-})();
+});
 
-(function testAcOffersOnly() {
+test("direct offers respond with AC products", () => {
   setOffersForTest(TEST_OFFERS);
   const reply = tryDirectOfferAnswer("مكيف", [], "dzl", "k-ac");
   assert.ok(reply.includes("AC-1"));
   assert.ok(!reply.includes("TV-50"));
   assertNoQuestionMarks(reply);
-})();
+});
 
-(function testContextResetAcrossCategories() {
+test("context resets across categories", () => {
   setOffersForTest(TEST_OFFERS);
   tryDirectOfferAnswer("tv", [], "dzl", "k-switch");
   const reply = tryDirectOfferAnswer("ثلاجة", [], "dzl", "k-switch");
   assert.ok(reply.includes("FR-1"));
   assert.ok(!reply.includes("TV-50"));
   assertNoQuestionMarks(reply);
-})();
+});
 
-await (async function testWebsiteCatalogFridge() {
+test("website catalog fridge filters out TVs", async () => {
   const fridge = {
     name: "Réfrigerateur 300L",
     sku: "FR-300",
@@ -230,7 +251,7 @@ await (async function testWebsiteCatalogFridge() {
     permalink: "https://example.com/fr-300",
   };
   const tv = {
-    name: "TV 50\"",
+    name: 'TV 50"',
     sku: "TV-50",
     price: "4500",
     stock_status: "instock",
@@ -244,9 +265,9 @@ await (async function testWebsiteCatalogFridge() {
   assert.ok(reply.includes("example.com"));
   assert.ok(!reply.toLowerCase().includes("tv 50"));
   assertNoQuestionMarks(reply);
-})();
+});
 
-await (async function testWebsiteCatalogCuisiniereAliases() {
+test("website catalog cuisiniere aliases are handled", async () => {
   const cooker = {
     name: "Cuisinière 4 feux",
     sku: "CK-4",
@@ -261,24 +282,24 @@ await (async function testWebsiteCatalogCuisiniereAliases() {
   assert.ok(reply.includes("CK-4"));
   assert.ok(reply.includes("example.com"));
   assertNoQuestionMarks(reply);
-})();
+});
 
-(function testFridgeFollowupCapacity() {
+test("fridge follow-up capacity uses context", () => {
   setOffersForTest(TEST_OFFERS);
   tryDirectOfferAnswer("ثلاجة", [], "dzl", "k-fridge-followup");
   const reply = tryDirectOfferAnswer("350 لتر", [], "dzl", "k-fridge-followup");
   assert.ok(reply.includes("FR-2"));
   assert.ok(!reply.toLowerCase().includes("tv-50"));
   assertNoQuestionMarks(reply);
-})();
+});
 
-(function testCuisiniereSynonymsNonTv() {
+test("cuisiniere synonyms do not hit TV", () => {
   setOffersForTest(TEST_OFFERS);
   const reply = tryDirectOfferAnswer("فورنو", [], "dzl", "k-oven");
   assert.ok(!reply.toLowerCase().includes("tv"));
-})();
+});
 
-(function testVisionJsonParsing() {
+test("parseVisionJson normalizes output", () => {
   const parsed = parseVisionJson("```json\n{\n \"category\": \"tv\"}\n```");
   assert.ok(parsed.ok);
   const normalized = normalizeVisionResult(parsed.obj);
@@ -288,16 +309,16 @@ await (async function testWebsiteCatalogCuisiniereAliases() {
   assert.ok(!bad.ok);
   const normalizedBad = normalizeVisionResult(null);
   assert.strictEqual(normalizedBad.confidence, 0);
-})();
+});
 
-(function testAudioMimeHelpers() {
+test("audio mime helpers map extensions", () => {
   assert.ok(isAudioMime("audio/ogg"));
   assert.strictEqual(extFromAudioMime("audio/aac"), ".m4a");
   assert.strictEqual(extFromAudioMime("audio/mpeg"), ".mp3");
   assert.strictEqual(extFromAudioMime("unknown/type"), ".mp3");
-})();
+});
 
-(function testExtractMediaMetaAudio() {
+test("extractMediaMetaFromBody handles audio", () => {
   const meta = extractMediaMetaFromBody({
     data: {
       type: "voice",
@@ -307,9 +328,9 @@ await (async function testWebsiteCatalogCuisiniereAliases() {
   assert.ok(meta);
   assert.strictEqual(meta.kind, "audio");
   assert.ok(isAudioMeta(meta));
-})();
+});
 
-await (async function testVisionRoutingUsesOffers() {
+test("vision routing uses offers and analyzer", async () => {
   setOffersForTest(TEST_OFFERS);
   setMediaFetcherForTest(async () => ({ buffer: Buffer.from("test"), mimeType: "image/png" }));
   setVisionAnalyzerForTest(async () => ({
@@ -325,12 +346,9 @@ await (async function testVisionRoutingUsesOffers() {
   assert.ok(replyObj.reply.includes("TV-50"));
   assert.ok(replyObj.reply.includes("http://x/TV-50"));
   assertNoQuestionMarks(replyObj.reply);
+});
 
-  setVisionAnalyzerForTest(analyzeProductImage);
-  setMediaFetcherForTest(null);
-})();
-
-await (async function testAudioMediaTranscribesToTextFlow() {
+test("audio media routes through transcription flow", async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "audio-test-"));
   const tmpFile = path.join(dir, "audio.ogg");
   fs.writeFileSync(tmpFile, "dummy");
@@ -366,14 +384,12 @@ await (async function testAudioMediaTranscribesToTextFlow() {
   const reply = tryDirectOfferAnswer(res.userText, [], "dzl", "k-audio");
   assert.ok(reply.includes("FR-1"));
 
-  setAudioDownloaderForTest(null);
-  setAudioTranscriberForTest(null);
   try {
     fs.rmSync(dir, { recursive: true, force: true });
   } catch {}
-})();
+});
 
-await (async function testImageMediaRoutesToVision() {
+test("image media routes to vision path", async () => {
   setOffersForTest(TEST_OFFERS);
   setMediaFetcherForTest(() => ({ buffer: Buffer.from("img"), mimeType: "image/jpeg" }));
   setVisionAnalyzerForTest(() => ({
@@ -394,12 +410,9 @@ await (async function testImageMediaRoutesToVision() {
 
   assert.strictEqual(res.path, "image");
   assert.ok(res.reply);
+});
 
-  setMediaFetcherForTest(null);
-  setVisionAnalyzerForTest(ORIGINAL_VISION_ANALYZER);
-})();
-
-await (async function testOtherMediaSkipsVision() {
+test("non-image media returns generic file response", async () => {
   let visionCalled = false;
   setVisionAnalyzerForTest(() => {
     visionCalled = true;
@@ -417,11 +430,9 @@ await (async function testOtherMediaSkipsVision() {
   assert.strictEqual(res.path, "other");
   assert.ok(res.reply.includes("I received a file"));
   assert.strictEqual(visionCalled, false);
+});
 
-  setVisionAnalyzerForTest(ORIGINAL_VISION_ANALYZER);
-})();
-
-(function testConversationKeyUniquenessAndOrder() {
+test("conversation key generation is stable", () => {
   const keyJid = buildConversationKey({ remoteJid: "123@wa" });
   const keyFrom = buildConversationKey({ from: "user-a" });
   const keySender = buildConversationKey({ sender: "user-b" });
@@ -436,9 +447,9 @@ await (async function testOtherMediaSkipsVision() {
   assert.notStrictEqual(keyFrom, keySender);
   assert.strictEqual(keyFallback1, keyFallback2);
   assert.notStrictEqual(keyFallback1, keyFrom);
-})();
+});
 
-(function testNoCrossChatBleed() {
+test("offers do not bleed between chats", () => {
   setOffersForTest({
     TVBRAND: [{ model: "TV-1", class: "Tv", category: "Tv", size: 50, price: 1000, stock: 5 }],
     FRIDGE: [{ model: "FR-1", class: "Refrigerateur", category: "Refrigerateur", price: 2000, stock: 3 }],
@@ -448,12 +459,12 @@ await (async function testOtherMediaSkipsVision() {
   const fridgeReply = tryDirectOfferAnswer("Refrigerateur", [], "fr", "chat-fridge");
   assert.ok(fridgeReply.toLowerCase().includes("fr-1"));
   assert.ok(!fridgeReply.toLowerCase().includes("tv-1"));
-})();
+});
 
-await (async function testWebsiteCatalogTvRanking() {
+test("website catalog TV ranking respects priority", async () => {
   const tvs = [
     {
-      name: "LCD 50\"",
+      name: 'LCD 50"',
       sku: "XYZ-50",
       price: "3000",
       stock_status: "instock",
@@ -461,7 +472,7 @@ await (async function testWebsiteCatalogTvRanking() {
       brands: [{ name: "XYZ" }],
     },
     {
-      name: "DAIKO 50\"",
+      name: 'DAIKO 50"',
       sku: "DAIKO-50",
       price: "5200",
       stock_status: "instock",
@@ -469,7 +480,7 @@ await (async function testWebsiteCatalogTvRanking() {
       brands: [{ name: "DAIKO" }],
     },
     {
-      name: "TCL 50\"",
+      name: 'TCL 50"',
       sku: "TCL-50",
       price: "5400",
       stock_status: "instock",
@@ -477,7 +488,7 @@ await (async function testWebsiteCatalogTvRanking() {
       brands: [{ name: "TCL" }],
     },
     {
-      name: "LG 50\"",
+      name: 'LG 50"',
       sku: "LG-50",
       price: "4000",
       stock_status: "instock",
@@ -492,8 +503,168 @@ await (async function testWebsiteCatalogTvRanking() {
   const brands = lines.map((l) => l.replace(/^•\s*/, "").split(" ")[0]);
   assert.deepStrictEqual(brands.slice(0, 3), ["TCL", "DAIKO", "LG"]);
   assertNoQuestionMarks(reply);
-})();
+});
 
-setWcFetchJsonForTest(null);
+test("normalizeMedia covers image/audio/data url inputs", () => {
+  const img = normalizeMedia("http://example.com/p.png");
+  assert.strictEqual(img.kind, "image");
+  const audio = normalizeMedia({ media_url: "https://example.com/a.mp3", mime: "audio/mpeg" });
+  assert.strictEqual(audio.kind, "audio");
+  const data = normalizeMedia("data:image/png;base64,AAA");
+  assert.strictEqual(data.kind, "image");
+});
 
-console.log("All tests passed");
+test("media-only image wanotifier derives text and replies", async () => {
+  setOffersForTest({
+    SAMSUNG: [{ model: "SM55", class: "Tv", category: "Tv", size: 55, price: 5000, stock: 2 }],
+  });
+  const fakeJpeg = Buffer.from([0xff, 0xd8, 0xff, 0xd9]);
+  const fetchImpl = async () => ({
+    ok: true,
+    status: 200,
+    headers: { get: (k) => (String(k || "").toLowerCase() === "content-type" ? "image/jpeg" : null) },
+    arrayBuffer: async () => fakeJpeg,
+  });
+  const openai = {
+    responses: { create: async () => ({ output_text: "TV SAMSUNG 55 4K" }) },
+  };
+  const { close, urlBase } = await createServerForTests({ fetchImpl, openai, env: { MEDIA_ALLOW_INSECURE_HTTP: "1" } });
+  const resp = await fetch(urlBase + "/wanotifier", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      data: { type: "image", media: { media_url: "http://remote/image.jpg" } },
+      wa_number: "+21260000000",
+    }),
+  });
+  const json = await resp.json();
+  assert.ok(json.ok);
+  assert.ok(json.reply);
+  assert.notStrictEqual(json.reply, t("dzl", "askTextInsteadMedia"));
+  assert.ok(!json.reply.includes("?"));
+  assert.ok(!json.reply.toLowerCase().includes("http"));
+  await close();
+});
+
+test("media-only audio wanotifier transcribes and replies", async () => {
+  setOffersForTest({
+    OTHER: [{ model: "TV55", class: "Tv", category: "Tv", size: 55, price: 4200, stock: 4 }],
+  });
+  const fakeMp3 = Buffer.from([0, 1, 2, 3]);
+  const fetchImpl = async () => ({
+    ok: true,
+    status: 200,
+    headers: { get: (k) => (String(k || "").toLowerCase() === "content-type" ? "audio/mpeg" : null) },
+    arrayBuffer: async () => fakeMp3,
+  });
+  const openai = {
+    audio: { transcriptions: { create: async () => ({ text: "salam bghit tv 55" }) } },
+  };
+  const { close, urlBase } = await createServerForTests({ fetchImpl, openai, env: { MEDIA_ALLOW_INSECURE_HTTP: "1" } });
+  const resp = await fetch(urlBase + "/wanotifier", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      data: { type: "audio", media: { media_url: "http://remote/audio.mp3" } },
+      wa_number: "+21260000000",
+    }),
+  });
+  const json = await resp.json();
+  assert.ok(json.ok);
+  assert.ok(json.reply);
+  assert.notStrictEqual(json.reply, t("dzl", "askTextInsteadMedia"));
+  assert.ok(!json.reply.includes("?"));
+  await close();
+});
+
+test("media failures fall back to askTextInsteadMedia", async () => {
+  const fetchImpl = async () => {
+    throw new Error("fail");
+  };
+  const { close, urlBase } = await createServerForTests({ fetchImpl });
+  const resp = await fetch(urlBase + "/wanotifier", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      data: { type: "image", media: { media_url: "http://remote/image.jpg" } },
+      wa_number: "+21260000000",
+    }),
+  });
+  const json = await resp.json();
+  assert.ok(json.ok);
+  assert.strictEqual(json.reply, t("dzl", "askTextInsteadMedia"));
+  assert.ok(!json.reply.includes("?"));
+  await close();
+});
+
+test("ssrf guard rejects localhost media", async () => {
+  const { close, urlBase } = await createServerForTests({});
+  const resp = await fetch(urlBase + "/wanotifier", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      data: { type: "image", media: { media_url: "http://127.0.0.1/img.jpg" } },
+      wa_number: "+21260000000",
+    }),
+  });
+  const json = await resp.json();
+  assert.ok(json.ok);
+  assert.strictEqual(json.reply, t("dzl", "askTextInsteadMedia"));
+  await close();
+});
+
+test("getSizeFromNameSku finds sizes in mixed text", () => {
+  assert.strictEqual(getSizeFromNameSku({ name: "TV TCL 55 pouces" }), 55);
+  assert.strictEqual(getSizeFromNameSku({ name: 'SMART TV 50"', sku: "" }), 50);
+  assert.strictEqual(getSizeFromNameSku({ name: "تلفاز 55 بوصة" }), 55);
+  assert.strictEqual(getSizeFromNameSku({ name: "MORSAT 50 بوس" }), 50);
+});
+
+test("offer parsing falls back to name/sku size", () => {
+  const offer = offerFromWooProduct({
+    sku: "TCL-55",
+    name: "TV TCL 55 pouces 4K",
+    categories: [{ name: "Tv" }],
+    brands: [{ name: "TCL" }],
+    regular_price: "3200",
+    stock_status: "instock",
+  });
+  assert.strictEqual(offer.size, 55);
+});
+
+test("size-only reply ignores lastBrand leak", () => {
+  setOffersForTest({ OTHER: [{ model: "TV-43", class: "Tv", category: "Tv", size: 43, price: 2000, stock: 1 }] });
+  setCtxForTest("size-leak", { lastBrand: "MORSAT" });
+  const reply = tryDirectOfferAnswer("بوس 50", [], "ar", "size-leak");
+  assert.ok(!reply.toUpperCase().includes("MORSAT"));
+  assert.ok(reply.includes("50"));
+  assert.ok(!reply.includes('"'));
+});
+
+test("formatSize formats RTL and Latin styles", () => {
+  assert.strictEqual(formatSize("ar", 50), "50 بوصة");
+  assert.strictEqual(formatSize("dzl", 50), "50″");
+});
+
+test("wanotifier HMAC uses rawBody including whitespace", async () => {
+  const secret = "abc123";
+  const body = { text: "hello " };
+  const raw = JSON.stringify(body);
+  const ts = Math.floor(Date.now() / 1000).toString();
+  const base = ts + "." + raw;
+  const sig = crypto.createHmac("sha256", secret).update(base, "utf8").digest("hex");
+
+  const { close, urlBase } = await createServerForTests({ env: { WANOTIFIER_HMAC_SECRET: secret } });
+  const resp = await fetch(urlBase + "/wanotifier", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-timestamp": ts,
+      "x-signature": sig,
+    },
+    body: raw,
+  });
+  const json = await resp.json();
+  assert.ok(json.ok);
+  await close();
+});

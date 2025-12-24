@@ -4,12 +4,9 @@ import crypto from "crypto";
 import fs from "fs";
 import path from "path";
 import os from "os";
-import http from "http";
-import https from "https";
 import assert from "assert";
-import axios from "axios";
 import { fileURLToPath } from "url";
-import OpenAI from "openai";
+import { getFetch, getOpenAI, getNowMs, setDepsForTests } from "./src/deps.js";
 
 const app = express();
 app.set("trust proxy", true);
@@ -18,7 +15,7 @@ const LOG_DEBUG = String(process.env.LOG_DEBUG || "0") === "1";
 const ENTRY_FILE = fileURLToPath(import.meta.url);
 const RUN_SELF_TESTS = String(process.env.RUN_SELF_TESTS || process.env.SELF_TEST || "0") === "1";
 const REQUIRE_ENV = process.argv[1] === ENTRY_FILE && !RUN_SELF_TESTS;
-const MAX_AUDIO_BYTES = 25 * 1024 * 1024;
+const MAX_AUDIO_BYTES = Number(process.env.MEDIA_MAX_BYTES_AUDIO || 12000000) || 12000000;
 
 function debugLog(event, payload) {
   if (!LOG_DEBUG) return;
@@ -66,6 +63,15 @@ const {
   WANOTIFIER_TS_HEADER = "x-timestamp",
   WANOTIFIER_MAX_SKEW_SECONDS = "300",
   WANOTIFIER_MEDIA_URL = "",
+
+  MEDIA_MODE = "auto",
+  MEDIA_FETCH_TIMEOUT_MS = "8000",
+  MEDIA_MAX_BYTES_IMAGE = "4000000",
+  MEDIA_MAX_BYTES_AUDIO = "12000000",
+  MEDIA_ALLOW_INSECURE_HTTP = "0",
+
+  OPENAI_VISION_MODEL = "",
+  OPENAI_TRANSCRIBE_MODEL = "gpt-4o-mini-transcribe",
 } = process.env;
 
 if (REQUIRE_ENV && !OPENAI_API_KEY) {
@@ -97,6 +103,15 @@ const CFG = {
   wanotifierMaxSkewSec: Math.max(30, Number(WANOTIFIER_MAX_SKEW_SECONDS) || 300),
   wanotifierMediaUrl: String(WANOTIFIER_MEDIA_URL || "").trim(),
 
+  mediaMode: String(MEDIA_MODE || "auto").toLowerCase(),
+  mediaFetchTimeoutMs: Math.max(1000, Number(MEDIA_FETCH_TIMEOUT_MS) || 8000),
+  mediaMaxBytesImage: Number(MEDIA_MAX_BYTES_IMAGE) || 4000000,
+  mediaMaxBytesAudio: Number(MEDIA_MAX_BYTES_AUDIO) || MAX_AUDIO_BYTES,
+  mediaAllowHttp: String(MEDIA_ALLOW_INSECURE_HTTP || "0") === "1",
+
+  openaiVisionModel: String(OPENAI_VISION_MODEL || "").trim(),
+  openaiTranscribeModel: String(OPENAI_TRANSCRIBE_MODEL || "gpt-4o-mini-transcribe").trim(),
+
   wcBase: String(WC_BASE_URL || "").replace(/\/$/g, ""),
   wcKey: String(WC_CONSUMER_KEY || ""),
   wcSecret: String(WC_CONSUMER_SECRET || ""),
@@ -121,12 +136,8 @@ const COMPANY = {
 
 const GREETING_DAIKO_MODELS = ["GLED32H93DK", "GLED43H94DK", "GLED50AI95DK", "GLED55AI96DK"];
 
-let openai = null;
 function getOpenAIClient() {
-  if (openai) return openai;
-  if (!OPENAI_API_KEY) throw new Error("OPENAI_API_KEY is required to call OpenAI");
-  openai = new OpenAI({ apiKey: OPENAI_API_KEY });
-  return openai;
+  return getOpenAI();
 }
 
 app.use(
@@ -271,6 +282,15 @@ function ensureNoQuestion(text) {
 function shortenNoQuestion(text, max) {
   const cleaned = stripUrlQueriesInText(stripQuestions(text));
   return shorten(ensureNoQuestion(cleaned), max || 520);
+}
+
+function formatSize(lang, size) {
+  const num = Number(size);
+  if (!Number.isFinite(num) || num <= 0) return "";
+  const L = String(lang || "dzl");
+  if (L === "ar") return `${num} بوصة`;
+  if (L === "fr" || L === "dzl") return `${num}″`;
+  return `${num}″`;
 }
 
 const INITIAL_GREETING_TTL_MS = 24 * 60 * 60 * 1000;
@@ -427,12 +447,18 @@ function t(lang, key, vars) {
         const z = x || {};
         const brand = String(z.brand || "");
         const size = String(z.size || "");
-        return "Smah lia, ma kaynach " + brand + " " + size + '" daba.';
+        const sizeTxt = formatSize("dzl", size);
+        return "Smah lia, ma kaynach " + brand + " " + sizeTxt + " daba.";
       },
       notAvailableSizeGeneral: (x) => {
         const z = x || {};
         const size = String(z.size || "");
-        return "Smah lia, ma kaynach TV " + size + '" daba.';
+        const sizeTxt = formatSize("dzl", size);
+        return "Smah lia, ma kaynach TV " + sizeTxt + " daba.";
+      },
+      askBrandForSize: (x) => {
+        const sizeTxt = formatSize("dzl", (x && x.size) || x);
+        return "Smah lia, 3tini brand w budget ta9ribi dyal TV " + sizeTxt + " bach n3awnk.";
       },
       preferBest: "L’a7san men had l-khtiyarat هو",
       preferCheapest: "L’ar5as men had l-khtiyarat هو",
@@ -488,12 +514,18 @@ function t(lang, key, vars) {
         const z = x || {};
         const brand = String(z.brand || "");
         const size = String(z.size || "");
-        return "Désolé, je n’ai pas " + brand + " " + size + '" pour le moment.';
+        const sizeTxt = formatSize("fr", size);
+        return "Désolé, je n’ai pas " + brand + " " + sizeTxt + " pour le moment.";
       },
       notAvailableSizeGeneral: (x) => {
         const z = x || {};
         const size = String(z.size || "");
-        return "Désolé, aucune TV " + size + '" disponible pour le moment.';
+        const sizeTxt = formatSize("fr", size);
+        return "Désolé, aucune TV " + sizeTxt + " disponible pour le moment.";
+      },
+      askBrandForSize: (x) => {
+        const sizeTxt = formatSize("fr", (x && x.size) || x);
+        return "Merci d’indiquer la marque et/ou le budget pour une TV " + sizeTxt + " afin de proposer des options.";
       },
       preferBest: "Le meilleur parmi ces options est",
       preferCheapest: "Le moins cher parmi ces options est",
@@ -548,12 +580,18 @@ function t(lang, key, vars) {
         const z = x || {};
         const brand = String(z.brand || "");
         const size = String(z.size || "");
-        return "سمح ليا، ما كايناش " + brand + " " + size + '" دابا.';
+        const sizeTxt = formatSize("ar", size);
+        return "سمح ليا، ما كايناش " + brand + " " + sizeTxt + " دابا.";
       },
       notAvailableSizeGeneral: (x) => {
         const z = x || {};
         const size = String(z.size || "");
-        return "سمح ليا، ما كايناش تلفاز " + size + " بوصة دابا.";
+        const sizeTxt = formatSize("ar", size);
+        return "سمح ليا، ما كايناش تلفاز " + sizeTxt + " دابا.";
+      },
+      askBrandForSize: (x) => {
+        const sizeTxt = formatSize("ar", (x && x.size) || x);
+        return "صيفط ليا الماركة ولا الميزانية ديالك لتلفاز " + sizeTxt + " باش نعاونك.";
       },
       preferBest: "الأفضل من هاد الخيارات هو",
       preferCheapest: "الأرخص من هاد الخيارات هو",
@@ -1379,67 +1417,6 @@ function buildWooUrl(pth, params) {
   return u.toString();
 }
 
-function getFetch() {
-  if (typeof globalThis.fetch === "function") return globalThis.fetch.bind(globalThis);
-
-  return function nodeFetch(url, options) {
-    const opts = options || {};
-    const method = String(opts.method || "GET").toUpperCase();
-    const headers = opts.headers || {};
-    const body = opts.body;
-
-    return new Promise((resolve, reject) => {
-      try {
-        const u = new URL(String(url));
-        const lib = u.protocol === "https:" ? https : http;
-
-        const req = lib.request(
-          {
-            protocol: u.protocol,
-            hostname: u.hostname,
-            port: u.port,
-            path: u.pathname + (u.search || ""),
-            method,
-            headers,
-          },
-          (res) => {
-            const chunks = [];
-            res.on("data", (c) => chunks.push(c));
-            res.on("end", () => {
-              const buf = Buffer.concat(chunks);
-              const text = buf.toString("utf8");
-              resolve({
-                ok: res.statusCode >= 200 && res.statusCode < 300,
-                status: res.statusCode || 0,
-                headers: {
-                  get: (name) => {
-                    const k = String(name || "").toLowerCase();
-                    return res.headers[k];
-                  },
-                },
-                text: async () => text,
-                json: async () => {
-                  try {
-                    return JSON.parse(text || "{}");
-                  } catch {
-                    return {};
-                  }
-                },
-              });
-            });
-          }
-        );
-
-        req.on("error", (e) => reject(e));
-        if (body) req.write(body);
-        req.end();
-      } catch (e) {
-        reject(e);
-      }
-    });
-  };
-}
-
 const fetchFn = getFetch();
 
 async function wcFetchJson(url) {
@@ -1616,6 +1593,22 @@ function extractAllowedTvSizeFromString(str, opts = {}) {
   return 0;
 }
 
+function getSizeFromNameSku(p) {
+  const name = String((p && p.name) || "");
+  const sku = String((p && p.sku) || "");
+  const combined = arabicIndicToAsciiDigits((name + " " + sku).trim());
+  if (!combined) return 0;
+
+  const allowed = [24, 32, 40, 43, 50, 55, 65, 75];
+  const re = new RegExp(`\\b(${allowed.join("|")})(\\s*(\"|''|”|″|pouce|pouces|inch|inches|inch\\b|inch-|inchs|بوصة|بوص|بوس))?`, "gi");
+  let match = null;
+  while ((match = re.exec(combined))) {
+    const num = Number(match[1]);
+    if (allowed.includes(num)) return num;
+  }
+  return 0;
+}
+
 function getTvSizeFromProduct(p) {
   const clsRaw = getClassFromCategories(p);
   const clsNorm = normMatch(clsRaw || "");
@@ -1630,6 +1623,9 @@ function getTvSizeFromProduct(p) {
     const size = extractAllowedTvSizeFromString(c.name, { allowNoHint: false, externalTvContext: hasTvContext });
     if (size) return size;
   }
+
+  const nameSkuSize = getSizeFromNameSku(p);
+  if (nameSkuSize) return nameSkuSize;
 
   const nameHit = extractAllowedTvSizeFromString(p && p.name, { allowNoHint: false, externalTvContext: hasTvContext });
   if (nameHit) return nameHit;
@@ -2124,7 +2120,7 @@ function formatOfferLine(brand, o, opts = {}) {
   const priceNum = Number((o && o.price) || NaN);
   const pricePart = Number.isFinite(priceNum) ? `${priceNum} dh` : "Prix sur demande";
   const sizeNum = Number((o && o.size) || NaN);
-  const sizePart = Number.isFinite(sizeNum) ? ` ${sizeNum}"` : "";
+  const sizePart = Number.isFinite(sizeNum) ? " " + formatSize(opts.lang || "dzl", sizeNum) : "";
   const typeVal = String((o && o.type) || "").trim();
   const typePart = typeVal ? ` — ${typeVal}` : "";
   const url = sanitizeUrlNoQuestion(String((o && o.url) || (o && o.link) || "").trim());
@@ -2162,40 +2158,201 @@ let mediaFetcherOverride = null;
 let audioDownloaderOverride = null;
 let audioTranscriberOverride = null;
 
-function normalizeMediaInput(mediaVal) {
-  const raw = Array.isArray(mediaVal) ? mediaVal[0] : mediaVal;
-  if (!raw) return null;
-  if (typeof raw === "string") return { url: String(raw).trim() };
-  if (typeof raw !== "object") return null;
+function guessMediaKind(meta) {
+  const mime = String((meta && (meta.mime || meta.mimetype || meta.mimeType || meta.contentType || meta.type)) || "").toLowerCase();
+  const type = String((meta && meta.type) || "").toLowerCase();
+  const kindField = String((meta && meta.kind) || "").toLowerCase();
+  const filename = String((meta && (meta.filename || meta.fileName || meta.name)) || "");
+  const url = String((meta && meta.url) || "");
+  if (kindField === "image") return "image";
+  if (kindField === "audio" || type === "voice" || type === "audio") return "audio";
+  if (mime.startsWith("image/")) return "image";
+  if (mime.startsWith("audio/")) return "audio";
+  const ext = path.extname(filename || url).toLowerCase();
+  if ([".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp"].includes(ext)) return "image";
+  if ([".mp3", ".wav", ".ogg", ".opus", ".m4a", ".webm"].includes(ext)) return "audio";
+  return "unknown";
+}
 
+function normalizeMediaSingle(mediaVal) {
+  if (!mediaVal) return null;
+  if (typeof mediaVal === "string") {
+    const str = String(mediaVal).trim();
+    if (!str) return null;
+    if (str.startsWith("data:")) {
+      const mimeMatch = str.match(/^data:([^;,]+)?;/i);
+      const mime = mimeMatch && mimeMatch[1] ? mimeMatch[1] : "";
+      return { kind: guessMediaKind({ mime }), url: str, mime, raw: mediaVal };
+    }
+    if (/^https?:\/\//i.test(str)) {
+      const kind = guessMediaKind({ url: str });
+      return { kind, url: str, raw: mediaVal };
+    }
+    return null;
+  }
+
+  if (Array.isArray(mediaVal)) {
+    let image = null;
+    let audio = null;
+    let first = null;
+    for (let i = 0; i < mediaVal.length; i += 1) {
+      const norm = normalizeMediaSingle(mediaVal[i]);
+      if (!norm) continue;
+      if (!first) first = norm;
+      if (norm.kind === "image" && !image) image = norm;
+      if (norm.kind === "audio" && !audio) audio = norm;
+    }
+    return image || audio || first;
+  }
+
+  if (typeof mediaVal === "object") {
+    const url = String(
+      mediaVal.url ||
+        mediaVal.media_url ||
+        mediaVal.link ||
+        mediaVal.download_url ||
+        mediaVal.downloadUrl ||
+        mediaVal.mediaUrl ||
+        ""
+    ).trim();
+    const mime = String(mediaVal.mime || mediaVal.mimetype || mediaVal.mimeType || mediaVal.contentType || "").trim();
+    const filename = String(mediaVal.filename || mediaVal.fileName || mediaVal.name || "").trim();
+    const kind = guessMediaKind({ mime, type: mediaVal.type, kind: mediaVal.kind, filename, url });
+    return { kind, url, mime, filename, raw: mediaVal };
+  }
+
+  return null;
+}
+
+function normalizeMedia(mediaVal) {
+  return normalizeMediaSingle(mediaVal);
+}
+
+function normalizeMediaInput(mediaVal) {
+  const norm = normalizeMedia(mediaVal);
+  if (!norm) return null;
+  const raw = norm.raw || {};
   return {
-    url: String(raw.url || raw.media_url || raw.downloadUrl || raw.href || "").trim(),
+    url: norm.url || "",
     id: String(raw.id || raw.mediaId || raw.media_id || "").trim(),
-    mimeType: String(raw.mimeType || raw.contentType || "").trim(),
-    filename: String(raw.filename || raw.fileName || raw.name || "").trim(),
+    mimeType: norm.mime || String(raw.mimeType || raw.contentType || "").trim(),
+    filename: norm.filename || String(raw.filename || raw.fileName || raw.name || "").trim(),
     base64: raw.base64 || null,
-    kind: raw.kind || null,
+    kind: norm.kind || raw.kind || null,
   };
+}
+
+function isPrivateHost(hostname) {
+  const h = String(hostname || "").toLowerCase();
+  if (!h) return true;
+  if (h === "localhost") return true;
+  if (h === "::1" || h === "0:0:0:0:0:0:0:1") return true;
+  if (/^127\./.test(h)) return true;
+  if (/^10\./.test(h)) return true;
+  if (/^192\.168\./.test(h)) return true;
+  if (/^172\.(1[6-9]|2[0-9]|3[0-1])\./.test(h)) return true;
+  if (/^(fc00|fd00)/.test(h)) return true;
+  if (/^fe80:/.test(h)) return true;
+  return false;
+}
+
+async function fetchMedia(url, opts = {}) {
+  if (!url) throw new Error("media_url_missing");
+  const allowHttp = opts.allowHttp ?? CFG.mediaAllowHttp;
+  const maxBytes = opts.maxBytes ?? CFG.mediaMaxBytesImage;
+  const timeoutMs = opts.timeoutMs ?? CFG.mediaFetchTimeoutMs;
+  const maxRedirects = Number.isInteger(opts.redirects) ? opts.redirects : 3;
+
+  if (String(url || "").startsWith("data:")) {
+    const m = String(url || "").match(/^data:([^;,]+)?;base64,(.+)$/i);
+    if (!m || !m[2]) throw new Error("media_data_invalid");
+    const buf = Buffer.from(m[2], "base64");
+    if (buf.length > maxBytes) throw new Error("media_too_large");
+    return { buffer: buf, mimeType: m[1] || "application/octet-stream", sizeBytes: buf.length };
+  }
+
+  let currentUrl = url;
+  let redirects = 0;
+
+  while (redirects <= maxRedirects) {
+    const u = new URL(currentUrl);
+    if (u.protocol !== "http:" && u.protocol !== "https:") throw new Error("media_protocol_blocked");
+    if (u.protocol === "http:" && !allowHttp) throw new Error("media_http_blocked");
+    if (isPrivateHost(u.hostname)) throw new Error("media_ssrf_blocked");
+
+    let ctrl = null;
+    let timeoutId = null;
+    if (typeof AbortController !== "undefined") ctrl = new AbortController();
+    if (ctrl) timeoutId = setTimeout(() => ctrl.abort(), timeoutMs);
+
+    try {
+      const resp = await getFetch()(currentUrl, { method: "GET", redirect: "manual", signal: ctrl ? ctrl.signal : undefined });
+      if (!resp) throw new Error("media_fetch_failed");
+
+      const status = Number(resp.status || 0);
+      const loc = resp.headers && resp.headers.get && resp.headers.get("location");
+      if ([301, 302, 303, 307, 308].includes(status) && loc && redirects < maxRedirects) {
+        currentUrl = new URL(loc, currentUrl).toString();
+        redirects += 1;
+        continue;
+      }
+
+      if (!resp.ok) throw new Error("media_fetch_failed");
+
+      const mimeType = String((resp.headers && resp.headers.get && resp.headers.get("content-type")) || "").trim();
+      const contentLength = Number((resp.headers && resp.headers.get && resp.headers.get("content-length")) || NaN);
+      if (Number.isFinite(contentLength) && contentLength > maxBytes) throw new Error("media_too_large");
+
+      const chunks = [];
+      let sizeBytes = 0;
+      if (resp.body && typeof resp.body.getReader === "function") {
+        const reader = resp.body.getReader();
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          if (value) {
+            sizeBytes += value.length;
+            if (sizeBytes > maxBytes) throw new Error("media_too_large");
+            chunks.push(Buffer.from(value));
+          }
+        }
+      } else if (typeof resp.arrayBuffer === "function") {
+        const arrBuf = await resp.arrayBuffer();
+        const buf = Buffer.from(arrBuf);
+        sizeBytes = buf.length;
+        if (sizeBytes > maxBytes) throw new Error("media_too_large");
+        chunks.push(buf);
+      } else {
+        throw new Error("media_fetch_failed");
+      }
+
+      const buffer = Buffer.concat(chunks);
+      return { buffer, mimeType: mimeType || "application/octet-stream", sizeBytes };
+    } finally {
+      if (timeoutId) clearTimeout(timeoutId);
+    }
+  }
+
+  throw new Error("media_redirect_loop");
 }
 
 async function downloadMediaBuffer(mediaInput) {
   const m = mediaInput || {};
   if (typeof mediaFetcherOverride === "function") return mediaFetcherOverride(m);
 
-  const fetch = getFetch();
   const baseUrl = String(CFG.wanotifierMediaUrl || "").replace(/\/$/, "");
   const url = m.url || (m.id && baseUrl ? `${baseUrl}/${m.id}` : "");
   if (!url) throw new Error("media_url_missing");
 
-  const resp = await fetch(url, { method: "GET" });
-  if (!resp || !resp.ok) throw new Error("media_fetch_failed");
-  const arrBuf = await resp.arrayBuffer();
-  const buf = Buffer.from(arrBuf);
-  const ct = String((resp.headers && resp.headers.get && resp.headers.get("content-type")) || "");
+  const fetched = await fetchMedia(url, {
+    maxBytes: CFG.mediaMaxBytesImage,
+    timeoutMs: CFG.mediaFetchTimeoutMs,
+    allowHttp: CFG.mediaAllowHttp,
+  });
 
   return {
-    buffer: buf,
-    mimeType: m.mimeType || ct || "application/octet-stream",
+    buffer: fetched.buffer,
+    mimeType: m.mimeType || fetched.mimeType || "application/octet-stream",
     filename: m.filename || null,
   };
 }
@@ -2243,25 +2400,13 @@ function inferMimeFromPath(filepath, fallbackMime) {
 async function downloadToTemp(url, filepath) {
   const target = path.resolve(filepath);
   fs.mkdirSync(path.dirname(target), { recursive: true });
-  let sizeBytes = 0;
-  const resp = await axios.get(url, { responseType: "stream", timeout: 15000 });
-  const ctRaw = (resp.headers && (resp.headers["content-type"] || resp.headers["Content-Type"])) || "";
-  await new Promise((resolve, reject) => {
-    const ws = fs.createWriteStream(target);
-    resp.data.on("data", (chunk) => {
-      sizeBytes += chunk.length;
-      if (sizeBytes > MAX_AUDIO_BYTES) {
-        const err = new Error("audio_too_large");
-        resp.data.destroy(err);
-        ws.destroy(err);
-      }
-    });
-    resp.data.on("error", reject);
-    ws.on("error", reject);
-    ws.on("finish", resolve);
-    resp.data.pipe(ws);
+  const fetched = await fetchMedia(url, {
+    maxBytes: CFG.mediaMaxBytesAudio,
+    timeoutMs: CFG.mediaFetchTimeoutMs,
+    allowHttp: CFG.mediaAllowHttp,
   });
-  return { filePath: target, mimeType: String(ctRaw || ""), sizeBytes };
+  fs.writeFileSync(target, fetched.buffer);
+  return { filePath: target, mimeType: String((fetched && fetched.mimeType) || ""), sizeBytes: fetched.sizeBytes || 0 };
 }
 
 async function downloadAudioBuffer(mediaInput, reqId) {
@@ -2277,25 +2422,14 @@ async function downloadAudioBuffer(mediaInput, reqId) {
   const tmpFile = path.join(dir, `audio${ext}`);
   let sizeBytes = 0;
   try {
-    const resp = await axios.get(url, { responseType: "stream" });
-    const ctRaw = (resp.headers && (resp.headers["content-type"] || resp.headers["Content-Type"])) || "";
-    const mimeType = m.mimeType || String(ctRaw || "").trim() || "application/octet-stream";
-
-    await new Promise((resolve, reject) => {
-      const ws = fs.createWriteStream(tmpFile);
-      resp.data.on("data", (chunk) => {
-        sizeBytes += chunk.length;
-        if (sizeBytes > MAX_AUDIO_BYTES) {
-          const err = new Error("audio_too_large");
-          resp.data.destroy(err);
-          ws.destroy(err);
-        }
-      });
-      resp.data.on("error", reject);
-      ws.on("error", reject);
-      ws.on("finish", resolve);
-      resp.data.pipe(ws);
+    const fetched = await fetchMedia(url, {
+      maxBytes: CFG.mediaMaxBytesAudio,
+      timeoutMs: CFG.mediaFetchTimeoutMs,
+      allowHttp: CFG.mediaAllowHttp,
     });
+    fs.writeFileSync(tmpFile, fetched.buffer);
+    sizeBytes = fetched.sizeBytes || fetched.buffer.length || 0;
+    const mimeType = m.mimeType || String((fetched && fetched.mimeType) || "").trim() || "application/octet-stream";
 
     console.log(
       JSON.stringify({ level: "info", msg: "audio_download", sizeBytes, contentType: mimeType, reqId })
@@ -2310,21 +2444,27 @@ async function downloadAudioBuffer(mediaInput, reqId) {
   }
 }
 
+async function transcribeAudioOpenAI({ filePath, model }, openaiClient) {
+  const client = openaiClient || getOpenAIClient();
+  const resp = await client.audio.transcriptions.create({
+    file: fs.createReadStream(filePath),
+    model: model || CFG.openaiTranscribeModel || "gpt-4o-mini-transcribe",
+    response_format: "text",
+  });
+  if (resp && typeof resp === "object" && (resp.text || resp.output_text)) return String(resp.text || resp.output_text || "").trim();
+  return String(resp || "").trim();
+}
+
 async function transcribeAudioFile(filePath, mimeType) {
   if (typeof audioTranscriberOverride === "function") return audioTranscriberOverride(filePath, mimeType);
 
   const mime = String(mimeType || "").toLowerCase();
   const ext = path.extname(filePath) || extFromAudioMime(mime);
   const finalPath = filePath || path.join(os.tmpdir(), `audio-fallback${ext}`);
-
-  const resp = await getOpenAIClient().audio.transcriptions.create({
-    file: fs.createReadStream(finalPath),
-    model: "whisper-1",
-    response_format: "text",
-  });
-
-  if (resp && typeof resp === "object" && resp.text) return String(resp.text || "").trim();
-  return String(resp || "").trim();
+  return transcribeAudioOpenAI(
+    { filePath: finalPath, model: CFG.openaiTranscribeModel || "gpt-4o-mini-transcribe" },
+    getOpenAIClient()
+  );
 }
 
 async function transcribeAudio(filePath, mimeType) {
@@ -2362,6 +2502,35 @@ function normalizeVisionResult(obj) {
   };
 }
 
+async function describeImage({ image, model }, openaiClient) {
+  const client = openaiClient || getOpenAIClient();
+  const resp = await client.responses.create({
+    model: model || CFG.openaiVisionModel || OPENAI_MODEL,
+    input: [
+      {
+        role: "user",
+        content: [
+          {
+            type: "input_text",
+            text: "Extract brand/model/size/category + any visible text. Return ONE compact line. No URLs. No question marks.",
+          },
+          { type: "input_image", image_url: image },
+        ],
+      },
+    ],
+  });
+
+  const outText =
+    (resp && (resp.output_text || resp.text)) ||
+    (resp &&
+      resp.output &&
+      Array.isArray(resp.output) &&
+      resp.output[0] &&
+      (resp.output[0].content || resp.output[0].text)) ||
+    "";
+  return String(outText || "").trim();
+}
+
 async function analyzeProductImage(imageBytes, mimeType) {
   const imgBuf = Buffer.isBuffer(imageBytes) ? imageBytes : Buffer.from(imageBytes || []);
   const safeMime = String(mimeType || "image/jpeg");
@@ -2386,7 +2555,8 @@ async function analyzeProductImage(imageBytes, mimeType) {
     },
   ];
 
-  const resp = await getOpenAIClient().chat.completions.create({ model: OPENAI_MODEL, messages, temperature: 0 });
+  const model = CFG.openaiVisionModel || OPENAI_MODEL;
+  const resp = await getOpenAIClient().chat.completions.create({ model, messages, temperature: 0 });
   const raw = resp && resp.choices && resp.choices[0] && resp.choices[0].message ? resp.choices[0].message.content : "";
   const parsed = parseVisionJson(raw);
   if (!parsed.ok) return normalizeVisionResult({ confidence: 0 });
@@ -2515,6 +2685,82 @@ function handleVisionMediaForTest(mediaInput, lang, key) {
   return handleVisionMedia(mediaInput, lang, key);
 }
 
+function sanitizeDerivedText(text) {
+  return stripUrlQueriesInText(String(text || "").replace(/https?:\/\/\S+/g, "")).trim();
+}
+
+async function deriveMediaText(mediaInput, lang, reqId) {
+  const normalized = normalizeMedia(mediaInput);
+  if (!normalized) return { ok: false, reason: "media_missing" };
+  if (CFG.mediaMode === "disabled") return { ok: false, disabled: true };
+
+  const raw = (normalized && normalized.raw) || {};
+  const baseKind = normalized.kind || guessMediaKind({ mime: normalized.mime, type: raw.type, kind: raw.kind });
+  if (baseKind === "audio") {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "wan-derive-audio-"));
+    const ext = path.extname(normalized.filename || normalized.url || "") || extFromAudioMime(normalized.mime || "");
+    const tmpFile = path.join(dir, `audio${ext || ".mp3"}`);
+    let sizeBytes = 0;
+    let mimeType = normalized.mime || "";
+    try {
+      if (raw && raw.base64) {
+        const buf = Buffer.from(String(raw.base64 || ""), "base64");
+        sizeBytes = buf.length;
+        if (sizeBytes > CFG.mediaMaxBytesAudio) throw new Error("audio_too_large");
+        fs.writeFileSync(tmpFile, buf);
+      } else if (normalized.url) {
+        const dl = await downloadToTemp(normalized.url, tmpFile);
+        sizeBytes = dl.sizeBytes || 0;
+        mimeType = mimeType || dl.mimeType || "";
+      } else {
+        throw new Error("audio_url_missing");
+      }
+
+      const transcript = await transcribeAudioOpenAI(
+        { filePath: tmpFile, model: CFG.openaiTranscribeModel || "gpt-4o-mini-transcribe" },
+        getOpenAIClient()
+      );
+      const safe = ensureNoQuestion(sanitizeDerivedText(transcript));
+      if (!safe) throw new Error("transcription_empty");
+      return { ok: true, text: safe.slice(0, 1800), path: "audio", sizeBytes, mimeType: mimeType || raw.mime || null };
+    } catch (err) {
+      console.error(JSON.stringify({ level: "error", msg: "media_audio_derive_fail", reqId, error: (err && err.message) || String(err) }));
+      return { ok: false, error: err };
+    } finally {
+      try {
+        fs.rmSync(dir, { recursive: true, force: true });
+      } catch {}
+    }
+  }
+
+  if (baseKind === "image" || baseKind === "unknown") {
+    try {
+      if (!normalized.url || normalized.url.startsWith("data:")) {
+        if (!normalized.url) throw new Error("media_url_missing");
+      }
+      const fetched = await fetchMedia(normalized.url, {
+        maxBytes: CFG.mediaMaxBytesImage,
+        timeoutMs: CFG.mediaFetchTimeoutMs,
+        allowHttp: CFG.mediaAllowHttp,
+      });
+      const mimeType = normalized.mime || fetched.mimeType || "image/jpeg";
+      const dataUrl = `data:${mimeType};base64,${fetched.buffer.toString("base64")}`;
+      const desc = await describeImage(
+        { image: dataUrl, model: CFG.openaiVisionModel || OPENAI_MODEL },
+        getOpenAIClient()
+      );
+      const safe = ensureNoQuestion(sanitizeDerivedText(desc));
+      if (!safe) throw new Error("vision_description_empty");
+      return { ok: true, text: safe.slice(0, 1800), path: "image", sizeBytes: fetched.sizeBytes || fetched.buffer.length || 0, mimeType };
+    } catch (err) {
+      console.error(JSON.stringify({ level: "error", msg: "media_image_derive_fail", reqId, error: (err && err.message) || String(err) }));
+      return { ok: false, error: err };
+    }
+  }
+
+  return { ok: false, reason: "unsupported_media" };
+}
+
 function normalizeOfferItem(brand, offer, originalIdx) {
   const priceNum = Number((offer && offer.price) || NaN);
   const sizeNum = Number((offer && offer.size) || NaN);
@@ -2632,10 +2878,11 @@ function offersHeader(lang, ctx) {
   const brand = c.brand;
   const cls = c.cls;
   const category = c.category;
-  const size = c.size;
+  const size = Number.isFinite(Number(c.size)) ? Number(c.size) : null;
+  const sizeTxt = size ? formatSize(L, size) : "";
 
   if (L === "fr") {
-    if (brand && size) return 'Options ' + brand + ' ' + size + '" :';
+    if (brand && sizeTxt) return "Options " + brand + " " + sizeTxt + " :";
     if (brand && category) return "Options " + brand + " (" + category + ") :";
     if (brand && cls) return "Options " + brand + " (" + cls + ") :";
     if (category) return "Options (" + category + ") :";
@@ -2645,7 +2892,7 @@ function offersHeader(lang, ctx) {
   }
 
   if (L === "ar") {
-    if (brand && size) return "خيارات " + brand + " " + size + " بوصة:";
+    if (brand && sizeTxt) return "خيارات " + brand + " " + sizeTxt + ":";
     if (brand && category) return "خيارات " + brand + " (" + category + "):";
     if (brand && cls) return "خيارات " + brand + " (" + cls + "):";
     if (category) return "خيارات (" + category + "):";
@@ -2654,7 +2901,7 @@ function offersHeader(lang, ctx) {
     return "خيارات:";
   }
 
-  if (brand && size) return 'Options dyal ' + brand + " " + size + '" :';
+  if (brand && sizeTxt) return "Options dyal " + brand + " " + sizeTxt + " :";
   if (brand && category) return "Options dyal " + brand + " (" + category + ") :";
   if (brand && cls) return "Options dyal " + brand + " (" + cls + ") :";
   if (category) return "Options (" + category + ") :";
@@ -2669,11 +2916,12 @@ function catalogHeader(lang, ctx) {
   const brand = c.brand;
   const category = c.category;
   const cls = c.cls;
-  const size = c.size;
+  const size = Number.isFinite(Number(c.size)) ? Number(c.size) : null;
+  const sizeTxt = size ? formatSize(L, size) : "";
   const label = category || cls || null;
 
   if (L === "fr") {
-    if (size) return 'TV ' + size + '" recommandées :';
+    if (sizeTxt) return "TV " + sizeTxt + " recommandées :";
     if (brand && label) return "Produits " + brand + " (" + label + ") :";
     if (label) return "Produits (" + label + ") :";
     if (brand) return "Produits " + brand + " :";
@@ -2681,14 +2929,14 @@ function catalogHeader(lang, ctx) {
   }
 
   if (L === "ar") {
-    if (size) return "تلفازات " + size + " بوصة:";
+    if (sizeTxt) return "تلفازات " + sizeTxt + ":";
     if (brand && label) return "منتجات " + brand + " (" + label + "):";
     if (label) return "منتجات (" + label + "):";
     if (brand) return "منتجات " + brand + ":";
     return "منتجات متوفرة:";
   }
 
-  if (size) return 'TV ' + size + '" disponibles :';
+  if (sizeTxt) return "TV " + sizeTxt + " disponibles :";
   if (brand && label) return "Produits dyal " + brand + " (" + label + ") :";
   if (label) return "Produits (" + label + ") :";
   if (brand) return "Produits dyal " + brand + " :";
@@ -2834,7 +3082,7 @@ async function tryWebsiteCatalogAnswer(userText, lang, key) {
 
   const lines = picks.map((it) => {
     const brandPart = it.brand && it.brand !== "UNKNOWN" ? it.brand + " " : "";
-    const sizePart = isTvContext && Number(it.size) > 0 ? ` ${it.size}\"` : "";
+    const sizePart = isTvContext && Number(it.size) > 0 ? " " + formatSize(lang, Number(it.size)) : "";
     const typePart = isTvContext && it.type ? ` — ${it.type}` : "";
     const urlPart = it.url ? ` — ${it.url}` : "";
     return `• ${brandPart}${it.model}${sizePart}: ${it.price} dh${typePart}${urlPart}`.trim();
@@ -2847,25 +3095,26 @@ async function tryWebsiteCatalogAnswer(userText, lang, key) {
 function salesIntro(lang, ctx) {
   const L = lang || "dzl";
   const c = ctx || {};
-  const size = c.size;
+  const size = Number.isFinite(Number(c.size)) ? Number(c.size) : null;
   const cls = c.cls;
+  const sizeTxt = size ? formatSize(L, size) : "";
 
   if (L === "fr") {
     let s = "Voici des options ";
     if (cls) s += "(" + cls + ") ";
-    if (size) s += size + '" ';
+    if (sizeTxt) s += sizeTxt + " ";
     return s.trim();
   }
   if (L === "ar") {
     let s = "هادي بعض الخيارات ";
     if (cls) s += "(" + cls + ") ";
-    if (size) s += size + " بوصة ";
+    if (sizeTxt) s += sizeTxt + " ";
     return s.trim();
   }
 
   let s = "Hna chi options ";
   if (cls) s += "(" + cls + ") ";
-  if (size) s += size + '" ';
+  if (sizeTxt) s += sizeTxt + " ";
   return s.trim();
 }
 
@@ -3144,6 +3393,8 @@ function hasTvSizeContext(text) {
   const lower = raw.toLowerCase();
   if (hasTvIntentTokens(lower)) return true;
   if (/(pouce|pouces|inch|inches|\"\s*$|''\s*$|diagonale|\"|''|po\b)/i.test(lower)) return true;
+  if (/(بوصة|بوص|بوس)/i.test(raw)) return true;
+  if (/\d{2,3}\s*(بوصة|بوص|بوس)/i.test(raw)) return true;
   return false;
 }
 
@@ -3156,21 +3407,20 @@ function parseUserQuery(text, opts = {}) {
   const forcedClass = (forcedIntent && forcedIntent.cls) || null;
 
   const modelHit = detectModel(raw);
-  const detectedBrand = (modelHit && modelHit.brand) || detectBrand(raw) || ctx.lastBrand || null;
+  const explicitBrand = (modelHit && modelHit.brand) || detectBrand(raw);
+  const sizeVal = extractTvSize(raw, {
+    categoryHint: forcedCategory || ctx.lastCategory || null,
+    allowNoHint: hasTvSizeContext(raw) || Boolean(explicitBrand && !forcedCategory),
+    requireTvHint: false,
+    externalTvContext: hasTvSizeContext(raw) || Boolean(explicitBrand),
+  });
+  const detectedBrand = explicitBrand || (!sizeVal ? ctx.lastBrand : null) || null;
   const detectedCategory = forcedCategory || detectCategory(raw) || ctx.lastCategory || null;
   const detectedClass = forcedClass || (!detectedCategory ? detectClass(raw) : null) || ctx.lastClass || null;
 
-  const tvContext = hasTvSizeContext(raw);
   const forcedNonTv =
     (detectedCategory && normMatch(detectedCategory) !== normMatch(OFFERS_INDEX.classCanon.tv || "tv") && normMatch(detectedCategory) !== "tv") ||
     (detectedClass && normMatch(detectedClass) !== normMatch(OFFERS_INDEX.classCanon.tv || "tv"));
-
-  const sizeVal = extractTvSize(raw, {
-    categoryHint: detectedCategory || detectedClass,
-    allowNoHint: tvContext || Boolean(detectedBrand && !forcedNonTv),
-    requireTvHint: forcedNonTv,
-    externalTvContext: tvContext || (!forcedNonTv && Boolean(detectedBrand)),
-  });
 
   const tvClass = OFFERS_INDEX.classCanon.tv || "Tv";
   const brand = detectedBrand || null;
@@ -3593,7 +3843,7 @@ function handleTvSizePriceFlow(parsed, lang, key) {
       return ensureNoQuestion(msg);
     }
     if (brand) return ensureNoQuestion(t(lang, "notAvailableSize", { brand, size: sizeVal }));
-    return ensureNoQuestion(t(lang, "notAvailableSizeGeneral", { size: sizeVal }));
+    return ensureNoQuestion(t(lang, "askBrandForSize", { size: sizeVal }));
   }
 
   const prices = matches.map((m) => Number(m.offer.price)).filter((p) => Number.isFinite(p));
@@ -3711,23 +3961,7 @@ function tryDirectOfferAnswer(userText, historyMsgs, lang, key) {
       const base = salesIntro(lang, { size: sizeVal, cls: tvCanon }) + "\n\n" + lines;
       return ensureNoQuestion(base);
     }
-    const fallbackBrand = ctx.lastBrand;
-    if (fallbackBrand) {
-      const pack = listOffersForBrand(fallbackBrand, { cls: tvCanon, size: sizeVal, limit: 3, withOffers: true });
-      if (pack.lines.length) {
-        setCtx(key, {
-          lastBrand: fallbackBrand,
-          lastClass: tvCanon || undefined,
-          lastCategory: undefined,
-          lastSize: sizeVal,
-          lastOffersShown: (pack.offers || []).map((o) => ({ brand: fallbackBrand, model: o.model })),
-        });
-        const base = offersHeader(lang, { brand: fallbackBrand, size: sizeVal }) + "\n" + pack.lines.join("\n\n");
-        return ensureNoQuestion(base);
-      }
-      return ensureNoQuestion(t(lang, "notAvailableSize", { brand: fallbackBrand, size: sizeVal }));
-    }
-    return ensureNoQuestion(t(lang, "notAvailableSizeGeneral", { size: sizeVal }));
+    return ensureNoQuestion(t(lang, "askBrandForSize", { size: sizeVal }));
   }
 
   if (brand && category2) {
@@ -4362,7 +4596,7 @@ function validateWanotifierHmac(req) {
   const tsNum = Number(ts);
   if (!Number.isFinite(tsNum)) return false;
 
-  const nowSec = Math.floor(Date.now() / 1000);
+  const nowSec = Math.floor(getNowMs() / 1000);
   const skew = Math.abs(nowSec - tsNum);
   if (skew > CFG.wanotifierMaxSkewSec) return false;
 
@@ -4522,22 +4756,29 @@ app.post("/wanotifier", async (req, res) => {
     const phone = incoming.phone;
     let userTextRaw = String(incoming.text || "").slice(0, 2000);
     const mediaInfo = normalizeMediaInput(mediaMeta || incoming.media);
+    const normalizedMedia = normalizeMedia(mediaMeta || incoming.media);
     const msgType = String(incoming.type || "").toLowerCase();
-    const mediaResult = await processIncomingMedia({
-      mediaInfo,
-      mediaMeta,
-      msgType,
-      lang: detectLang(userTextRaw),
-      key,
-      reqId,
-    });
-    if (mediaResult && mediaResult.userText) {
-      userTextRaw = mediaResult.userText;
-      incoming.text = userTextRaw;
+    const lang = detectLang(userTextRaw || incoming.lang || "");
+    const ip = String(req.ip || "");
+
+    let mediaResult = null;
+    let mediaDerivedText = "";
+    if (normalizedMedia) {
+      mediaResult = await deriveMediaText(
+        { ...normalizedMedia, raw: (normalizedMedia && normalizedMedia.raw) || mediaMeta || incoming.media },
+        lang,
+        reqId
+      );
+      if (mediaResult && mediaResult.ok && mediaResult.text) {
+        mediaDerivedText = mediaResult.text;
+      }
     }
 
-    const lang = detectLang(userTextRaw);
-    const ip = String(req.ip || "");
+    if (mediaDerivedText) {
+      if (userTextRaw) userTextRaw = (userTextRaw + "\n" + mediaDerivedText).slice(0, 2000);
+      else userTextRaw = mediaDerivedText;
+      incoming.text = userTextRaw;
+    }
 
     const logLine = {
       msg: "media_route",
@@ -4567,19 +4808,22 @@ app.post("/wanotifier", async (req, res) => {
       return res.status(429).json({ ok: false, error: "Rate limit exceeded" });
     }
 
+    if (
+      (mediaResult && mediaResult.ok === false && !userTextRaw && !mediaDerivedText) ||
+      (normalizedMedia && CFG.mediaMode === "disabled" && !userTextRaw)
+    ) {
+      const reply = shortenNoQuestion(t(lang, "askTextInsteadMedia"), 420);
+      memory.push(key, "assistant", reply);
+      resetStrikes(key);
+      return res.json({ ok: true, reply });
+    }
+
     const greetingReply = maybeSendInitialGreeting({ key, lang });
-    if (greetingReply) {
+    if (greetingReply && !mediaDerivedText) {
       if (userTextRaw) memory.push(key, "user", userTextRaw);
       memory.push(key, "assistant", greetingReply);
       resetStrikes(key);
       return res.json({ ok: true, reply: greetingReply });
-    }
-
-    if (mediaResult && mediaResult.reply) {
-      const reply = shortenNoQuestion(mediaResult.reply, 520);
-      memory.push(key, "assistant", reply);
-      resetStrikes(key);
-      return res.json({ ok: true, reply });
     }
 
     if (!offersAvailable) {
@@ -4885,6 +5129,13 @@ export {
   isGreetingLikeOpener,
   getCtx as getCtxForTest,
   setCtx as setCtxForTest,
+  normalizeMedia,
+  getSizeFromNameSku,
+  formatSize,
+  offerFromWooProduct,
+  createServerForTests,
+  t,
+  describeImage,
   INITIAL_GREETING_TTL_MS,
 };
 
@@ -4961,7 +5212,7 @@ function runSelfTests() {
   assert.strictEqual(normMatch(parsedMicro.category || ""), normMatch("Micro-ondes"));
 
   const reply50Price = tryDirectOfferAnswer("50 pouce prix", [], "fr", "self_price50");
-  assert.ok(reply50Price.indexOf('50"') >= 0);
+  assert.ok(reply50Price.indexOf(formatSize("fr", 50)) >= 0);
   assert.ok(reply50Price.indexOf("2700") >= 0);
   assert.ok(reply50Price.indexOf("http") < 0);
   assert.ok(!/[\?؟]/.test(reply50Price));
@@ -4974,11 +5225,11 @@ function runSelfTests() {
 
   const replyDaiko32 = tryDirectOfferAnswer("daiko 32", [], "dzl", "self_daiko32");
   assert.ok(replyDaiko32.indexOf("DAIKO") >= 0);
-  assert.ok(replyDaiko32.indexOf('32"') >= 0);
+  assert.ok(replyDaiko32.indexOf(formatSize("dzl", 32)) >= 0);
   assert.ok(!/[\?؟]/.test(replyDaiko32));
 
   const replyMicro = tryDirectOfferAnswer("daiko micro-ondes 32L prix", [], "fr", "self_micro") || "";
-  assert.ok(replyMicro.indexOf('32"') < 0);
+  assert.ok(replyMicro.indexOf(formatSize("fr", 32)) < 0);
   assert.ok(normMatch(replyMicro).indexOf("tv") < 0);
   assert.ok(!/[\?؟]/.test(replyMicro));
 
@@ -5035,7 +5286,7 @@ async function processIncomingMedia({ mediaInfo, mediaMeta, msgType, lang, key, 
       } else if (normalizedMedia.base64) {
         const buf = Buffer.from(String(normalizedMedia.base64 || ""), "base64");
         sizeBytes = buf.length;
-        if (sizeBytes > MAX_AUDIO_BYTES) throw new Error("audio_too_large");
+        if (sizeBytes > CFG.mediaMaxBytesAudio) throw new Error("audio_too_large");
         fs.writeFileSync(tmpFile, buf);
         audioDl = { filePath: tmpFile, mimeType, filename: normalizedMedia.filename || null };
       } else if (normalizedMedia.url) {
@@ -5084,6 +5335,39 @@ async function processIncomingMedia({ mediaInfo, mediaMeta, msgType, lang, key, 
   }
 
   return route;
+}
+
+async function createServerForTests(opts = {}) {
+  const { fetchImpl = null, openai = null, nowMs = null, env = {} } = opts || {};
+  const prevCfg = { ...CFG };
+  const cfgPatch = {};
+  if (env && env.WANOTIFIER_HMAC_SECRET !== undefined)
+    cfgPatch.wanotifierHmacSecret = String(env.WANOTIFIER_HMAC_SECRET || "").trim();
+  if (env && env.WANOTIFIER_HMAC_HEADER !== undefined)
+    cfgPatch.wanotifierHmacHeader = String(env.WANOTIFIER_HMAC_HEADER || CFG.wanotifierHmacHeader).toLowerCase();
+  if (env && env.WANOTIFIER_TS_HEADER !== undefined)
+    cfgPatch.wanotifierTsHeader = String(env.WANOTIFIER_TS_HEADER || CFG.wanotifierTsHeader).toLowerCase();
+  if (env && env.MEDIA_MODE !== undefined) cfgPatch.mediaMode = String(env.MEDIA_MODE || CFG.mediaMode).toLowerCase();
+  if (env && env.MEDIA_ALLOW_INSECURE_HTTP !== undefined)
+    cfgPatch.mediaAllowHttp = String(env.MEDIA_ALLOW_INSECURE_HTTP || "0") === "1";
+  Object.assign(CFG, cfgPatch);
+  setDepsForTests({ fetchImpl, openai, nowMs });
+
+  const srv = app.listen(0);
+  const address = srv.address();
+  const port = typeof address === "object" && address ? address.port : 0;
+  const urlBase = `http://127.0.0.1:${port}`;
+
+  return {
+    app,
+    server: srv,
+    urlBase,
+    close: async () => {
+      await new Promise((resolve) => srv.close(resolve));
+      Object.assign(CFG, prevCfg);
+      setDepsForTests({});
+    },
+  };
 }
 
 if (process.argv[1] === ENTRY_FILE) {
