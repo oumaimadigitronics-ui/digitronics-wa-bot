@@ -12,6 +12,9 @@ const app = express();
 app.set("trust proxy", true);
 
 const LOG_DEBUG = String(process.env.LOG_DEBUG || "0") === "1";
+const DEBUG_WEBHOOK_PAYLOAD = String(process.env.DEBUG_WEBHOOK_PAYLOAD || "")
+  .toLowerCase()
+  .trim();
 const ENTRY_FILE = fileURLToPath(import.meta.url);
 const RUN_SELF_TESTS = String(process.env.RUN_SELF_TESTS || process.env.SELF_TEST || "0") === "1";
 const REQUIRE_ENV = process.argv[1] === ENTRY_FILE && !RUN_SELF_TESTS;
@@ -156,6 +159,22 @@ app.use((req, _res, next) => {
     const ct = String(req.headers["content-type"] || "");
     const bodyPreview = String(req.rawBody || "").slice(0, 500);
     console.log("[RAW BODY]", req.method, req.url, "CT=", ct, "BODY=", bodyPreview);
+  }
+  if (DEBUG_WEBHOOK_PAYLOAD === "true") {
+    const body = req.body || {};
+    const firstMessage = Array.isArray(body.messages) ? body.messages[0] : undefined;
+    const payloadSummary = {
+      level: "debug",
+      msg: "webhook_payload_keys",
+      keys: Object.keys(body),
+      messageKeys:
+        firstMessage && typeof firstMessage === "object" ? Object.keys(firstMessage || {}) : undefined,
+    };
+    try {
+      console.log(JSON.stringify(payloadSummary));
+    } catch {
+      console.log(payloadSummary);
+    }
   }
   next();
 });
@@ -804,133 +823,105 @@ function findPhoneInObject(obj, maxDepth) {
   return null;
 }
 
-function buildConversationKey(fields, req, body) {
-  const f = fields || {};
-  const b = body || {};
-  const pickFirst = (arr) => {
-    for (let i = 0; i < arr.length; i += 1) {
-      const v = arr[i];
-      const s = String(v || "").trim();
-      if (s) return s;
+function normalizeConversationIdValue(raw, type) {
+  if (raw === undefined || raw === null) return "";
+  const rawStr = String(raw).trim();
+  if (!rawStr) return "";
+  if (rawStr.includes("@")) return rawStr.slice(0, 120);
+  if (type === "wa") {
+    const digits = rawStr.replace(/\D+/g, "");
+    if (digits) return digits.slice(0, 120);
+  }
+  return rawStr.slice(0, 120);
+}
+
+function extractConversationKey(req) {
+  const body = (req && req.body) || {};
+  const headers = (req && req.headers) || {};
+  const firstMessage = Array.isArray(body.messages) ? body.messages[0] : undefined;
+  const candidates = [
+    { value: body.contactId, prefix: "wa", used: "contactId" },
+    { value: body.threadId, prefix: "thread", used: "threadId" },
+    { value: body.conversationId, prefix: "thread", used: "conversationId" },
+    { value: body.chatId, prefix: "chat", used: "chatId" },
+    { value: body.remoteJid, prefix: "wa", used: "remoteJid" },
+    { value: body.from, prefix: "wa", used: "from" },
+    { value: body.waId, prefix: "wa", used: "waId" },
+    { value: body.sender, prefix: "wa", used: "sender" },
+    { value: body.phone, prefix: "wa", used: "phone" },
+    { value: firstMessage && firstMessage.from, prefix: "wa", used: "messages[0].from" },
+    { value: firstMessage && firstMessage.wa_id, prefix: "wa", used: "messages[0].wa_id" },
+    { value: body.message && body.message.key && body.message.key.remoteJid, prefix: "wa", used: "message.key.remoteJid" },
+    { value: body.message && body.message.remoteJid, prefix: "wa", used: "message.remoteJid" },
+    {
+      value:
+        body.entry &&
+        body.entry[0] &&
+        body.entry[0].changes &&
+        body.entry[0].changes[0] &&
+        body.entry[0].changes[0].value &&
+        body.entry[0].changes[0].value.messages &&
+        body.entry[0].changes[0].value.messages[0] &&
+        body.entry[0].changes[0].value.messages[0].from,
+      prefix: "wa",
+      used: "entry[0].changes[0].value.messages[0].from",
+    },
+    {
+      value:
+        body.entry &&
+        body.entry[0] &&
+        body.entry[0].changes &&
+        body.entry[0].changes[0] &&
+        body.entry[0].changes[0].value &&
+        body.entry[0].changes[0].value.contacts &&
+        body.entry[0].changes[0].value.contacts[0] &&
+        body.entry[0].changes[0].value.contacts[0].wa_id,
+      prefix: "wa",
+      used: "entry[0].changes[0].value.contacts[0].wa_id",
+    },
+  ];
+
+  for (let i = 0; i < candidates.length; i += 1) {
+    const cand = candidates[i];
+    const id = normalizeConversationIdValue(cand.value, cand.prefix);
+    if (id) {
+      const key = `${cand.prefix}:${id}`;
+      debugLog("conversation_key", { used: cand.used, key });
+      return key;
     }
-    return "";
-  };
-
-  const remoteJid = pickFirst([
-    f.remoteJid,
-    safeGet(b, ["remoteJid"]),
-    safeGet(b, ["data", "remoteJid"]),
-    safeGet(b, ["messages", 0, "key", "remoteJid"]),
-    safeGet(b, ["messages", 0, "key", "remote_jid"]),
-  ]);
-  const waId = pickFirst([
-    f.waId,
-    safeGet(b, ["waId"]),
-    safeGet(b, ["wa_id"]),
-    safeGet(b, ["messages", 0, "wa_id"]),
-    safeGet(b, ["messages", 0, "from"]),
-    safeGet(b, ["data", "waId"]),
-    safeGet(b, ["data", "wa_id"]),
-  ]);
-  const from = pickFirst([f.from, safeGet(b, ["from"]), safeGet(b, ["messages", 0, "from"]), safeGet(b, ["data", "from"])]);
-  const sender = pickFirst([f.sender, safeGet(b, ["sender"]), safeGet(b, ["data", "sender"])]);
-  const phone = String(f.phone || "").trim();
-  const chatId = pickFirst([
-    f.chatId,
-    safeGet(b, ["chatId"]),
-    safeGet(b, ["chat_id"]),
-    safeGet(b, ["messages", 0, "chatId"]),
-    safeGet(b, ["messages", 0, "chat_id"]),
-    safeGet(b, ["data", "chatId"]),
-    safeGet(b, ["data", "chat_id"]),
-  ]);
-  const convId = pickFirst([
-    f.convId,
-    safeGet(b, ["conversationId"]),
-    safeGet(b, ["conversation_id"]),
-    safeGet(b, ["data", "conversationId"]),
-    safeGet(b, ["data", "conversation_id"]),
-  ]);
-
-  const logPayload = {
-    used: null,
-    remoteJid: remoteJid || null,
-    waId: waId || null,
-    from: from || null,
-    sender: sender || null,
-    phone: phone || null,
-    chatId: chatId || null,
-    convId: convId || null,
-  };
-
-  if (remoteJid) {
-    const key = "jid:" + remoteJid.slice(0, 120);
-    debugLog("conversation_key", Object.assign({}, logPayload, { used: "remoteJid", key }));
-    return key;
   }
 
-  if (waId) {
-    const key = "wa:" + stableHash(waId);
-    debugLog("conversation_key", Object.assign({}, logPayload, { used: "waId", key }));
-    return key;
-  }
-
-  if (from) {
-    const key = "from:" + stableHash(from);
-    debugLog("conversation_key", Object.assign({}, logPayload, { used: "from", key }));
-    return key;
-  }
-
-  if (sender) {
-    const key = "sender:" + stableHash(sender);
-    debugLog("conversation_key", Object.assign({}, logPayload, { used: "sender", key }));
-    return key;
-  }
-
-  if (phone) {
-    const key = "phone:" + stableHash(phone);
-    debugLog("conversation_key", Object.assign({}, logPayload, { used: "phone", key }));
-    return key;
-  }
-
-  if (chatId) {
-    const key = "chat:" + chatId.slice(0, 120);
-    debugLog("conversation_key", Object.assign({}, logPayload, { used: "chatId", key }));
-    return key;
-  }
-
-  if (convId) {
-    const key = "conv:" + convId.slice(0, 120);
-    debugLog("conversation_key", Object.assign({}, logPayload, { used: "convId", key }));
-    return key;
-  }
-
-  const ua = String((req && req.headers && req.headers["user-agent"]) || "").slice(0, 120);
-  const ip = String((req && (req.ip || req.connection?.remoteAddress)) || "").slice(0, 120);
+  const xff = headers["x-forwarded-for"];
+  const ipFromHeader = xff ? String(xff).split(",")[0].trim() : "";
+  const ip = String(ipFromHeader || req?.ip || req?.connection?.remoteAddress || "").slice(0, 120);
   const tsBucket = Math.floor(getNowMs() / (15 * 60 * 1000));
   const fallbackHint = {
-    ua,
+    ua: String(headers["user-agent"] || "").slice(0, 120),
     ip,
+    xForwardedFor: Boolean(xff),
+    bodyKeys: Object.keys(body || {}),
+    messageKeys:
+      firstMessage && typeof firstMessage === "object" ? Object.keys(firstMessage || {}) : undefined,
     ts: tsBucket,
     textHash: stableHash(String((body && body.text) || "")),
-    contactId:
-      safeGet(body || {}, ["contact_id"]) ||
-      safeGet(body || {}, ["contactId"]) ||
-      safeGet(body || {}, ["data", "contact_id"]) ||
-      safeGet(body || {}, ["data", "contactId"]) ||
-      null,
-    threadId:
-      safeGet(body || {}, ["thread_id"]) ||
-      safeGet(body || {}, ["threadId"]) ||
-      safeGet(body || {}, ["data", "thread_id"]) ||
-      safeGet(body || {}, ["data", "threadId"]) ||
-      null,
   };
+
   const key = "anon:" + stableHash(JSON.stringify(fallbackHint));
-  const logLine = Object.assign({}, logPayload, { used: "fallback", key });
-  debugLog("conversation_key", logLine);
+  debugLog("conversation_key", { used: "fallback", key });
   console.warn(JSON.stringify({ level: "warn", msg: "conversation_key_fallback", key, hint: fallbackHint }));
   return key;
+}
+
+function buildConversationKey(fields, req, body) {
+  const mergedBody = Object.assign({}, body || {});
+  if (fields && typeof fields === "object") {
+    const normalizedFields = Object.assign({}, fields);
+    if (fields.convId && !fields.conversationId) normalizedFields.conversationId = fields.convId;
+    Object.assign(mergedBody, normalizedFields);
+  }
+  const mergedReq = Object.assign({ headers: {} }, req || {}, { body: mergedBody });
+  if (!mergedReq.headers) mergedReq.headers = {};
+  return extractConversationKey(mergedReq);
 }
 
 function normalizeIncoming(body, req) {
@@ -5416,6 +5407,7 @@ export {
   ensureNoQuestion,
   extractCapacityLiters,
   resolveCategoryIntent,
+  extractConversationKey,
   buildConversationKey,
   normalizeIncoming,
   maybeSendInitialGreeting,
