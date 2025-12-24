@@ -2603,8 +2603,34 @@ function normalizeVisionResult(obj) {
   };
 }
 
+function toImageUrlString(image, mime = "image/jpeg") {
+  if (typeof image === "string") {
+    if (/^(https?:|data:)/i.test(image)) return image;
+    throw new Error("Image string must start with http or data:");
+  }
+
+  if (Buffer.isBuffer(image) || image instanceof Uint8Array) {
+    const buf = Buffer.isBuffer(image) ? image : Buffer.from(image);
+    const b64 = buf.toString("base64");
+    return `data:${mime};base64,${b64}`;
+  }
+
+  if (image && typeof image === "object") {
+    if (typeof image.url === "string") return toImageUrlString(image.url, mime);
+    console.error("Invalid image object keys:", Object.keys(image || {}));
+    throw new Error("Unsupported image object for vision: expected string, Buffer/Uint8Array, or { url }");
+  }
+
+  throw new Error("Unsupported image type for vision input");
+}
+
 async function describeImage({ image, model }, openaiClient) {
   const client = openaiClient || getOpenAIClient();
+  const imageUrl = toImageUrlString(image);
+  console.log("vision image typeof:", typeof image, "isBuffer:", Buffer.isBuffer(image));
+  if (typeof imageUrl === "string" && /^(data:|https?:)/i.test(imageUrl)) {
+    console.log("vision image_url preview:", imageUrl.slice(0, 80));
+  }
   const resp = await client.responses.create({
     model: model || pickVisionModel(),
     input: [
@@ -2615,7 +2641,7 @@ async function describeImage({ image, model }, openaiClient) {
             type: "input_text",
             text: "Extract brand/model/size/category + any visible text. Return ONE compact line. No URLs. No question marks.",
           },
-          { type: "input_image", image_url: image },
+          { type: "input_image", image_url: imageUrl },
         ],
       },
     ],
@@ -2647,7 +2673,6 @@ function pickVisionModel() {
 async function analyzeProductImage(imageBytes, mimeType, opts = {}) {
   const imgBuf = Buffer.isBuffer(imageBytes) ? imageBytes : Buffer.from(imageBytes || []);
   const safeMime = sniffImageMime(imgBuf) || String(mimeType || "image/jpeg");
-  const b64 = imgBuf.toString("base64");
   const model = pickVisionModel();
   const client = getOpenAIClient();
   const formattingInstruction =
@@ -2661,6 +2686,11 @@ async function analyzeProductImage(imageBytes, mimeType, opts = {}) {
     const enforceJsonNote = formattingEnabled
       ? ""
       : " Respond with JSON only. Do not add explanations, code fences, or non-JSON text.";
+    const imageUrl = toImageUrlString(imgBuf, safeMime);
+    console.log("vision image typeof:", typeof imageBytes, "isBuffer:", Buffer.isBuffer(imageBytes));
+    if (typeof imageUrl === "string" && /^(data:|https?:)/i.test(imageUrl)) {
+      console.log("vision image_url preview:", imageUrl.slice(0, 80));
+    }
     const payload = {
       model,
       temperature: 0,
@@ -2672,7 +2702,7 @@ async function analyzeProductImage(imageBytes, mimeType, opts = {}) {
               type: "input_text",
               text: formattingInstruction + enforceJsonNote,
             },
-            { type: "input_image", image_url: { url: `data:${safeMime};base64,${b64}` } },
+            { type: "input_image", image_url: imageUrl },
           ],
         },
       ],
