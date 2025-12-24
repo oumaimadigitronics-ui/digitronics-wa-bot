@@ -70,7 +70,7 @@ const {
   MEDIA_MAX_BYTES_AUDIO = "12000000",
   MEDIA_ALLOW_INSECURE_HTTP = "0",
 
-  OPENAI_VISION_MODEL = "gpt-4o",
+  OPENAI_VISION_MODEL = "",
   OPENAI_TRANSCRIBE_MODEL = "gpt-4o-mini-transcribe",
 } = process.env;
 
