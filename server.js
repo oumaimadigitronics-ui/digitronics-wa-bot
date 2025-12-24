@@ -134,8 +134,6 @@ const COMPANY = {
   address: "Ville de Casablanca – Quartier Oulfa (Haj Fateh) – Rue 9 – Rond-point Chahdiya – à côté de la boulangerie Pan Com",
 };
 
-const GREETING_DAIKO_MODELS = ["GLED32H93DK", "GLED43H94DK", "GLED50AI95DK", "GLED55AI96DK"];
-
 function getOpenAIClient() {
   return getOpenAI();
 }
@@ -314,8 +312,6 @@ function formatSize(lang, size) {
   return `${num}″`;
 }
 
-const INITIAL_GREETING_TTL_MS = 24 * 60 * 60 * 1000;
-
 function sanitizeUrlNoQuestion(urlStr) {
   try {
     const u = new URL(String(urlStr || ""));
@@ -396,7 +392,6 @@ function detectLang(text) {
 
   let frScore = 0;
   if (/[éèêàçùôî]/i.test(t0)) frScore += 2;
-  if (s.indexOf("bonjour") >= 0 || s.indexOf("salut") >= 0) frScore += 2;
   if (s.indexOf("merci") >= 0) frScore += 2;
   if (s.indexOf("livraison") >= 0) frScore += 1;
   if (s.indexOf("commande") >= 0 || s.indexOf("commander") >= 0) frScore += 1;
@@ -414,34 +409,6 @@ function t(lang, key, vars) {
     dzl: {
       askTextInsteadMedia: "Smah lia, ma nqdrch nfhem l-content mn image/voice. 3afak kteb l-message b text bach n3awnk.",
       typeYourMessage: "3afak kteb l-message dyalk.",
-      greeting: (x) => {
-        const y = x || {};
-        const daikoLines = Array.isArray(y.daikoLines) ? y.daikoLines : [];
-        const extras = String(y.extras || "");
-        let offersPart = "Kaynin big offers f DAIKO.";
-        if (daikoLines.length) offersPart = "Big offers f DAIKO:\n" + daikoLines.join("\n");
-        return (
-          "Wa 3alaykom salam, marhba bik f Digitronics.\n\n" +
-          "Ana Digitronics AI Bot.\n" +
-          "Ghadi n3awnk b as2ila l-basita, ila ma qdrtch ghadi ykml m3ak agent.\n\n" +
-          "📍 L3nwan: " +
-          COMPANY.address +
-          "\n" +
-          "💳 " +
-          RULES_I18N.dzl.payment +
-          "\n" +
-          "🚚 " +
-          RULES_I18N.dzl.delivery +
-          "\n\n" +
-          offersPart +
-          "\n\n" +
-          "📝 Ila bghiti tdir commande: " +
-          ORDER_FORM_URL_SAFE +
-          "\n\n" +
-          extras
-        ).trim();
-      },
-      howCanIHelp: "Kifach n9dr n3awnk lyoum?",
       address: "L3nwan dyalna: " + COMPANY.address,
       orderForm: "Tfdal/ي: 3mmer had formulaire bach tdir commande: " + ORDER_FORM_URL_SAFE,
       askOrderNo: "3afak sft رقم الطلب bach n9dro n7ssbo.",
@@ -489,26 +456,6 @@ function t(lang, key, vars) {
     fr: {
       askTextInsteadMedia: "Merci. Pour que je comprenne, envoyez un message écrit (sans audio/image).",
       typeYourMessage: "Merci d’écrire votre demande.",
-      greeting: (x) => {
-        const y = x || {};
-        const daikoLines = Array.isArray(y.daikoLines) ? y.daikoLines : [];
-        let offersPart = "Grandes offres DAIKO disponibles.\n\n";
-        if (daikoLines.length) offersPart = "Grandes offres DAIKO:\n" + daikoLines.join("\n") + "\n\n";
-        return (
-          offersPart +
-          "Bonjour, je suis le bot IA de Digitronics. Je réponds aux questions simples; si besoin, un agent prendra la suite.\n" +
-          "Adresse: " +
-          COMPANY.address +
-          "\n" +
-          RULES_I18N.fr.payment +
-          "\n" +
-          RULES_I18N.fr.delivery +
-          "\n" +
-          "Pour commander: " +
-          ORDER_FORM_URL_SAFE
-        ).trim();
-      },
-      howCanIHelp: "Comment puis-je vous aider aujourd’hui ?",
       address: "Notre adresse: " + COMPANY.address,
       orderForm: "Veuillez remplir ce formulaire pour commander: " + ORDER_FORM_URL_SAFE,
       askOrderNo: "Merci d’envoyer votre numéro de commande pour vérification.",
@@ -556,26 +503,6 @@ function t(lang, key, vars) {
     ar: {
       askTextInsteadMedia: "شكراً. من فضلك ارسل رسالة مكتوبة (بدون صوت/صورة) باش نقدر نفهمك.",
       typeYourMessage: "من فضلك اكتب رسالتك.",
-      greeting: (x) => {
-        const y = x || {};
-        const daikoLines = Array.isArray(y.daikoLines) ? y.daikoLines : [];
-        let offersPart = "عروض كبيرة من DAIKO متوفرة.\n\n";
-        if (daikoLines.length) offersPart = "عروض كبيرة من DAIKO:\n" + daikoLines.join("\n") + "\n\n";
-        return (
-          offersPart +
-          "مرحباً، أنا بوت ذكاء اصطناعي من Digitronics. أجيب عن الأسئلة البسيطة، وإذا لم أستطع فسيكمل معك أحد الفريق.\n" +
-          "العنوان: " +
-          COMPANY.address +
-          "\n" +
-          RULES_I18N.ar.payment +
-          "\n" +
-          RULES_I18N.ar.delivery +
-          "\n" +
-          "للطلب: " +
-          ORDER_FORM_URL_SAFE
-        ).trim();
-      },
-      howCanIHelp: "كيفاش نقدر نعاونك اليوم؟",
       address: "عنواننا: " + COMPANY.address,
       orderForm: "من فضلك عبّئ هذا الفورم للطلب: " + ORDER_FORM_URL_SAFE,
       askOrderNo: "من فضلك ارسل رقم الطلب باش نقدر نتحققو.",
@@ -3392,74 +3319,6 @@ function collectTvOffers({ brand, size, budget }) {
   return items.sort((a, b) => Number(a.offer.price) - Number(b.offer.price));
 }
 
-function buildBigOffersForGreeting(brand, tvCanon) {
-  const BRAND = String(brand || "").trim().toUpperCase();
-  const wanted = BRAND === "DAIKO" ? GREETING_DAIKO_MODELS : [];
-  const arr0 = (((OFFERS && OFFERS.offers && OFFERS.offers[BRAND]) || [])).filter((x) => Number((x && x.stock) || 0) > 0);
-
-  if (wanted.length) {
-    const lines = [];
-    for (let i = 0; i < wanted.length; i += 1) {
-      const model = wanted[i];
-      let found = null;
-      for (let j = 0; j < arr0.length; j += 1) {
-        if (normMatch(arr0[j].model) === normMatch(model)) {
-          found = arr0[j];
-          break;
-        }
-      }
-      if (!found) continue;
-      if (tvCanon && normMatch((found && found.class) || "") !== normMatch(tvCanon)) continue;
-      lines.push(formatOfferLine(BRAND, found));
-    }
-    return lines;
-  }
-
-  const tvLines = listOffersForBrand(BRAND, { cls: tvCanon, limit: 3 });
-  if (tvLines.length) return tvLines;
-  return [];
-}
-
-function buildGreetingExtras() {
-  return (
-    "✅ TV DAIKO: Garantie 2 ans.\n" +
-    "✅ Kayjiw b 2 télécommandes.\n" +
-    "✅ Taman kaychmel support/bracket mural.\n" +
-    "✅ Livraison gratuite."
-  );
-}
-
-function shouldSendInitialGreeting(ctx, now) {
-  const ts = Number(now || Date.now());
-  if (!ctx || (ctx.didSendInitialGreeting !== true && ctx.greeted !== true && ctx.hasGreeted !== true)) return true;
-  const at = Number(ctx.greetedAt || ctx.initialGreetingAt || 0);
-  if (!at) return true;
-  return ts - at > INITIAL_GREETING_TTL_MS;
-}
-
-function buildInitialGreeting(lang) {
-  const daikoLines = buildBigOffersForGreeting("DAIKO", OFFERS_INDEX.classCanon.tv || null);
-  const extras = buildGreetingExtras();
-  const base = t(lang, "greeting", { daikoLines, extras });
-  return `${base}\n\n${t(lang, "howCanIHelp")}`.trim();
-}
-
-function maybeSendInitialGreeting({ key, lang, now }) {
-  const ctx = getCtx(key);
-  if (!shouldSendInitialGreeting(ctx, now)) return null;
-  const ts = Number(now || Date.now());
-  const greeting = buildInitialGreeting(lang);
-  setCtx(key, {
-    ...ctx,
-    didSendInitialGreeting: true,
-    initialGreetingAt: ts,
-    greeted: true,
-    greetedAt: ts,
-    hasGreeted: true,
-  });
-  return greeting;
-}
-
 function resolveOfferForPhoto(userText, historyMsgs, key) {
   const text = String(userText || "");
   const hist = Array.isArray(historyMsgs) ? historyMsgs : [];
@@ -3713,57 +3572,6 @@ function pickFromLastShown(key, prefer) {
     return normMatch(a.offer.model || "").localeCompare(normMatch(b.offer.model || ""));
   });
   return resolved[0];
-}
-
-function isGreeting(text) {
-  const raw = String(text || "").trim();
-  const s = normMatch(raw);
-  if (!s) return false;
-
-  if (s === "salam") return true;
-  if (s === "slm") return true;
-  if (s === "hi") return true;
-  if (s === "hello") return true;
-  if (s === "bonjour") return true;
-  if (s === "salut") return true;
-
-  if (s.indexOf("salam") >= 0) return true;
-  if (s.indexOf("slm") >= 0) return true;
-  if (s.indexOf("bonjour") >= 0) return true;
-  if (s.indexOf("salut") >= 0) return true;
-
-  if (hasArabicScript(raw) && /سلام|السلام|مرحبا/.test(raw)) return true;
-  return false;
-}
-
-function normalizeGreetingLike(text) {
-  const base = stripDiacritics(arabicIndicToAsciiDigits(String(text || "").toLowerCase()));
-  return base
-    .replace(/[\p{P}\p{S}]+/gu, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-function isGreetingLikeOpener(text) {
-  const s = normalizeGreetingLike(text);
-  if (!s) return false;
-  if (isGreeting(text)) return true;
-
-  const candidates = [
-    "hello can i get more info on this",
-    "bonjour puis je en savoir plus a ce sujet",
-    "مرحبًا هل يمكنني الحصول على مزيد من المعلومات حول هذا",
-  ];
-
-  for (let i = 0; i < candidates.length; i += 1) {
-    const c = normalizeGreetingLike(candidates[i]);
-    if (!c) continue;
-    if (s === c) return true;
-    if (s.startsWith(c)) return true;
-    if (c.startsWith(s)) return true;
-  }
-
-  return false;
 }
 
 function isCallMeIntent(text) {
@@ -4327,23 +4135,6 @@ function tryDirectOfferAnswer(userText, historyMsgs, lang, key) {
   return null;
 }
 
-function handleGreetingMessage({ key, lang, text, now }) {
-  if (!isGreetingLikeOpener(text)) return null;
-  const ctx = getCtx(key);
-  if (ctx && (ctx.greeted === true || ctx.didSendInitialGreeting === true || ctx.hasGreeted === true)) return null;
-  const ts = Number(now || Date.now());
-  const greeting = buildInitialGreeting(lang);
-  setCtx(key, {
-    ...ctx,
-    didSendInitialGreeting: true,
-    initialGreetingAt: ts,
-    greeted: true,
-    greetedAt: ts,
-    hasGreeted: true,
-  });
-  return greeting;
-}
-
 function bestGuessOffers(lang, key, limit = 3) {
   if (!OFFERS || !OFFERS.offers || !Object.keys(OFFERS.offers).length) return null;
 
@@ -4663,7 +4454,7 @@ function buildSystemPrompt(offersSubset, lang, opts) {
     "- NEVER reply in English.\n" +
     "- Do NOT suggest out-of-stock products (stock <= 0).\n" +
     "- Do NOT mention stock quantity.\n" +
-    "- Mention delivery/payment/warranty ONLY if the client asks (except greeting handled outside).\n" +
+    "- Mention delivery/payment/warranty ONLY if the client asks.\n" +
     "- If client asks about products/prices/options, DO NOT invent or use OFFERS. Catalog replies are handled separately. Provide only short helpful text if needed.\n" +
     "- If client asks for photo/picture/image: ONLY provide product link if present, else write ONE short instruction sentence without question marks.\n" +
     "- Recommend at most 3 options.\n" +
@@ -5018,14 +4809,6 @@ app.post("/wanotifier", async (req, res) => {
       return res.json({ ok: true, reply });
     }
 
-    const greetingReply = maybeSendInitialGreeting({ key, lang });
-    if (greetingReply && !mediaDerivedText) {
-      if (userTextRaw) memory.push(key, "user", userTextRaw);
-      memory.push(key, "assistant", greetingReply);
-      resetStrikes(key);
-      return res.json({ ok: true, reply: greetingReply });
-    }
-
     if (!offersAvailable) {
       const reply = shortenNoQuestion(t(lang, "cannot3"), 420);
       console.error(JSON.stringify({ level: "error", msg: "offers_unavailable", lastOffersSync }));
@@ -5042,12 +4825,6 @@ app.post("/wanotifier", async (req, res) => {
 
     memory.push(key, "user", userTextRaw);
     const history = memory.get(key);
-    const greetingFlow = handleGreetingMessage({ key, lang, text: userTextRaw });
-    if (greetingFlow) {
-      memory.push(key, "assistant", greetingFlow);
-      resetStrikes(key);
-      return res.json({ ok: true, reply: greetingFlow });
-    }
 if (isIptvIntent(userTextRaw)) {
   const out = shortenNoQuestion(t(lang, "iptvCall"), 220);
   memory.push(key, "assistant", out);
@@ -5324,9 +5101,6 @@ export {
   transcribeAudioFile,
   classifyMediaRoute,
   processIncomingMedia,
-  maybeSendInitialGreeting,
-  handleGreetingMessage,
-  isGreetingLikeOpener,
   getCtx as getCtxForTest,
   setCtx as setCtxForTest,
   normalizeMedia,
@@ -5336,7 +5110,6 @@ export {
   createServerForTests,
   t,
   describeImage,
-  INITIAL_GREETING_TTL_MS,
 };
 
 function runSelfTests() {
