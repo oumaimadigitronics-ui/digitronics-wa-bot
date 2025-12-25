@@ -3636,7 +3636,7 @@ function collectTvOffers({ brand, size, budget }) {
       if (a.price !== b.price) return a.price - b.price;
       return normMatch((a.offer && a.offer.model) || "").localeCompare(normMatch((b.offer && b.offer.model) || ""));
     })
-    .slice(0, 5)
+    .slice(0, MAX_OFFERS)
     .map((it) => ({ brand: it.brand, offer: it.offer }));
 }
 
@@ -4279,17 +4279,17 @@ function handleTvSizePriceFlow(parsed, lang, key) {
       for (let j = 0; j < arr.length; j += 1) fallbackItems.push({ brand: b, offer: arr[j] });
     }
 
-    const ranked = rankOffers(fallbackItems, { size: sizeVal, className: tvCanon, limit: 5 });
+    const ranked = rankOffers(fallbackItems, { size: sizeVal, className: tvCanon, limit: MAX_OFFERS });
     if (ranked.length) {
       setCtx(key, {
         lastBrand: brand || undefined,
         lastClass: tvCanon || undefined,
         lastCategory: undefined,
         lastSize: sizeVal,
-        lastOffersShown: ranked.slice(0, 5).map((it) => ({ brand: it.brand, model: (it.offer && it.offer.model) || "" })),
+        lastOffersShown: ranked.slice(0, MAX_OFFERS).map((it) => ({ brand: it.brand, model: (it.offer && it.offer.model) || "" })),
       });
       const header = offersHeader(lang, { brand: brand || undefined, size: sizeVal, cls: tvCanon || undefined });
-      const lines = ranked.slice(0, 5).map((it) => formatOfferLine(it.brand, it.offer, { lang }));
+      const lines = ranked.slice(0, MAX_OFFERS).map((it) => formatOfferLine(it.brand, it.offer, { lang }));
       return ensureNoQuestion([header, ...lines].filter(Boolean).join("\n"));
     }
 
