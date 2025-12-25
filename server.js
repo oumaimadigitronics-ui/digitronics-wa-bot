@@ -303,7 +303,7 @@ function ensureNoQuestion(text) {
 
 function shortenNoQuestion(text, max) {
   const cleaned = stripUrlQueriesInText(stripQuestions(text));
-  return shorten(ensureNoQuestion(cleaned), max || 520);
+  return shorten(ensureNoQuestion(cleaned), max || CFG.maxReplyChars);
 }
 
 function sniffImageMime(buf) {
@@ -3549,7 +3549,7 @@ async function tryWebsiteCatalogAnswer(userText, lang, key) {
   });
 
   const reply = ensureNoQuestion([header, ...lines].filter(Boolean).join("\n"));
-  return shortenNoQuestion(reply, 520);
+  return shortenNoQuestion(reply, CFG.maxReplyChars);
 }
 
 function salesIntro(lang, ctx) {
