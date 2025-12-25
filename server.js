@@ -5373,7 +5373,7 @@ app.post("/wanotifier", async (req, res) => {
     if (mediaInfo && (mediaInfo.kind === "image" || guessMediaKind(mediaInfo) === "image")) {
       try {
         const visionOut = await handleVisionMedia(mediaInfo, lang, key, { reqId });
-        const reply = shortenNoQuestion(visionOut.reply, 520);
+        const reply = shortenNoQuestion(visionOut.reply, CFG.maxReplyChars);
         memory.push(key, "assistant", reply);
         resetStrikes(key);
         console.log(JSON.stringify({ level: "info", msg: "vision_reply_sent", reqId, confidence: visionOut.confidence || 0 }));
@@ -6002,7 +6002,7 @@ async function processIncomingMedia({ mediaInfo, mediaMeta, msgType, lang, key, 
   if (route.imageLikely && normalizedMedia) {
     try {
       const visionReply = await handleVisionMedia(normalizedMedia, lang, key, { reqId });
-      const reply = shortenNoQuestion(visionReply.reply, 520);
+      const reply = shortenNoQuestion(visionReply.reply, CFG.maxReplyChars);
       return { ...route, reply };
     } catch (e) {
       console.error(JSON.stringify({ level: "error", msg: "vision_failed", reqId, error: (e && e.message) || String(e) }));
