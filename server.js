@@ -131,7 +131,19 @@ const CONTACTS = {
 };
 
 // RULE #1 no questions
-const BRAND_PRIORITY = ["Daiko", "TCL", "Haier", "Samsung", "LG", "Elexia", "Revolution", "Visio", "Echolink", "Hisense"];
+const BRAND_PRIORITY = [
+  "Daiko",
+  "TCL",
+  "Haier",
+  "Samsung",
+  "LG",
+  "Elexia",
+  "Revolution",
+  "Visio",
+  "Echolink",
+  "Hisense",
+  "Tivoli",
+];
 const MAX_OFFERS = 5;
 
 const COMPANY = {
@@ -2002,6 +2014,15 @@ function detectBrand(text) {
   return null;
 }
 
+function findBrandByNorm(name) {
+  const target = normMatch(name || "");
+  const brands = OFFERS_INDEX.brands || [];
+  for (let i = 0; i < brands.length; i += 1) {
+    if (normMatch(brands[i]) === target) return brands[i];
+  }
+  return null;
+}
+
 function buildDefaultClassAliases() {
   const tvCanon = OFFERS_INDEX.classCanon.tv;
   const out = {};
@@ -2140,6 +2161,24 @@ function detectCategory(text) {
     if (s === ncat || s.indexOf(ncat) >= 0) return cat;
   }
 
+  return null;
+}
+
+function findCategoryByNorm(name) {
+  const target = normMatch(name || "");
+  const cats = OFFERS_INDEX.categories || [];
+  for (let i = 0; i < cats.length; i += 1) {
+    if (normMatch(cats[i]) === target) return cats[i];
+  }
+  return null;
+}
+
+function findClassByNorm(name) {
+  const target = normMatch(name || "");
+  const classes = OFFERS_INDEX.classes || [];
+  for (let i = 0; i < classes.length; i += 1) {
+    if (normMatch(classes[i]) === target) return classes[i];
+  }
   return null;
 }
 
@@ -4094,6 +4133,56 @@ function isIptvIntent(text) {
   return false;
 }
 
+// RULE B: All TVs have integrated receiver + TNT
+function isTvReceiverIntent(text) {
+  const raw = String(text || "");
+  const s = normMatch(raw);
+  if (!s) return false;
+
+  const normTokens = ["recepteur", "récepteur", "tnt", "decoder", "decodeur", "décodeur"];
+  for (let i = 0; i < normTokens.length; i += 1) {
+    if (includesToken(s, normTokens[i])) return true;
+  }
+
+  const rawChecks = ["ريسپتور", "ريسيفر", "ريسيفور", "tnt", "decoder tnt"];
+  for (let i = 0; i < rawChecks.length; i += 1) {
+    if (raw.toLowerCase().includes(rawChecks[i].toLowerCase())) return true;
+  }
+
+  return false;
+}
+
+// RULE A: Tivoli ovens
+function isTivoliOvenIntent(text) {
+  const raw = String(text || "");
+  const s = normMatch(raw);
+  if (!s || s.indexOf("tivoli") < 0) return false;
+
+  const ovenTokens = [
+    "four",
+    "forn",
+    "فرن",
+    "cuisiniere",
+    "cuisinière",
+    "cuisinier",
+    "gaziniere",
+    "gazinière",
+    "cuisiniere",
+    "cuisinière",
+  ];
+
+  for (let i = 0; i < ovenTokens.length; i += 1) {
+    if (includesToken(s, ovenTokens[i])) return true;
+  }
+
+  const rawTokens = ["tivoli four", "فرن tivoli", "gazinière tivoli", "cuisinière tivoli"];
+  for (let i = 0; i < rawTokens.length; i += 1) {
+    if (raw.toLowerCase().includes(rawTokens[i].toLowerCase())) return true;
+  }
+
+  return false;
+}
+
 
 function asksAboutDeliveryPaymentWarranty(text) {
   const s = normMatch(text);
@@ -4351,11 +4440,25 @@ function tryDirectOfferAnswer(userText, historyMsgs, lang, key) {
   }
 
   const tvFlow = handleTvSizePriceFlow(parsed, lang, key);
+  const receiverIntent = isTvReceiverIntent(text);
+  if (receiverIntent) {
+    const receiverMsg = tvReceiverAnswerText(lang);
+    const offerReply = tvFlow || defaultTvOffersForReceiver(lang, key);
+    const combined = [receiverMsg, offerReply].filter(Boolean).join("\n\n");
+    if (combined) return ensureNoQuestion(combined);
+    return ensureNoQuestion(receiverMsg);
+  }
+
   if (tvFlow) return tvFlow;
 
-  let brand = parsed.brand || null;
-  let category = parsed.category || null;
-  let cls = parsed.cls || null;
+  const tivoliIntent = isTivoliOvenIntent(text);
+  const tivoliBrand = tivoliIntent ? findBrandByNorm("tivoli") || "TIVOLI" : null;
+  const ovenCategory = tivoliIntent ? findCategoryByNorm("cuisiniere") || "Cuisiniere" : null;
+  const ovenClass = tivoliIntent ? findClassByNorm("cuisiniere") || "Cuisiniere" : null;
+
+  let brand = tivoliIntent ? tivoliBrand || parsed.brand || null : parsed.brand || null;
+  let category = tivoliIntent ? ovenCategory || parsed.category || null : parsed.category || null;
+  let cls = tivoliIntent ? ovenClass || parsed.cls || null : parsed.cls || null;
   const sizeVal = parsed.size;
   const capacityVal = parsed.capacityLiters || extractCapacityLiters(text);
 
@@ -4710,6 +4813,36 @@ function bestGuessOffers(lang, key, limit = MAX_OFFERS) {
   }
 
   return null;
+}
+
+// RULE B: All TVs have integrated receiver + TNT
+function tvReceiverAnswerText(lang) {
+  if (lang === "fr") return "Oui ✅ Toutes nos TV ont un récepteur intégré + TNT intégré.";
+  return "ايه ✅ جميع التلفازات عندنا فيها Récepteur intégré و TNT intégré.";
+}
+
+function defaultTvOffersForReceiver(lang, key) {
+  const tvCanon = OFFERS_INDEX.classCanon.tv || "Tv";
+  const tvCanonNorm = normMatch(tvCanon || "tv");
+  const items0 = OFFERS_INDEX.classToOffers.get(tvCanonNorm) || [];
+  const items = items0
+    .map((it, idx) => Object.assign({}, it, { originalIdx: typeof it.originalIdx === "number" ? it.originalIdx : idx }))
+    .filter((it) => Number(((it.offer || {}).stock) || 0) > 0);
+
+  const ranked = rankOffers(items, { limit: MAX_OFFERS, className: tvCanon, tvClassCanon: tvCanon });
+  if (!ranked.length) return null;
+
+  setCtx(key, {
+    lastBrand: undefined,
+    lastCategory: undefined,
+    lastClass: tvCanon || undefined,
+    lastSize: undefined,
+    lastOffersShown: ranked.map((it) => ({ brand: it.brand, model: (it.offer && it.offer.model) || "" })),
+  });
+
+  const lines = ranked.map((it) => formatOfferLine(it.brand, it.offer, { lang })).join("\n\n");
+  const header = offersHeader(lang, { cls: tvCanon });
+  return [header, lines].filter(Boolean).join("\n");
 }
 
 const MAX_OFFERS_FOR_PROMPT = 20;
