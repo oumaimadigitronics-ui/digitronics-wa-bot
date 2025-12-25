@@ -1826,6 +1826,10 @@ function getClassFromCategories(p) {
 }
 
 function getTypeFromProduct(p) {
+  // Fix: always respect catalog type
+  const typeRaw = String((p && p.type) || "").trim();
+  if (typeRaw) return typeRaw;
+
   const sku = normMatch((p && p.sku) || "");
   const name = normMatch((p && p.name) || "");
   const brand = normMatch(getBrandFromWoo(p) || "");
@@ -2959,10 +2963,12 @@ function selectOffersFromVision(hints) {
     size: sizeNum,
     capacityLiters: capNum,
     className: cls,
-    limit: MAX_OFFERS,
+    limit: null,
   });
 
-  return { offers: ranked.map((r) => r.offer), lines: ranked.map((r) => formatOfferLine(r.brand, r.offer)) };
+  const picked = pickCheapestPerBrand(ranked).slice(0, MAX_OFFERS);
+
+  return { offers: picked.map((r) => r.offer), lines: picked.map((r) => formatOfferLine(r.brand, r.offer)) };
 }
 
 async function handleVisionMedia(mediaInput, lang, key, opts = {}) {
@@ -3304,30 +3310,69 @@ function capacityScoreCmp(a, b) {
   return aScore - bScore;
 }
 
+// RULE: max 1 offer per brand, cheapest per brand, priority order
 function pickCheapestPerBrand(items) {
-  const map = new Map();
   const arr = Array.isArray(items) ? items : [];
+  const brandMap = new Map();
+
+  const brandKey = (b) => normMatch(String(b || "").trim());
+  const modelKey = (it) => {
+    const src = (it && it.offer) || it || {};
+    return normMatch(src.model || src.name || (it && it.model) || (it && it.name) || "");
+  };
+  const priceInfo = (it) => {
+    const src = (it && it.offer) || it || {};
+    const sale = Number(src.salePrice);
+    const base = Number(src.price);
+    const price = Number.isFinite(sale) ? sale : Number.isFinite(base) ? base : null;
+    return { price, hasPrice: Number.isFinite(price) };
+  };
+
   for (let i = 0; i < arr.length; i += 1) {
-    const it = arr[i] || {};
-    const brand = String(it.brand || "").toUpperCase();
-    if (!brand) continue;
-    const offer = it.offer || {};
-    const priceNum = Number(offer.price);
-    if (!Number.isFinite(priceNum)) continue;
-    const modelNorm = normMatch(offer.model || offer.name || "");
-    const existing = map.get(brand);
-    if (!existing) {
-      map.set(brand, { brand, offer, price: priceNum, modelNorm });
-      continue;
+    const item = arr[i] || {};
+    const brandRaw = String(item.brand || "").trim();
+    const key = brandKey(brandRaw);
+    if (!key) continue;
+
+    const price = priceInfo(item);
+    const model = modelKey(item);
+    const record = brandMap.get(key) || { brand: brandRaw, best: null, fallback: null };
+
+    if (price.hasPrice) {
+      if (
+        !record.best ||
+        price.price < record.best.price ||
+        (price.price === record.best.price && model.localeCompare(record.best.model) < 0)
+      ) {
+        record.best = { item, price: price.price, model };
+      }
+    } else if (!record.fallback) {
+      record.fallback = { item, model };
     }
-    if (
-      priceNum < existing.price ||
-      (priceNum === existing.price && modelNorm.localeCompare(existing.modelNorm) < 0)
-    ) {
-      map.set(brand, { brand, offer, price: priceNum, modelNorm });
-    }
+
+    if (!record.brand) record.brand = brandRaw;
+    brandMap.set(key, record);
   }
-  return Array.from(map.values()).map((x) => ({ brand: x.brand, offer: x.offer }));
+
+  const picks = [];
+  for (const record of brandMap.values()) {
+    const choice = record.best || record.fallback;
+    if (choice && choice.item) picks.push(choice.item);
+  }
+
+  return picks.sort((a, b) => {
+    const ra = brandRank(a.brand || "", BRAND_PRIORITY);
+    const rb = brandRank(b.brand || "", BRAND_PRIORITY);
+    if (ra !== rb) return ra - rb;
+    const pa = priceInfo(a);
+    const pb = priceInfo(b);
+    if (pa.hasPrice && pb.hasPrice && pa.price !== pb.price) return pa.price - pb.price;
+    if (pa.hasPrice !== pb.hasPrice) return pa.hasPrice ? -1 : 1;
+    const ba = normMatch(String(a.brand || ""));
+    const bb = normMatch(String(b.brand || ""));
+    if (ba !== bb) return ba.localeCompare(bb);
+    return modelKey(a).localeCompare(modelKey(b));
+  });
 }
 
 
@@ -3521,7 +3566,7 @@ async function tryWebsiteCatalogAnswer(userText, lang, key) {
     if (priorityOnly.length) sorted = priorityOnly.sort(sortTv);
   }
 
-  const picks = sorted.slice(0, MAX_OFFERS);
+  const picks = pickCheapestPerBrand(sorted).slice(0, MAX_OFFERS);
   if (!picks.length) return null;
 
   setCtx(key, {
@@ -3603,11 +3648,12 @@ function listOffersForBrand(brand, opts) {
     size: hasSize ? sizeNum : null,
     capacityLiters: hasCapacity ? capacityNum : null,
     className: cls,
-    limit,
+    limit: null,
   });
-  const offers = ranked.map((r) => r.offer);
-  const lines = ranked.map((r) => formatOfferLine(r.brand, r.offer));
-  debugLog("rank_offers_for_brand", { brand, cls, category, size: hasSize ? sizeNum : null, count: ranked.length });
+  const picked = pickCheapestPerBrand(ranked).slice(0, limit);
+  const offers = picked.map((r) => r.offer || r);
+  const lines = picked.map((r) => formatOfferLine(r.brand, r.offer || r));
+  debugLog("rank_offers_for_brand", { brand, cls, category, size: hasSize ? sizeNum : null, count: picked.length });
   if (withOffers) return { lines, offers };
   return lines;
 }
@@ -3632,15 +3678,18 @@ function listOffersForSizeAcrossBrands(size, opts) {
     items.push(...arr);
   }
 
-  const ranked = rankOffers(items, { size: Number(size), className: cls, limit });
-  debugLog("rank_offers_across_brands", { size, cls, count: ranked.length });
+  const ranked = rankOffers(items, { size: Number(size), className: cls, limit: null });
+  const uniqueRanked = pickCheapestPerBrand(ranked);
+  debugLog("rank_offers_across_brands", { size, cls, count: uniqueRanked.length });
 
   if (hasFocusBrand() && FOCUS.mode === "preferred") {
-    const focus = ranked.filter((x) => x.brand === FOCUS.brand).slice(0, limit);
-    if (focus.length) return focus.concat(ranked.filter((x) => x.brand !== FOCUS.brand)).slice(0, limit);
+    const focus = uniqueRanked.filter((x) => x.brand === FOCUS.brand);
+    const combined = focus.concat(uniqueRanked.filter((x) => x.brand !== FOCUS.brand));
+    const picks = pickCheapestPerBrand(combined).slice(0, limit);
+    if (picks.length) return picks;
   }
 
-  return ranked.slice(0, limit);
+  return uniqueRanked.slice(0, limit);
 }
 
 function collectTvOffers({ brand, size, budget }) {
@@ -3663,20 +3712,7 @@ function collectTvOffers({ brand, size, budget }) {
       items.push({ brand: b, offer: o });
     }
   }
-  return items
-    .map((it) => ({
-      brand: it.brand,
-      offer: it.offer,
-      rank: brandRank(it.brand, TV_BRAND_PRIORITY),
-      price: Number((it.offer && it.offer.price) || Number.POSITIVE_INFINITY),
-    }))
-    .sort((a, b) => {
-      if (a.rank !== b.rank) return a.rank - b.rank;
-      if (a.price !== b.price) return a.price - b.price;
-      return normMatch((a.offer && a.offer.model) || "").localeCompare(normMatch((b.offer && b.offer.model) || ""));
-    })
-    .slice(0, MAX_OFFERS)
-    .map((it) => ({ brand: it.brand, offer: it.offer }));
+  return pickCheapestPerBrand(items).slice(0, MAX_OFFERS);
 }
 
 function resolveOfferForPhoto(userText, historyMsgs, key) {
@@ -4368,17 +4404,18 @@ function handleTvSizePriceFlow(parsed, lang, key) {
       for (let j = 0; j < arr.length; j += 1) fallbackItems.push({ brand: b, offer: arr[j] });
     }
 
-    const ranked = rankOffers(fallbackItems, { size: sizeVal, className: tvCanon, limit: MAX_OFFERS });
-    if (ranked.length) {
+    const ranked = rankOffers(fallbackItems, { size: sizeVal, className: tvCanon, limit: null });
+    const limited = pickCheapestPerBrand(ranked).slice(0, MAX_OFFERS);
+    if (limited.length) {
       setCtx(key, {
         lastBrand: brand || undefined,
         lastClass: tvCanon || undefined,
         lastCategory: undefined,
         lastSize: sizeVal,
-        lastOffersShown: ranked.slice(0, MAX_OFFERS).map((it) => ({ brand: it.brand, model: (it.offer && it.offer.model) || "" })),
+        lastOffersShown: limited.map((it) => ({ brand: it.brand, model: (it.offer && it.offer.model) || "" })),
       });
       const header = offersHeader(lang, { brand: brand || undefined, size: sizeVal, cls: tvCanon || undefined });
-      const lines = ranked.slice(0, MAX_OFFERS).map((it) => formatOfferLine(it.brand, it.offer, { lang }));
+      const lines = limited.map((it) => formatOfferLine(it.brand, it.offer, { lang }));
       return ensureNoQuestion([header, ...lines].filter(Boolean).join("\n"));
     }
 
@@ -4389,11 +4426,11 @@ function handleTvSizePriceFlow(parsed, lang, key) {
   const minPrice = prices.length ? Math.min(...prices) : null;
   const maxPrice = prices.length ? Math.max(...prices) : null;
 
-  const top = matches.slice(0, MAX_OFFERS);
-  const lines = top
-    .sort((a, b) => brandRank(a.brand, TV_BRAND_PRIORITY) - brandRank(b.brand, TV_BRAND_PRIORITY) || Number(a.offer.price) - Number(b.offer.price))
-    .slice(0, MAX_OFFERS)
-    .map((it) => formatOfferLine(it.brand, it.offer, { lang }));
+  const top = pickCheapestPerBrand(matches).slice(0, MAX_OFFERS);
+  const orderedTop = [...top].sort(
+    (a, b) => brandRank(a.brand, TV_BRAND_PRIORITY) - brandRank(b.brand, TV_BRAND_PRIORITY) || Number(a.offer.price) - Number(b.offer.price)
+  );
+  const lines = orderedTop.map((it) => formatOfferLine(it.brand, it.offer, { lang }));
   const wantPrice = priceIntent || cheapIntent || Number.isFinite(budget);
 
   setCtx(key, {
@@ -4401,7 +4438,7 @@ function handleTvSizePriceFlow(parsed, lang, key) {
     lastClass: tvCanon || undefined,
     lastCategory: undefined,
     lastSize: sizeVal,
-    lastOffersShown: top.map((it) => ({ brand: it.brand, model: (it.offer && it.offer.model) || "" })),
+    lastOffersShown: orderedTop.map((it) => ({ brand: it.brand, model: (it.offer && it.offer.model) || "" })),
   });
 
   const parts = [];
@@ -4588,7 +4625,7 @@ function tryDirectOfferAnswer(userText, historyMsgs, lang, key) {
             return normMatch((a.offer && a.offer.model) || "").localeCompare(normMatch((b.offer && b.offer.model) || ""));
           })
           .slice(0, MAX_OFFERS)
-      : rankOffers(items, { limit: MAX_OFFERS, capacityLiters: capacityHint });
+      : pickCheapestPerBrand(rankOffers(items, { limit: null, capacityLiters: capacityHint })).slice(0, MAX_OFFERS);
 
     if (sorted.length) {
       setCtx(key, {
@@ -4631,7 +4668,7 @@ function tryDirectOfferAnswer(userText, historyMsgs, lang, key) {
             return normMatch((a.offer && a.offer.model) || "").localeCompare(normMatch((b.offer && b.offer.model) || ""));
           })
           .slice(0, MAX_OFFERS)
-      : rankOffers(items, { limit: MAX_OFFERS, capacityLiters: capacityHint });
+      : pickCheapestPerBrand(rankOffers(items, { limit: null, capacityLiters: capacityHint })).slice(0, MAX_OFFERS);
 
     if (sorted.length) {
       setCtx(key, {
@@ -4675,17 +4712,18 @@ function tryDirectOfferAnswer(userText, historyMsgs, lang, key) {
     const items = items0
       .map((it, idx) => Object.assign({}, it, { originalIdx: typeof it.originalIdx === "number" ? it.originalIdx : idx }))
       .filter((it) => Number(((it.offer || {}).stock) || 0) > 0);
-    const ranked = rankOffers(items, { limit: MAX_OFFERS, capacityLiters: capacityHint });
-    if (ranked.length) {
+    const ranked = rankOffers(items, { limit: null, capacityLiters: capacityHint });
+    const picked = pickCheapestPerBrand(ranked).slice(0, MAX_OFFERS);
+    if (picked.length) {
       setCtx(key, {
         lastBrand: undefined,
         lastCategory: ctx.lastCategory,
         lastClass: ctx.lastClass || undefined,
         lastSize: undefined,
         lastCapacity: capacityHint,
-        lastOffersShown: ranked.map((it) => ({ brand: it.brand, model: (it.offer && it.offer.model) || "" })),
+        lastOffersShown: picked.map((it) => ({ brand: it.brand, model: (it.offer && it.offer.model) || "" })),
       });
-      const lines = ranked.map((it) => formatOfferLine(it.brand, it.offer)).join("\n\n");
+      const lines = picked.map((it) => formatOfferLine(it.brand, it.offer)).join("\n\n");
       const base = offersHeader(lang, { category: ctx.lastCategory });
       return ensureNoQuestion(base + "\n" + lines);
     }
@@ -4728,21 +4766,22 @@ function bestGuessOffers(lang, key, limit = MAX_OFFERS) {
       .filter((it) => Number(((it.offer || {}).stock) || 0) > 0);
 
     const ranked = rankOffers(items, {
-      limit: max,
+      limit: null,
       className: ctx.lastClass || null,
       tvClassCanon: tvCanon,
       capacityLiters: ctx.lastCapacity || null,
     });
-    if (ranked.length) {
+    const picked = pickCheapestPerBrand(ranked).slice(0, max);
+    if (picked.length) {
       setCtx(key, {
         lastBrand: undefined,
         lastCategory: ctx.lastCategory,
         lastClass: ctx.lastClass || undefined,
         lastSize: undefined,
         lastCapacity: ctx.lastCapacity || undefined,
-        lastOffersShown: ranked.map((it) => ({ brand: it.brand, model: (it.offer && it.offer.model) || "" })),
+        lastOffersShown: picked.map((it) => ({ brand: it.brand, model: (it.offer && it.offer.model) || "" })),
       });
-      const lines = ranked.map((it) => formatOfferLine(it.brand, it.offer)).join("\n\n");
+      const lines = picked.map((it) => formatOfferLine(it.brand, it.offer)).join("\n\n");
       const base = offersHeader(L, { category: ctx.lastCategory });
       return ensureNoQuestion(base + "\n" + lines);
     }
@@ -4755,16 +4794,17 @@ function bestGuessOffers(lang, key, limit = MAX_OFFERS) {
       .map((it, idx) => Object.assign({}, it, { originalIdx: typeof it.originalIdx === "number" ? it.originalIdx : idx }))
       .filter((it) => Number(((it.offer || {}).stock) || 0) > 0);
 
-    const ranked = rankOffers(items, { limit: max, className: ctx.lastClass, tvClassCanon: tvCanon });
-    if (ranked.length) {
+    const ranked = rankOffers(items, { limit: null, className: ctx.lastClass, tvClassCanon: tvCanon });
+    const picked = pickCheapestPerBrand(ranked).slice(0, max);
+    if (picked.length) {
       setCtx(key, {
         lastBrand: undefined,
         lastClass: ctx.lastClass,
         lastCategory: undefined,
         lastSize: undefined,
-        lastOffersShown: ranked.map((it) => ({ brand: it.brand, model: (it.offer && it.offer.model) || "" })),
+        lastOffersShown: picked.map((it) => ({ brand: it.brand, model: (it.offer && it.offer.model) || "" })),
       });
-      const lines = ranked.map((it) => formatOfferLine(it.brand, it.offer)).join("\n\n");
+      const lines = picked.map((it) => formatOfferLine(it.brand, it.offer)).join("\n\n");
       const base = offersHeader(L, { cls: ctx.lastClass });
       return ensureNoQuestion(base + "\n" + lines);
     }
@@ -4798,16 +4838,17 @@ function bestGuessOffers(lang, key, limit = MAX_OFFERS) {
     }
   }
 
-  const ranked = rankOffers(items, { limit: max, className: null, tvClassCanon: null });
-  if (ranked.length) {
+  const ranked = rankOffers(items, { limit: null, className: null, tvClassCanon: null });
+  const picked = pickCheapestPerBrand(ranked).slice(0, max);
+  if (picked.length) {
     setCtx(key, {
       lastBrand: undefined,
       lastClass: undefined,
       lastCategory: undefined,
       lastSize: undefined,
-      lastOffersShown: ranked.map((it) => ({ brand: it.brand, model: (it.offer && it.offer.model) || "" })),
+      lastOffersShown: picked.map((it) => ({ brand: it.brand, model: (it.offer && it.offer.model) || "" })),
     });
-    const lines = ranked.map((it) => formatOfferLine(it.brand, it.offer)).join("\n\n");
+    const lines = picked.map((it) => formatOfferLine(it.brand, it.offer)).join("\n\n");
     const base = offersHeader(L, {});
     return ensureNoQuestion(base + "\n" + lines);
   }
@@ -4829,18 +4870,19 @@ function defaultTvOffersForReceiver(lang, key) {
     .map((it, idx) => Object.assign({}, it, { originalIdx: typeof it.originalIdx === "number" ? it.originalIdx : idx }))
     .filter((it) => Number(((it.offer || {}).stock) || 0) > 0);
 
-  const ranked = rankOffers(items, { limit: MAX_OFFERS, className: tvCanon, tvClassCanon: tvCanon });
-  if (!ranked.length) return null;
+  const ranked = rankOffers(items, { limit: null, className: tvCanon, tvClassCanon: tvCanon });
+  const picked = pickCheapestPerBrand(ranked).slice(0, MAX_OFFERS);
+  if (!picked.length) return null;
 
   setCtx(key, {
     lastBrand: undefined,
     lastCategory: undefined,
     lastClass: tvCanon || undefined,
     lastSize: undefined,
-    lastOffersShown: ranked.map((it) => ({ brand: it.brand, model: (it.offer && it.offer.model) || "" })),
+    lastOffersShown: picked.map((it) => ({ brand: it.brand, model: (it.offer && it.offer.model) || "" })),
   });
 
-  const lines = ranked.map((it) => formatOfferLine(it.brand, it.offer, { lang })).join("\n\n");
+  const lines = picked.map((it) => formatOfferLine(it.brand, it.offer, { lang })).join("\n\n");
   const header = offersHeader(lang, { cls: tvCanon });
   return [header, lines].filter(Boolean).join("\n");
 }
