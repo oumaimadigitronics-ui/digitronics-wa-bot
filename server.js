@@ -1177,6 +1177,33 @@ const memory = new Memory({
 const ctxStore = new Map();
 const CTX_TTL_MS = 24 * 60 * 60 * 1000;
 
+function shouldAskOrderNo(key, now = Date.now()) {
+  const ctx = getCtx(key);
+  const lastAsk = ctx.lastAskOrderAt || 0;
+  return !lastAsk || now - lastAsk > PENDING_TTL_MS;
+}
+
+function markOrderAsk(key, type) {
+  setCtx(key, { lastAskOrderAt: Date.now(), lastAskOrderType: type });
+}
+
+function clearOrderAsk(key) {
+  setCtx(key, { lastAskOrderAt: 0, lastAskOrderType: "" });
+}
+
+function neutralOrderReply(lang) {
+  if (lang === "fr") return "D’accord.";
+  if (lang === "ar") return "حسناً.";
+  return "OK.";
+}
+
+function alternativeSupportReply(lang) {
+  const calls = CONTACTS.calls.join(" / ");
+  if (lang === "fr") return "Envoyez votre nom + téléphone, on vous rappelle, ou appelez: " + calls + ".";
+  if (lang === "ar") return "صيفط لينا سميتك + رقمك وغا نتاصلوا بيك، أو عيط لينا على: " + calls + ".";
+  return "Sift smiytk + numéro, ghadi ntasslo bik, ola 3ayet lina: " + calls + ".";
+}
+
 function setCtx(key, patch) {
   const now = Date.now();
   const k = String(key || "");
@@ -5304,6 +5331,7 @@ app.post("/wanotifier", async (req, res) => {
 
     if (pending && pending.waiting && isNoOrderNumberIntent(userTextRaw)) {
       pendingOrderStore.delete(key);
+      clearOrderAsk(key);
       let reply = "";
       if (lang === "fr") reply = "D’accord. Sans numéro de commande, vous pouvez appeler: " + CONTACTS.calls.join(" / ") + ".";
       else if (lang === "ar") reply = "تمام. إلا ما كانش رقم الطلب، تقدر تعيط لينا: " + CONTACTS.calls.join(" / ") + ".";
@@ -5318,12 +5346,32 @@ app.post("/wanotifier", async (req, res) => {
       if (orderNo) {
         pendingOrderStore.delete(key);
         lastOrderAckStore.set(key, { at: Date.now(), orderNo });
+        clearOrderAsk(key);
         const out = shortenNoQuestion(t(lang, "gotOrderNo"), 520);
         memory.push(key, "assistant", out);
         resetStrikes(key);
         return res.json({ ok: true, reply: out });
       }
+      const ctx = getCtx(key);
+      const askedRecently = !shouldAskOrderNo(key);
+      const lastAskType = ctx.lastAskOrderType || "";
+      // Avoid looping on asking for order numbers; suggest alternatives after the first ask.
+      if (askedRecently && lastAskType === "ask") {
+        const out = shortenNoQuestion(alternativeSupportReply(lang), 420);
+        markOrderAsk(key, "alt");
+        memory.push(key, "assistant", out);
+        resetStrikes(key);
+        return res.json({ ok: true, reply: out });
+      }
+      if (askedRecently) {
+        const out = shortenNoQuestion(neutralOrderReply(lang), 220);
+        markOrderAsk(key, "neutral");
+        memory.push(key, "assistant", out);
+        resetStrikes(key);
+        return res.json({ ok: true, reply: out });
+      }
       const out = shortenNoQuestion(t(lang, "askOrderNo"), 420);
+      markOrderAsk(key, "ask");
       memory.push(key, "assistant", out);
       return res.json({ ok: true, reply: out });
     }
@@ -5331,7 +5379,11 @@ app.post("/wanotifier", async (req, res) => {
     if (isCallMeIntent(userTextRaw)) {
       const recent = lastOrderAckStore.get(key);
       const okRecent = Boolean(recent && recent.at && Date.now() - recent.at < PENDING_TTL_MS);
-      const out = shortenNoQuestion(okRecent ? t(lang, "callSoon") : t(lang, "callSoonNeedOrder"), 420);
+      const out = shortenNoQuestion(
+        okRecent || !shouldAskOrderNo(key) ? t(lang, "callSoon") : t(lang, "callSoonNeedOrder"),
+        420
+      );
+      if (!okRecent && out === t(lang, "callSoonNeedOrder")) markOrderAsk(key, "callSoonNeedOrder");
       memory.push(key, "assistant", out);
       resetStrikes(key);
       return res.json({ ok: true, reply: out });
@@ -5341,13 +5393,17 @@ app.post("/wanotifier", async (req, res) => {
       supportModeStore.delete(key);
       if (orderNo) {
         lastOrderAckStore.set(key, { at: Date.now(), orderNo });
+        clearOrderAsk(key);
         const out = shortenNoQuestion(t(lang, "gotOrderNo"), 520);
         memory.push(key, "assistant", out);
         resetStrikes(key);
         return res.json({ ok: true, reply: out });
       }
       pendingOrderStore.set(key, { waiting: true, at: Date.now() });
-      const out = shortenNoQuestion(t(lang, "askOrderNo"), 420);
+      const shouldAsk = shouldAskOrderNo(key);
+      const out = shortenNoQuestion(shouldAsk ? t(lang, "askOrderNo") : neutralOrderReply(lang), 420);
+      if (shouldAsk) markOrderAsk(key, "ask");
+      else markOrderAsk(key, "neutral");
       memory.push(key, "assistant", out);
       return res.json({ ok: true, reply: out });
     }
