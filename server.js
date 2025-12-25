@@ -5373,7 +5373,7 @@ app.post("/wanotifier", async (req, res) => {
     if (mediaInfo && (mediaInfo.kind === "image" || guessMediaKind(mediaInfo) === "image")) {
       try {
         const visionOut = await handleVisionMedia(mediaInfo, lang, key, { reqId });
-        const reply = shortenNoQuestion(visionOut.reply, 520);
+        const reply = shortenNoQuestion(visionOut.reply, CFG.maxReplyChars);
         memory.push(key, "assistant", reply);
         resetStrikes(key);
         console.log(JSON.stringify({ level: "info", msg: "vision_reply_sent", reqId, confidence: visionOut.confidence || 0 }));
