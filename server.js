@@ -130,10 +130,20 @@ const CONTACTS = {
   calls: ["0605123934", "0522895746"],
 };
 
+// RULE #1 no questions
+const BRAND_PRIORITY = ["Daiko", "TCL", "Haier", "Samsung", "LG", "Elexia", "Revolution", "Visio", "Echolink", "Hisense"];
+
 const COMPANY = {
   name: "Digitronics",
   address: "Ville de Casablanca – Quartier Oulfa (Haj Fateh) – Rue 9 – Rond-point Chahdiya – à côté de la boulangerie Pan Com",
 };
+
+// RULE #1 no questions
+function brandRank(name, priority = BRAND_PRIORITY) {
+  const m = new Map(priority.map((b, idx) => [normMatch(b), idx]));
+  const r = m.get(normMatch(name || ""));
+  return Number.isInteger(r) ? r : Number.POSITIVE_INFINITY;
+}
 
 function getOpenAIClient() {
   return getOpenAI();
@@ -419,14 +429,14 @@ function t(lang, key, vars) {
       bankTransferHow:
         'Ila bghiti tخلص b virement: mlli tdir commande, zid note f formulaire: "paiement par virement bancaire".\nFormulaire: ' +
         ORDER_FORM_URL_SAFE,
-      needDetails: "3tini brand/model/size wla catégorie bach n3tik options.",
+      needDetails: "سمح ليا ما فهمتش الطلب ديالك مزيان 🙏 غادي يدخل معاك وكيل بشري يكمل معاك، ولا تقدر تعيط لينا على 0605123934",
       cannot3: "Ma qdrtch n3tik jawab bd9a daba. T9dr t3yt lina: " + CONTACTS.calls.join(" / ") + ".",
       photoLink: (x) => {
         const link = String((x || {}).link || "");
         return "Hna link dyal l-produit: " + link;
       },
       photoNoLink: "Ma 3ndnach link dyal tswira daba. 3tini model wla brand+size.",
-      askBrandModelSize: "3tini brand wla model wla size bach n3tik link/option.",
+      askBrandModelSize: "سمح ليا ما فهمتش الطلب ديالك مزيان 🙏 غادي يدخل معاك وكيل بشري يكمل معاك، ولا تقدر تعيط لينا على 0605123934",
       categoryUnavailable: (x) => {
         const z = x || {};
         const category = String(z.category || "");
@@ -446,8 +456,8 @@ function t(lang, key, vars) {
         return "Smah lia, ma kaynach TV " + sizeTxt + " daba.";
       },
       askBrandForSize: (x) => {
-        const sizeTxt = formatSize("dzl", (x && x.size) || x);
-        return "Smah lia, 3tini brand w budget ta9ribi dyal TV " + sizeTxt + " bach n3awnk.";
+        void x;
+        return "سمح ليا ما فهمتش الطلب ديالك مزيان 🙏 غادي يدخل معاك وكيل بشري يكمل معاك، ولا تقدر تعيط لينا على 0605123934";
       },
       preferBest: "L’a7san men had l-khtiyarat هو",
       preferCheapest: "L’ar5as men had l-khtiyarat هو",
@@ -466,14 +476,14 @@ function t(lang, key, vars) {
       bankTransferHow:
         'Paiement par virement : lors de la commande, ajoutez une note dans le formulaire : "paiement par virement bancaire".\nFormulaire: ' +
         ORDER_FORM_URL_SAFE,
-      needDetails: "Merci de préciser la marque, le modèle, la taille ou la catégorie.",
+      needDetails: "Désolé, je n’ai pas bien compris 🙏 Un agent humain va prendre le relais, ou appelez-nous au 0605123934",
       cannot3: "Je ne peux pas répondre avec certitude pour le moment. Vous pouvez appeler: " + CONTACTS.calls.join(" / ") + ".",
       photoLink: (x) => {
         const link = String((x || {}).link || "");
         return "Voici le lien du produit: " + link;
       },
       photoNoLink: "Je n’ai pas de lien photo pour ce produit. Précisez le modèle ou marque+taille.",
-      askBrandModelSize: "Précisez la marque, le modèle ou la taille.",
+      askBrandModelSize: "Désolé, je n’ai pas bien compris 🙏 Un agent humain va prendre le relais, ou appelez-nous au 0605123934",
       categoryUnavailable: (x) => {
         const z = x || {};
         const category = String(z.category || "");
@@ -493,8 +503,8 @@ function t(lang, key, vars) {
         return "Désolé, aucune TV " + sizeTxt + " disponible pour le moment.";
       },
       askBrandForSize: (x) => {
-        const sizeTxt = formatSize("fr", (x && x.size) || x);
-        return "Merci d’indiquer la marque et/ou le budget pour une TV " + sizeTxt + " afin de proposer des options.";
+        void x;
+        return "Désolé, je n’ai pas bien compris 🙏 Un agent humain va prendre le relais, ou appelez-nous au 0605123934";
       },
       preferBest: "Le meilleur parmi ces options est",
       preferCheapest: "Le moins cher parmi ces options est",
@@ -512,14 +522,14 @@ function t(lang, key, vars) {
       callSoonNeedOrder: "حسناً. غادي نعيطو ليك قريب. إلا كان عندك رقم الطلب صيفطو من فضلك.",
       bankTransferHow:
         'باش تخلص بالتحويل البنكي: منين دير الطلب زيد ملاحظة فالفورم: "الدفع بتحويل بنكي".\nالفورم: ' + ORDER_FORM_URL_SAFE,
-      needDetails: "عطيني الماركة أو الموديل أو الحجم أو الفئة باش نعاونك.",
+      needDetails: "سمح ليا ما فهمتش الطلب ديالك مزيان 🙏 غادي يدخل معاك وكيل بشري يكمل معاك، ولا تقدر تعيط لينا على 0605123934",
       cannot3: "ماقدرتش نعطيك جواب مؤكد دابا. تقدر تعيط لينا: " + CONTACTS.calls.join(" / ") + ".",
       photoLink: (x) => {
         const link = String((x || {}).link || "");
         return "هاهو رابط المنتج: " + link;
       },
       photoNoLink: "ما كاينش رابط صورة لهاد المنتج دابا. عطيني الموديل ولا الماركة+الحجم.",
-      askBrandModelSize: "عطيني الماركة ولا الموديل ولا الحجم.",
+      askBrandModelSize: "سمح ليا ما فهمتش الطلب ديالك مزيان 🙏 غادي يدخل معاك وكيل بشري يكمل معاك، ولا تقدر تعيط لينا على 0605123934",
       categoryUnavailable: (x) => {
         const z = x || {};
         const category = String(z.category || "");
@@ -539,8 +549,8 @@ function t(lang, key, vars) {
         return "سمح ليا، ما كايناش تلفاز " + sizeTxt + " دابا.";
       },
       askBrandForSize: (x) => {
-        const sizeTxt = formatSize("ar", (x && x.size) || x);
-        return "صيفط ليا الماركة ولا الميزانية ديالك لتلفاز " + sizeTxt + " باش نعاونك.";
+        void x;
+        return "سمح ليا ما فهمتش الطلب ديالك مزيان 🙏 غادي يدخل معاك وكيل بشري يكمل معاك، ولا تقدر تعيط لينا على 0605123934";
       },
       preferBest: "الأفضل من هاد الخيارات هو",
       preferCheapest: "الأرخص من هاد الخيارات هو",
@@ -553,6 +563,15 @@ function t(lang, key, vars) {
   const val = base[key];
   if (typeof val === "function") return String(val(v));
   return String(val || "");
+}
+
+// RULE #2 fallback with agent
+function fallbackWithAgent(lang) {
+  const L = String(lang || "dzl");
+  if (L === "fr") {
+    return "Désolé, je n’ai pas bien compris 🙏 Un agent humain va prendre le relais, ou appelez-nous au 0605123934";
+  }
+  return "سمح ليا ما فهمتش الطلب ديالك مزيان 🙏 غادي يدخل معاك وكيل بشري يكمل معاك، ولا تقدر تعيط لينا على 0605123934";
 }
 
 function stableHash(input) {
@@ -1315,6 +1334,8 @@ const PENDING_TTL_MS = 30 * 60 * 1000;
 
 const supportModeStore = new Map();
 const SUPPORT_TTL_MS = 30 * 60 * 1000;
+// RULE #3 audio reminder + transcription
+const audioReminderStore = new Map();
 
 let OFFERS = { offers: {} };
 
@@ -2196,9 +2217,17 @@ function extractCapacityLiters(text) {
   return null;
 }
 
+// RULE #4 always add links
+function buildProductLink(product) {
+  const url = sanitizeUrlNoQuestion(String((product && (product.url || product.link)) || "").trim());
+  if (url) return url;
+  const query = encodeURIComponent(String((product && (product.model || product.name || product.sku)) || "").trim());
+  if (!query) return "https://digitronics.ma";
+  return `https://digitronics.ma/search?q=${query}`;
+}
 
+// RULE #1 no questions
 function formatOfferLine(brand, o, opts = {}) {
-  const includeUrl = opts.includeUrl !== false;
   const safeBrand = String(brand || "").trim();
   const model = String((o && o.model) || "").trim();
   const priceNum = Number((o && o.price) || NaN);
@@ -2207,8 +2236,9 @@ function formatOfferLine(brand, o, opts = {}) {
   const sizePart = Number.isFinite(sizeNum) ? " " + formatSize(opts.lang || "dzl", sizeNum) : "";
   const typeVal = String((o && o.type) || "").trim();
   const typePart = typeVal ? ` — ${typeVal}` : "";
-  const url = sanitizeUrlNoQuestion(String((o && o.url) || (o && o.link) || "").trim());
-  const urlPart = includeUrl && url ? ` — ${url}` : "";
+  // RULE #4 always add links
+  const url = buildProductLink(o || {});
+  const urlPart = url ? ` — رابط: ${url}` : "";
 
   return `• ${safeBrand}${model ? " " + model : ""}${sizePart}: ${pricePart}${typePart}${urlPart}`.trim();
 }
@@ -2995,7 +3025,7 @@ async function handleVisionMedia(mediaInput, lang, key, opts = {}) {
       size: sizeNum || undefined,
     });
     const lines = Array.isArray(offers.lines) ? offers.lines : [];
-    const body = lines.length ? header + "\n" + lines.join("\n") : t(lang, "needDetails");
+  const body = lines.length ? header + "\n" + lines.join("\n") : fallbackWithAgent(lang);
     offerReply = {
       reply: shortenNoQuestion(body, CFG.maxReplyChars),
       confidence: vision.confidence || 0,
@@ -3178,7 +3208,9 @@ function rankOffers(items, opts) {
   const priorityRank = new Map(priority.map((b, idx) => [String(b || "").toUpperCase(), idx]));
   const rankForBrand = (b) => {
     const r = priorityRank.get(String(b || "").toUpperCase());
-    return Number.isInteger(r) ? r : Number.POSITIVE_INFINITY;
+    if (Number.isInteger(r)) return r;
+    const global = brandRank(b, priority);
+    return Number.isInteger(global) ? global : brandRank(b);
   };
 
   const tvClassNorm = normMatch(tvClassCanon || "");
@@ -3188,7 +3220,7 @@ function rankOffers(items, opts) {
     .map((it, idx) => normalizeOfferItem((it && it.brand) || "", (it && it.offer) || {}, (it && it.originalIdx) ?? idx))
     .filter((it) => it.brand && it.offer && it.stock > 0);
 
-  const priorityExists = isTvContext && arr.some((it) => Number.isFinite(rankForBrand(it.brand)));
+  const priorityExists = arr.some((it) => Number.isFinite(rankForBrand(it.brand)));
   if (priorityExists) {
     arr = arr.filter((it) => Number.isFinite(rankForBrand(it.brand)));
   }
@@ -3202,8 +3234,8 @@ function rankOffers(items, opts) {
         return Object.assign({}, it, { sizeScore, capacityScore, idx });
       })
     .sort((a, b) => {
-      const ra = isTvContext ? rankForBrand(a.brand) : Number.POSITIVE_INFINITY;
-      const rb = isTvContext ? rankForBrand(b.brand) : Number.POSITIVE_INFINITY;
+      const ra = rankForBrand(a.brand);
+      const rb = rankForBrand(b.brand);
       if (ra !== rb) return ra - rb;
 
       if (a.sizeScore !== b.sizeScore) return a.sizeScore - b.sizeScore;
@@ -3471,7 +3503,8 @@ async function tryWebsiteCatalogAnswer(userText, lang, key) {
     const brandPart = it.brand && it.brand !== "UNKNOWN" ? it.brand + " " : "";
     const sizePart = isTvContext && Number(it.size) > 0 ? " " + formatSize(lang, Number(it.size)) : "";
     const typePart = isTvContext && it.type ? ` — ${it.type}` : "";
-    const urlPart = it.url ? ` — ${it.url}` : "";
+    const url = buildProductLink(it);
+    const urlPart = url ? ` — رابط: ${url}` : "";
     return `• ${brandPart}${it.model}${sizePart}: ${it.price} dh${typePart}${urlPart}`.trim();
   });
 
@@ -3590,7 +3623,20 @@ function collectTvOffers({ brand, size, budget }) {
       items.push({ brand: b, offer: o });
     }
   }
-  return items.sort((a, b) => Number(a.offer.price) - Number(b.offer.price));
+  return items
+    .map((it) => ({
+      brand: it.brand,
+      offer: it.offer,
+      rank: brandRank(it.brand, TV_BRAND_PRIORITY),
+      price: Number((it.offer && it.offer.price) || Number.POSITIVE_INFINITY),
+    }))
+    .sort((a, b) => {
+      if (a.rank !== b.rank) return a.rank - b.rank;
+      if (a.price !== b.price) return a.price - b.price;
+      return normMatch((a.offer && a.offer.model) || "").localeCompare(normMatch((b.offer && b.offer.model) || ""));
+    })
+    .slice(0, 5)
+    .map((it) => ({ brand: it.brand, offer: it.offer }));
 }
 
 function resolveOfferForPhoto(userText, historyMsgs, key) {
@@ -4222,12 +4268,31 @@ function handleTvSizePriceFlow(parsed, lang, key) {
 
   const matches = collectTvOffers({ brand, size: sizeVal, budget });
   if (!matches.length) {
-    if (Number.isFinite(budget)) {
-      const msg = `Aucune TV ${sizeVal} pouces disponible à ${budget} dh ou moins. Essayez une autre taille (43, 50, 55) ou une autre marque.`;
-      return ensureNoQuestion(msg);
+    const tvCanon = OFFERS_INDEX.classCanon.tv || "Tv";
+    const fallbackItems = [];
+    const brandsPool = brand ? [brand] : OFFERS_INDEX.brands || [];
+    for (let i = 0; i < brandsPool.length; i += 1) {
+      const b = brandsPool[i];
+      const arr = ((OFFERS && OFFERS.offers && OFFERS.offers[b]) || [])
+        .filter((o) => Number((o && o.stock) || 0) > 0 && normMatch(o.class || "") === normMatch(tvCanon || ""));
+      for (let j = 0; j < arr.length; j += 1) fallbackItems.push({ brand: b, offer: arr[j] });
     }
-    if (brand) return ensureNoQuestion(t(lang, "notAvailableSize", { brand, size: sizeVal }));
-    return ensureNoQuestion(t(lang, "askBrandForSize", { size: sizeVal }));
+
+    const ranked = rankOffers(fallbackItems, { size: sizeVal, className: tvCanon, limit: 5 });
+    if (ranked.length) {
+      setCtx(key, {
+        lastBrand: brand || undefined,
+        lastClass: tvCanon || undefined,
+        lastCategory: undefined,
+        lastSize: sizeVal,
+        lastOffersShown: ranked.slice(0, 5).map((it) => ({ brand: it.brand, model: (it.offer && it.offer.model) || "" })),
+      });
+      const header = offersHeader(lang, { brand: brand || undefined, size: sizeVal, cls: tvCanon || undefined });
+      const lines = ranked.slice(0, 5).map((it) => formatOfferLine(it.brand, it.offer, { lang }));
+      return ensureNoQuestion([header, ...lines].filter(Boolean).join("\n"));
+    }
+
+    return ensureNoQuestion(fallbackWithAgent(lang));
   }
 
   const prices = matches.map((m) => Number(m.offer.price)).filter((p) => Number.isFinite(p));
@@ -4236,9 +4301,9 @@ function handleTvSizePriceFlow(parsed, lang, key) {
 
   const top = matches.slice(0, 3);
   const lines = top
-    .sort((a, b) => Number(a.offer.price) - Number(b.offer.price))
-    .slice(0, 3)
-    .map((it) => formatOfferLine(it.brand, it.offer, { includeUrl: false }));
+    .sort((a, b) => brandRank(a.brand, TV_BRAND_PRIORITY) - brandRank(b.brand, TV_BRAND_PRIORITY) || Number(a.offer.price) - Number(b.offer.price))
+    .slice(0, 5)
+    .map((it) => formatOfferLine(it.brand, it.offer, { lang }));
   const wantPrice = priceIntent || cheapIntent || Number.isFinite(budget);
 
   setCtx(key, {
@@ -4648,7 +4713,7 @@ function bestGuessOffers(lang, key, limit = 3) {
 
 const MAX_OFFERS_FOR_PROMPT = 20;
 
-const TV_BRAND_PRIORITY = ["TCL", "DAIKO", "HAIER", "SAMSUNG", "VISIO", "REVOLUTION", "MORSAT", "LG"];
+const TV_BRAND_PRIORITY = BRAND_PRIORITY.map((b) => String(b || "").toUpperCase());
 
 const OFFER_SCHEMA_HINT = {
   description:
@@ -4914,12 +4979,12 @@ async function digibotLLMReply(userText, historyMsgs, lang, key) {
     let reply = String(choice || "").trim();
     reply = ensureNoQuestion(reply);
 
-    if (!reply) reply = ensureNoQuestion(t(lang, "needDetails"));
+    if (!reply) reply = ensureNoQuestion(fallbackWithAgent(lang));
     return reply;
   } catch (_err) {
     const direct = tryDirectOfferAnswer(userText, historyMsgs, lang, key);
     if (direct) return ensureNoQuestion(direct);
-    return ensureNoQuestion(t(lang, "needDetails"));
+    return ensureNoQuestion(fallbackWithAgent(lang));
   }
 }
 
@@ -5252,7 +5317,7 @@ app.post("/wanotifier", async (req, res) => {
       const resolved = resolveOfferForPhoto(userTextRaw, history, key);
 
       if (!resolved) {
-        const reply = shortenNoQuestion(t(lang, "askBrandModelSize"), 420);
+        const reply = shortenNoQuestion(fallbackWithAgent(lang), 420);
         memory.push(key, "assistant", reply);
         resetStrikes(key);
         return res.json({ ok: true, reply });
@@ -5304,7 +5369,7 @@ app.post("/wanotifier", async (req, res) => {
 
       if (s.indexOf("wall mount") >= 0 || s.indexOf("support") >= 0 || s.indexOf("حامل") >= 0 || s.indexOf("براكي") >= 0) parts.push(r.wall_mount);
 
-      const reply = shortenNoQuestion(parts.length ? parts.join("\n") : t(lang, "needDetails"), 520);
+      const reply = shortenNoQuestion(parts.length ? parts.join("\n") : fallbackWithAgent(lang), 520);
       memory.push(key, "assistant", reply);
       resetStrikes(key);
       return res.json({ ok: true, reply });
@@ -5629,18 +5694,19 @@ function runSelfTests() {
   const reply50Price = tryDirectOfferAnswer("50 pouce prix", [], "fr", "self_price50");
   assert.ok(reply50Price.indexOf(formatSize("fr", 50)) >= 0);
   assert.ok(reply50Price.indexOf("2700") >= 0);
-  assert.ok(reply50Price.indexOf("http") < 0);
+  assert.ok(reply50Price.indexOf("http") >= 0);
   assert.ok(!/[\?؟]/.test(reply50Price));
 
   const reply55Budget = tryDirectOfferAnswer("tv 55 moins de 4000 dh", [], "fr", "self_budget55");
   assert.ok(reply55Budget.indexOf("3800") >= 0);
   assert.ok(reply55Budget.indexOf("4100") < 0);
-  assert.ok(reply55Budget.indexOf("http") < 0);
+  assert.ok(reply55Budget.indexOf("http") >= 0);
   assert.ok(!/[\?؟]/.test(reply55Budget));
 
   const replyDaiko32 = tryDirectOfferAnswer("daiko 32", [], "dzl", "self_daiko32");
   assert.ok(replyDaiko32.indexOf("DAIKO") >= 0);
   assert.ok(replyDaiko32.indexOf(formatSize("dzl", 32)) >= 0);
+  assert.ok(replyDaiko32.indexOf("http") >= 0);
   assert.ok(!/[\?؟]/.test(replyDaiko32));
 
   const replyMicro = tryDirectOfferAnswer("daiko micro-ondes 32L prix", [], "fr", "self_micro") || "";
@@ -5665,6 +5731,25 @@ async function main() {
   server = app.listen(CFG.port, () => {
     console.log("Server running on port", CFG.port);
   });
+}
+
+// RULE #3 audio reminder + transcription
+function audioReminderText(lang) {
+  if (String(lang || "") === "fr") {
+    return "Pour vous aider rapidement, merci d’écrire votre demande en message au lieu d’un vocal 🙏";
+  }
+  return "باش نعاونك بسرعة، عفاك كتب ليا الطلب فمِساج بدل الصوت 🙏";
+}
+
+function shouldSendAudioReminder(key) {
+  const last = audioReminderStore.get(key);
+  const now = Date.now();
+  const ONE_DAY = 24 * 60 * 60 * 1000;
+  if (!last || now - last > ONE_DAY) {
+    audioReminderStore.set(key, now);
+    return true;
+  }
+  return false;
 }
 
 function classifyMediaRoute(mediaInfo, msgType) {
@@ -5723,7 +5808,11 @@ async function processIncomingMedia({ mediaInfo, mediaMeta, msgType, lang, key, 
       return { ...route, userText: userTextRaw, sizeBytes, transcriptChars: userTextRaw.length, mimeType: safeMime };
     } catch (e) {
       console.error(JSON.stringify({ level: "error", msg: "audio_failed", reqId, error: (e && e.message) || String(e) }));
-      return { ...route, reply: "I couldn’t read the voice note. Please type your request." };
+      const parts = [];
+      if (shouldSendAudioReminder(key)) parts.push(audioReminderText(lang));
+      parts.push(fallbackWithAgent(lang));
+      const reply = ensureNoQuestion(parts.join("\n"));
+      return { ...route, reply };
     } finally {
       try {
         if (audioDl && audioDl.tmpDir) fs.rmSync(audioDl.tmpDir, { recursive: true, force: true });
