@@ -131,7 +131,20 @@ const CONTACTS = {
 };
 
 // RULE #1 no questions
-const BRAND_PRIORITY = ["Daiko", "TCL", "Haier", "Samsung", "LG", "Elexia", "Revolution", "Visio", "Echolink", "Hisense"];
+const BRAND_PRIORITY = [
+  "Daiko",
+  "TCL",
+  "Haier",
+  "Samsung",
+  "LG",
+  "Elexia",
+  "Revolution",
+  "Visio",
+  "Echolink",
+  "Hisense",
+  "Tivoli",
+];
+const MAX_OFFERS = 5;
 
 const COMPANY = {
   name: "Digitronics",
@@ -2001,6 +2014,15 @@ function detectBrand(text) {
   return null;
 }
 
+function findBrandByNorm(name) {
+  const target = normMatch(name || "");
+  const brands = OFFERS_INDEX.brands || [];
+  for (let i = 0; i < brands.length; i += 1) {
+    if (normMatch(brands[i]) === target) return brands[i];
+  }
+  return null;
+}
+
 function buildDefaultClassAliases() {
   const tvCanon = OFFERS_INDEX.classCanon.tv;
   const out = {};
@@ -2139,6 +2161,24 @@ function detectCategory(text) {
     if (s === ncat || s.indexOf(ncat) >= 0) return cat;
   }
 
+  return null;
+}
+
+function findCategoryByNorm(name) {
+  const target = normMatch(name || "");
+  const cats = OFFERS_INDEX.categories || [];
+  for (let i = 0; i < cats.length; i += 1) {
+    if (normMatch(cats[i]) === target) return cats[i];
+  }
+  return null;
+}
+
+function findClassByNorm(name) {
+  const target = normMatch(name || "");
+  const classes = OFFERS_INDEX.classes || [];
+  for (let i = 0; i < classes.length; i += 1) {
+    if (normMatch(classes[i]) === target) return classes[i];
+  }
   return null;
 }
 
@@ -2894,7 +2934,7 @@ function selectOffersFromVision(hints) {
       category,
       size: sizeNum,
       capacityLiters: capNum,
-      limit: 3,
+      limit: MAX_OFFERS,
       withOffers: true,
     });
     if (res && Array.isArray(res.offers) && res.offers.length) return res;
@@ -2919,7 +2959,7 @@ function selectOffersFromVision(hints) {
     size: sizeNum,
     capacityLiters: capNum,
     className: cls,
-    limit: 3,
+    limit: MAX_OFFERS,
   });
 
   return { offers: ranked.map((r) => r.offer), lines: ranked.map((r) => formatOfferLine(r.brand, r.offer)) };
@@ -3455,7 +3495,7 @@ async function tryWebsiteCatalogAnswer(userText, lang, key) {
       });
     }
 
-    if (matches.length + brandMatches.length >= 3) break;
+    if (matches.length + brandMatches.length >= MAX_OFFERS) break;
   }
 
   const pool = brandMatches.length ? brandMatches : matches;
@@ -3481,7 +3521,7 @@ async function tryWebsiteCatalogAnswer(userText, lang, key) {
     if (priorityOnly.length) sorted = priorityOnly.sort(sortTv);
   }
 
-  const picks = sorted.slice(0, 3);
+  const picks = sorted.slice(0, MAX_OFFERS);
   if (!picks.length) return null;
 
   setCtx(key, {
@@ -3546,7 +3586,7 @@ function listOffersForBrand(brand, opts) {
   const hasSize = Number.isFinite(sizeNum);
   const capacityNum = Number(o.capacityLiters);
   const hasCapacity = Number.isFinite(capacityNum);
-  const limit = Number(o.limit) || 3;
+  const limit = Number(o.limit) || MAX_OFFERS;
   const withOffers = Boolean(o.withOffers);
 
   const filtered = ((OFFERS && OFFERS.offers && OFFERS.offers[brand]) || [])
@@ -3575,7 +3615,7 @@ function listOffersForBrand(brand, opts) {
 function listOffersForSizeAcrossBrands(size, opts) {
   const o = opts || {};
   const cls = o.cls || null;
-  const limit = Number(o.limit) || 3;
+  const limit = Number(o.limit) || MAX_OFFERS;
 
   const items = [];
   const brands = OFFERS_INDEX.brands || [];
@@ -3635,7 +3675,7 @@ function collectTvOffers({ brand, size, budget }) {
       if (a.price !== b.price) return a.price - b.price;
       return normMatch((a.offer && a.offer.model) || "").localeCompare(normMatch((b.offer && b.offer.model) || ""));
     })
-    .slice(0, 5)
+    .slice(0, MAX_OFFERS)
     .map((it) => ({ brand: it.brand, offer: it.offer }));
 }
 
@@ -4093,6 +4133,56 @@ function isIptvIntent(text) {
   return false;
 }
 
+// RULE B: All TVs have integrated receiver + TNT
+function isTvReceiverIntent(text) {
+  const raw = String(text || "");
+  const s = normMatch(raw);
+  if (!s) return false;
+
+  const normTokens = ["recepteur", "récepteur", "tnt", "decoder", "decodeur", "décodeur"];
+  for (let i = 0; i < normTokens.length; i += 1) {
+    if (includesToken(s, normTokens[i])) return true;
+  }
+
+  const rawChecks = ["ريسپتور", "ريسيفر", "ريسيفور", "tnt", "decoder tnt"];
+  for (let i = 0; i < rawChecks.length; i += 1) {
+    if (raw.toLowerCase().includes(rawChecks[i].toLowerCase())) return true;
+  }
+
+  return false;
+}
+
+// RULE A: Tivoli ovens
+function isTivoliOvenIntent(text) {
+  const raw = String(text || "");
+  const s = normMatch(raw);
+  if (!s || s.indexOf("tivoli") < 0) return false;
+
+  const ovenTokens = [
+    "four",
+    "forn",
+    "فرن",
+    "cuisiniere",
+    "cuisinière",
+    "cuisinier",
+    "gaziniere",
+    "gazinière",
+    "cuisiniere",
+    "cuisinière",
+  ];
+
+  for (let i = 0; i < ovenTokens.length; i += 1) {
+    if (includesToken(s, ovenTokens[i])) return true;
+  }
+
+  const rawTokens = ["tivoli four", "فرن tivoli", "gazinière tivoli", "cuisinière tivoli"];
+  for (let i = 0; i < rawTokens.length; i += 1) {
+    if (raw.toLowerCase().includes(rawTokens[i].toLowerCase())) return true;
+  }
+
+  return false;
+}
+
 
 function asksAboutDeliveryPaymentWarranty(text) {
   const s = normMatch(text);
@@ -4278,17 +4368,17 @@ function handleTvSizePriceFlow(parsed, lang, key) {
       for (let j = 0; j < arr.length; j += 1) fallbackItems.push({ brand: b, offer: arr[j] });
     }
 
-    const ranked = rankOffers(fallbackItems, { size: sizeVal, className: tvCanon, limit: 5 });
+    const ranked = rankOffers(fallbackItems, { size: sizeVal, className: tvCanon, limit: MAX_OFFERS });
     if (ranked.length) {
       setCtx(key, {
         lastBrand: brand || undefined,
         lastClass: tvCanon || undefined,
         lastCategory: undefined,
         lastSize: sizeVal,
-        lastOffersShown: ranked.slice(0, 5).map((it) => ({ brand: it.brand, model: (it.offer && it.offer.model) || "" })),
+        lastOffersShown: ranked.slice(0, MAX_OFFERS).map((it) => ({ brand: it.brand, model: (it.offer && it.offer.model) || "" })),
       });
       const header = offersHeader(lang, { brand: brand || undefined, size: sizeVal, cls: tvCanon || undefined });
-      const lines = ranked.slice(0, 5).map((it) => formatOfferLine(it.brand, it.offer, { lang }));
+      const lines = ranked.slice(0, MAX_OFFERS).map((it) => formatOfferLine(it.brand, it.offer, { lang }));
       return ensureNoQuestion([header, ...lines].filter(Boolean).join("\n"));
     }
 
@@ -4299,10 +4389,10 @@ function handleTvSizePriceFlow(parsed, lang, key) {
   const minPrice = prices.length ? Math.min(...prices) : null;
   const maxPrice = prices.length ? Math.max(...prices) : null;
 
-  const top = matches.slice(0, 3);
+  const top = matches.slice(0, MAX_OFFERS);
   const lines = top
     .sort((a, b) => brandRank(a.brand, TV_BRAND_PRIORITY) - brandRank(b.brand, TV_BRAND_PRIORITY) || Number(a.offer.price) - Number(b.offer.price))
-    .slice(0, 5)
+    .slice(0, MAX_OFFERS)
     .map((it) => formatOfferLine(it.brand, it.offer, { lang }));
   const wantPrice = priceIntent || cheapIntent || Number.isFinite(budget);
 
@@ -4350,11 +4440,25 @@ function tryDirectOfferAnswer(userText, historyMsgs, lang, key) {
   }
 
   const tvFlow = handleTvSizePriceFlow(parsed, lang, key);
+  const receiverIntent = isTvReceiverIntent(text);
+  if (receiverIntent) {
+    const receiverMsg = tvReceiverAnswerText(lang);
+    const offerReply = tvFlow || defaultTvOffersForReceiver(lang, key);
+    const combined = [receiverMsg, offerReply].filter(Boolean).join("\n\n");
+    if (combined) return ensureNoQuestion(combined);
+    return ensureNoQuestion(receiverMsg);
+  }
+
   if (tvFlow) return tvFlow;
 
-  let brand = parsed.brand || null;
-  let category = parsed.category || null;
-  let cls = parsed.cls || null;
+  const tivoliIntent = isTivoliOvenIntent(text);
+  const tivoliBrand = tivoliIntent ? findBrandByNorm("tivoli") || "TIVOLI" : null;
+  const ovenCategory = tivoliIntent ? findCategoryByNorm("cuisiniere") || "Cuisiniere" : null;
+  const ovenClass = tivoliIntent ? findClassByNorm("cuisiniere") || "Cuisiniere" : null;
+
+  let brand = tivoliIntent ? tivoliBrand || parsed.brand || null : parsed.brand || null;
+  let category = tivoliIntent ? ovenCategory || parsed.category || null : parsed.category || null;
+  let cls = tivoliIntent ? ovenClass || parsed.cls || null : parsed.cls || null;
   const sizeVal = parsed.size;
   const capacityVal = parsed.capacityLiters || extractCapacityLiters(text);
 
@@ -4381,7 +4485,7 @@ function tryDirectOfferAnswer(userText, historyMsgs, lang, key) {
       : ctx.lastCapacity || null;
 
   if (brand && Number.isFinite(sizeVal)) {
-    const pack = listOffersForBrand(brand, { cls: tvCanon, size: sizeVal, limit: 3, withOffers: true });
+    const pack = listOffersForBrand(brand, { cls: tvCanon, size: sizeVal, limit: MAX_OFFERS, withOffers: true });
     if (pack.lines.length) {
       setCtx(key, {
         lastBrand: brand,
@@ -4397,7 +4501,7 @@ function tryDirectOfferAnswer(userText, historyMsgs, lang, key) {
   }
 
   if (!brand && Number.isFinite(sizeVal)) {
-    const picks = listOffersForSizeAcrossBrands(sizeVal, { cls: tvCanon, limit: 3 }) || [];
+    const picks = listOffersForSizeAcrossBrands(sizeVal, { cls: tvCanon, limit: MAX_OFFERS }) || [];
     if (picks.length) {
       const lines = picks.map((it) => formatOfferLine(it.brand, it.offer)).join("\n\n");
       setCtx(key, {
@@ -4414,7 +4518,7 @@ function tryDirectOfferAnswer(userText, historyMsgs, lang, key) {
   }
 
   if (brand && category2) {
-    const pack = listOffersForBrand(brand, { category: category2, limit: 3, withOffers: true, capacityLiters: capacityHint });
+    const pack = listOffersForBrand(brand, { category: category2, limit: MAX_OFFERS, withOffers: true, capacityLiters: capacityHint });
     if (pack.lines.length) {
       setCtx(key, {
         lastBrand: brand,
@@ -4431,7 +4535,7 @@ function tryDirectOfferAnswer(userText, historyMsgs, lang, key) {
   }
 
   if (brand && cls2) {
-    const pack = listOffersForBrand(brand, { cls: cls2, limit: 3, withOffers: true });
+    const pack = listOffersForBrand(brand, { cls: cls2, limit: MAX_OFFERS, withOffers: true });
     if (pack.lines.length) {
       setCtx(key, {
         lastBrand: brand,
@@ -4483,8 +4587,8 @@ function tryDirectOfferAnswer(userText, historyMsgs, lang, key) {
             if (pa !== pb) return pa - pb;
             return normMatch((a.offer && a.offer.model) || "").localeCompare(normMatch((b.offer && b.offer.model) || ""));
           })
-          .slice(0, 3)
-      : rankOffers(items, { limit: 3, capacityLiters: capacityHint });
+          .slice(0, MAX_OFFERS)
+      : rankOffers(items, { limit: MAX_OFFERS, capacityLiters: capacityHint });
 
     if (sorted.length) {
       setCtx(key, {
@@ -4526,8 +4630,8 @@ function tryDirectOfferAnswer(userText, historyMsgs, lang, key) {
             if (pa !== pb) return pa - pb;
             return normMatch((a.offer && a.offer.model) || "").localeCompare(normMatch((b.offer && b.offer.model) || ""));
           })
-          .slice(0, 3)
-      : rankOffers(items, { limit: 3, capacityLiters: capacityHint });
+          .slice(0, MAX_OFFERS)
+      : rankOffers(items, { limit: MAX_OFFERS, capacityLiters: capacityHint });
 
     if (sorted.length) {
       setCtx(key, {
@@ -4546,11 +4650,11 @@ function tryDirectOfferAnswer(userText, historyMsgs, lang, key) {
   }
 
   if (brand && !sizeVal) {
-    const packTv = tvHint ? listOffersForBrand(brand, { cls: tvCanon, limit: 3, withOffers: true }) : { lines: [], offers: [] };
+    const packTv = tvHint ? listOffersForBrand(brand, { cls: tvCanon, limit: MAX_OFFERS, withOffers: true }) : { lines: [], offers: [] };
     const pack =
       packTv.lines && packTv.lines.length
         ? packTv
-        : listOffersForBrand(brand, { cls: cls || null, limit: 3, withOffers: true, capacityLiters: capacityHint });
+        : listOffersForBrand(brand, { cls: cls || null, limit: MAX_OFFERS, withOffers: true, capacityLiters: capacityHint });
     if (pack.lines && pack.lines.length) {
       setCtx(key, {
         lastBrand: brand,
@@ -4571,7 +4675,7 @@ function tryDirectOfferAnswer(userText, historyMsgs, lang, key) {
     const items = items0
       .map((it, idx) => Object.assign({}, it, { originalIdx: typeof it.originalIdx === "number" ? it.originalIdx : idx }))
       .filter((it) => Number(((it.offer || {}).stock) || 0) > 0);
-    const ranked = rankOffers(items, { limit: 3, capacityLiters: capacityHint });
+    const ranked = rankOffers(items, { limit: MAX_OFFERS, capacityLiters: capacityHint });
     if (ranked.length) {
       setCtx(key, {
         lastBrand: undefined,
@@ -4590,12 +4694,12 @@ function tryDirectOfferAnswer(userText, historyMsgs, lang, key) {
   return null;
 }
 
-function bestGuessOffers(lang, key, limit = 3) {
+function bestGuessOffers(lang, key, limit = MAX_OFFERS) {
   if (!OFFERS || !OFFERS.offers || !Object.keys(OFFERS.offers).length) return null;
 
   const ctx = getCtx(key);
   const L = lang || "dzl";
-  const max = Number(limit) || 3;
+  const max = Number(limit) || MAX_OFFERS;
   const tvCanon = OFFERS_INDEX.classCanon.tv;
 
   const sizeVal = Number(ctx.lastSize);
@@ -4709,6 +4813,36 @@ function bestGuessOffers(lang, key, limit = 3) {
   }
 
   return null;
+}
+
+// RULE B: All TVs have integrated receiver + TNT
+function tvReceiverAnswerText(lang) {
+  if (lang === "fr") return "Oui ✅ Toutes nos TV ont un récepteur intégré + TNT intégré.";
+  return "ايه ✅ جميع التلفازات عندنا فيها Récepteur intégré و TNT intégré.";
+}
+
+function defaultTvOffersForReceiver(lang, key) {
+  const tvCanon = OFFERS_INDEX.classCanon.tv || "Tv";
+  const tvCanonNorm = normMatch(tvCanon || "tv");
+  const items0 = OFFERS_INDEX.classToOffers.get(tvCanonNorm) || [];
+  const items = items0
+    .map((it, idx) => Object.assign({}, it, { originalIdx: typeof it.originalIdx === "number" ? it.originalIdx : idx }))
+    .filter((it) => Number(((it.offer || {}).stock) || 0) > 0);
+
+  const ranked = rankOffers(items, { limit: MAX_OFFERS, className: tvCanon, tvClassCanon: tvCanon });
+  if (!ranked.length) return null;
+
+  setCtx(key, {
+    lastBrand: undefined,
+    lastCategory: undefined,
+    lastClass: tvCanon || undefined,
+    lastSize: undefined,
+    lastOffersShown: ranked.map((it) => ({ brand: it.brand, model: (it.offer && it.offer.model) || "" })),
+  });
+
+  const lines = ranked.map((it) => formatOfferLine(it.brand, it.offer, { lang })).join("\n\n");
+  const header = offersHeader(lang, { cls: tvCanon });
+  return [header, lines].filter(Boolean).join("\n");
 }
 
 const MAX_OFFERS_FOR_PROMPT = 20;
@@ -4863,7 +4997,7 @@ function buildOffersSubsetForPrompt(userText, historyMsgs, key) {
     const items = items0
       .map((it, idx) => Object.assign({}, it, { originalIdx: typeof it.originalIdx === "number" ? it.originalIdx : idx }))
       .filter((it) => Number(((it.offer || {}).stock) || 0) > 0);
-    const ranked = rankOffers(items, { limit: 6, capacityLiters: capacityVal || null });
+    const ranked = rankOffers(items, { limit: MAX_OFFERS, capacityLiters: capacityVal || null });
     const offers = {};
     for (let i = 0; i < ranked.length; i += 1) {
       const r = ranked[i];
@@ -4879,7 +5013,7 @@ function buildOffersSubsetForPrompt(userText, historyMsgs, key) {
     const items = items0
       .map((it, idx) => Object.assign({}, it, { originalIdx: typeof it.originalIdx === "number" ? it.originalIdx : idx }))
       .filter((it) => Number(((it.offer || {}).stock) || 0) > 0);
-    const ranked = rankOffers(items, { limit: 6, className: cls, tvClassCanon: tvCanon, capacityLiters: capacityVal || null });
+    const ranked = rankOffers(items, { limit: MAX_OFFERS, className: cls, tvClassCanon: tvCanon, capacityLiters: capacityVal || null });
     const offers = {};
     for (let i = 0; i < ranked.length; i += 1) {
       const r = ranked[i];
