@@ -4864,7 +4864,7 @@ function buildOffersSubsetForPrompt(userText, historyMsgs, key) {
     const items = items0
       .map((it, idx) => Object.assign({}, it, { originalIdx: typeof it.originalIdx === "number" ? it.originalIdx : idx }))
       .filter((it) => Number(((it.offer || {}).stock) || 0) > 0);
-    const ranked = rankOffers(items, { limit: 6, capacityLiters: capacityVal || null });
+    const ranked = rankOffers(items, { limit: MAX_OFFERS, capacityLiters: capacityVal || null });
     const offers = {};
     for (let i = 0; i < ranked.length; i += 1) {
       const r = ranked[i];
@@ -4880,7 +4880,7 @@ function buildOffersSubsetForPrompt(userText, historyMsgs, key) {
     const items = items0
       .map((it, idx) => Object.assign({}, it, { originalIdx: typeof it.originalIdx === "number" ? it.originalIdx : idx }))
       .filter((it) => Number(((it.offer || {}).stock) || 0) > 0);
-    const ranked = rankOffers(items, { limit: 6, className: cls, tvClassCanon: tvCanon, capacityLiters: capacityVal || null });
+    const ranked = rankOffers(items, { limit: MAX_OFFERS, className: cls, tvClassCanon: tvCanon, capacityLiters: capacityVal || null });
     const offers = {};
     for (let i = 0; i < ranked.length; i += 1) {
       const r = ranked[i];
