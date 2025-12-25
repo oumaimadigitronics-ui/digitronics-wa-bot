@@ -136,6 +136,26 @@ test("formatOfferLine includes sanitized URL", () => {
   assert.ok(line.includes("example.com"));
 });
 
+// Fix: always respect catalog type
+test("formatOfferLine preserves catalog TV type", () => {
+  const product = {
+    name: 'HAIER H50K800UX 50"',
+    sku: "H50K800UX",
+    price: "3699",
+    stock_status: "instock",
+    categories: [{ name: "Android TV" }],
+    brands: [{ name: "HAIER" }],
+    type: "Google TV",
+    permalink: "https://example.com/h50k800ux",
+  };
+
+  const offer = offerFromWooProduct(product);
+  const line = formatOfferLine("HAIER", offer);
+
+  assert.ok(line.includes("Google TV"));
+  assert.ok(!line.includes("Android TV"));
+});
+
 test("stripQuestions removes trailing questions", () => {
   const cleaned = stripQuestions("Wash bghiti?\nChno size?\n\n");
   assert.ok(!cleaned.includes("?"));
