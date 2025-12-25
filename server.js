@@ -2262,29 +2262,38 @@ function extractCapacityLiters(text) {
 }
 
 // RULE #4 always add links
-function buildProductLink(product) {
+function buildProductLink(product, fallbackName) {
   const url = sanitizeUrlNoQuestion(String((product && (product.url || product.link)) || "").trim());
   if (url) return url;
-  const query = encodeURIComponent(String((product && (product.model || product.name || product.sku)) || "").trim());
-  if (!query) return "https://digitronics.ma";
+
+  const searchCandidates = [
+    String(fallbackName || "").trim(),
+    String((product && product.name) || "").trim(),
+    String((product && product.model) || "").trim(),
+    String((product && product.sku) || "").trim(),
+  ].filter(Boolean);
+  const searchTerm = searchCandidates.find(Boolean) || "";
+  const query = searchTerm ? encodeURIComponent(searchTerm) : "";
+  if (!query) return "https://digitronics.ma/search";
   return `https://digitronics.ma/search?q=${query}`;
 }
 
 // RULE #1 no questions
+// Offer message format: clickable name + "name - price"
 function formatOfferLine(brand, o, opts = {}) {
   const safeBrand = String(brand || "").trim();
+  const name = String((o && o.name) || "").trim();
   const model = String((o && o.model) || "").trim();
+  const sizeNum = Number((o && o.size) || NaN);
+  const sizeText = Number.isFinite(sizeNum) && sizeNum > 0 ? formatSize(opts.lang || "dzl", sizeNum) : "";
+  const fallbackName = [model, safeBrand, sizeText].filter(Boolean).join(" ").trim();
+  const displayName = name || fallbackName || model || safeBrand || "Produit";
   const priceNum = Number((o && o.price) || NaN);
   const pricePart = Number.isFinite(priceNum) ? `${priceNum} dh` : "Prix sur demande";
-  const sizeNum = Number((o && o.size) || NaN);
-  const sizePart = Number.isFinite(sizeNum) ? " " + formatSize(opts.lang || "dzl", sizeNum) : "";
-  const typeVal = String((o && o.type) || "").trim();
-  const typePart = typeVal ? ` — ${typeVal}` : "";
   // RULE #4 always add links
-  const url = buildProductLink(o || {});
-  const urlPart = url ? ` — رابط: ${url}` : "";
-
-  return `• ${safeBrand}${model ? " " + model : ""}${sizePart}: ${pricePart}${typePart}${urlPart}`.trim();
+  const url = buildProductLink(o || {}, displayName);
+  if (url) return `• [${displayName}](${url}) - ${pricePart}`.trim();
+  return `• ${displayName} - ${pricePart}`.trim();
 }
 
 function priceSummaryText(lang, min, max) {
@@ -3584,14 +3593,7 @@ async function tryWebsiteCatalogAnswer(userText, lang, key) {
     size: isTvContext && Number.isFinite(sizeVal) ? sizeVal : undefined,
   });
 
-  const lines = picks.map((it) => {
-    const brandPart = it.brand && it.brand !== "UNKNOWN" ? it.brand + " " : "";
-    const sizePart = isTvContext && Number(it.size) > 0 ? " " + formatSize(lang, Number(it.size)) : "";
-    const typePart = isTvContext && it.type ? ` — ${it.type}` : "";
-    const url = buildProductLink(it);
-    const urlPart = url ? ` — رابط: ${url}` : "";
-    return `• ${brandPart}${it.model}${sizePart}: ${it.price} dh${typePart}${urlPart}`.trim();
-  });
+  const lines = picks.map((it) => formatOfferLine(it.brand, it, { lang }));
 
   const reply = ensureNoQuestion([header, ...lines].filter(Boolean).join("\n"));
   return shortenNoQuestion(reply, CFG.maxReplyChars);
