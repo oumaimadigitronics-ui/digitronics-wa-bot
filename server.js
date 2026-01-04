@@ -435,6 +435,7 @@ function t(lang, key, vars) {
       typeYourMessage: "3afak kteb l-message dyalk.",
       address: "L3nwan dyalna: " + COMPANY.address,
       orderForm: "Tfdal/ي: 3mmer had formulaire bach tdir commande: " + ORDER_FORM_URL_SAFE,
+      orderHumanHandoff: "Wakil bashari ghadi ykml m3ak bach ytba3 l-commande. Ila bghiti tsift chi haja wala t3ayet: " + CONTACTS.calls.join(" / ") + ".",
       askOrderNo: "3afak sft رقم الطلب bach n9dro n7ssbo.",
       gotOrderNo: "Shokran. Tsslna b رقم الطلب. Ghadi n3yto lik قريب.",
       callSoon: "Mzyan. Ghadi n3yto lik قريب.",
@@ -482,6 +483,7 @@ function t(lang, key, vars) {
       typeYourMessage: "Merci d’écrire votre demande.",
       address: "Notre adresse: " + COMPANY.address,
       orderForm: "Veuillez remplir ce formulaire pour commander: " + ORDER_FORM_URL_SAFE,
+      orderHumanHandoff: "Un agent humain va reprendre la conversation pour vérifier votre commande. Vous pouvez aussi appeler: " + CONTACTS.calls.join(" / ") + ".",
       askOrderNo: "Merci d’envoyer votre numéro de commande pour vérification.",
       gotOrderNo: "Merci. Nous avons bien reçu votre numéro de commande. Nous vous appellerons bientôt.",
       callSoon: "D’accord. Nous vous appellerons bientôt.",
@@ -529,6 +531,7 @@ function t(lang, key, vars) {
       typeYourMessage: "من فضلك اكتب رسالتك.",
       address: "عنواننا: " + COMPANY.address,
       orderForm: "من فضلك عبّئ هذا الفورم للطلب: " + ORDER_FORM_URL_SAFE,
+      orderHumanHandoff: "غادي يدخل وكيل بشري باش يتبع معاك حالة الطلب. تقدر حتى تعيط لينا: " + CONTACTS.calls.join(" / ") + ".",
       askOrderNo: "من فضلك ارسل رقم الطلب باش نقدر نتحققو.",
       gotOrderNo: "شكراً. توصلنا برقم الطلب. غادي نعيطو ليك قريب.",
       callSoon: "حسناً. غادي نعيطو ليك قريب.",
@@ -5703,27 +5706,11 @@ app.post("/wanotifier", async (req, res) => {
         resetStrikes(key);
         return res.json({ ok: true, reply: out });
       }
-      const ctx = getCtx(key);
-      const askedRecently = !shouldAskOrderNo(key);
-      const lastAskType = ctx.lastAskOrderType || "";
-      // Avoid looping on asking for order numbers; suggest alternatives after the first ask.
-      if (askedRecently && lastAskType === "ask") {
-        const out = shortenNoQuestion(alternativeSupportReply(lang), 420);
-        markOrderAsk(key, "alt");
-        memory.push(key, "assistant", out);
-        resetStrikes(key);
-        return res.json({ ok: true, reply: out });
-      }
-      if (askedRecently) {
-        const out = shortenNoQuestion(neutralOrderReply(lang), 220);
-        markOrderAsk(key, "neutral");
-        memory.push(key, "assistant", out);
-        resetStrikes(key);
-        return res.json({ ok: true, reply: out });
-      }
-      const out = shortenNoQuestion(t(lang, "askOrderNo"), 420);
-      markOrderAsk(key, "ask");
+      pendingOrderStore.delete(key);
+      clearOrderAsk(key);
+      const out = shortenNoQuestion(t(lang, "orderHumanHandoff"), 420);
       memory.push(key, "assistant", out);
+      resetStrikes(key);
       return res.json({ ok: true, reply: out });
     }
 
@@ -5750,11 +5737,9 @@ app.post("/wanotifier", async (req, res) => {
         resetStrikes(key);
         return res.json({ ok: true, reply: out });
       }
-      pendingOrderStore.set(key, { waiting: true, at: Date.now() });
-      const shouldAsk = shouldAskOrderNo(key);
-      const out = shortenNoQuestion(shouldAsk ? t(lang, "askOrderNo") : neutralOrderReply(lang), 420);
-      if (shouldAsk) markOrderAsk(key, "ask");
-      else markOrderAsk(key, "neutral");
+      const out = shortenNoQuestion(t(lang, "orderHumanHandoff"), 420);
+      pendingOrderStore.delete(key);
+      clearOrderAsk(key);
       memory.push(key, "assistant", out);
       return res.json({ ok: true, reply: out });
     }
