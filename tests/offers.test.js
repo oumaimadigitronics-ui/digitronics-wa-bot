@@ -33,6 +33,7 @@ import {
   maybeSendInitialGreeting,
   handleGreetingMessage,
   isGreetingLikeOpener,
+  findOfferFromLinks,
   extractMediaMetaFromBody,
   getCtxForTest,
   setCtxForTest,
@@ -134,6 +135,27 @@ test("formatOfferLine handles missing values", () => {
 test("formatOfferLine includes sanitized URL", () => {
   const line = formatOfferLine("BrandX", { model: "ModelY", price: 10, url: "http://example.com/p" });
   assert.ok(line.includes("example.com"));
+});
+
+test("findOfferFromLinks matches sanitized permalink", () => {
+  setOffersForTest({
+    BRANDX: [
+      {
+        model: "MX-50",
+        price: 5000,
+        stock: 2,
+        class: "Tv",
+        category: "Tv",
+        size: 50,
+        link: "https://shop.example.com/product/mx-50?ref=abc",
+      },
+    ],
+  });
+
+  const hit = findOfferFromLinks("Check this: https://shop.example.com/product/mx-50?campaign=1");
+  assert.ok(hit);
+  assert.strictEqual(hit.brand, "BRANDX");
+  assert.strictEqual(hit.offer.model, "MX-50");
 });
 
 // Fix: always respect catalog type
