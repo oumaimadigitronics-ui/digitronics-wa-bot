@@ -3522,6 +3522,8 @@ function normalizeOfferItem(brand, offer, originalIdx) {
     price: Number.isFinite(priceNum) ? priceNum : Number.POSITIVE_INFINITY,
     size: Number.isFinite(sizeNum) ? sizeNum : null,
     capacity: Number.isFinite(capacityNum) ? capacityNum : null,
+    class: String((offer && offer.class) || ""),
+    category: String((offer && offer.category) || ""),
     stock: Number((offer && offer.stock) || 0),
     originalIdx: Number.isInteger(originalIdx) ? originalIdx : 0,
   };
@@ -3576,6 +3578,36 @@ function rankOffers(items, opts) {
   if (priorityExists) {
     arr = arr.filter((it) => Number.isFinite(rankForBrand(it.brand)));
   }
+
+  // Enforce consistent category/class and size when hints are provided.
+  const classNorm = normMatch(className || "");
+  if (classNorm) {
+    arr = arr.filter((it) => normMatch(it.class || "") === classNorm);
+  }
+
+  if (hasSize) {
+    const desiredSize = Number(size);
+    const exact = arr.filter((it) => Number.isFinite(it.size) && Number(it.size) === desiredSize);
+    if (exact.length) {
+      arr = exact;
+    } else {
+      let closestSize = null;
+      let closestDiff = Number.POSITIVE_INFINITY;
+      for (let i = 0; i < arr.length; i += 1) {
+        const s = Number(arr[i].size);
+        if (!Number.isFinite(s)) continue;
+        const diff = Math.abs(s - desiredSize);
+        if (diff < closestDiff) {
+          closestDiff = diff;
+          closestSize = s;
+        }
+      }
+      if (Number.isFinite(closestSize)) {
+        arr = arr.filter((it) => Number.isFinite(it.size) && Number(it.size) === closestSize);
+      }
+    }
+  }
+
   if (LOG_DEBUG) debugLog("rank_offers_after_priority", { count: arr.length, brands: arr.map((it) => it.brand) });
 
   const ranked = arr
