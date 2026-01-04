@@ -1413,6 +1413,7 @@ let OFFERS_INDEX = {
   classes: [],
   categories: [],
   modelLookup: new Map(),
+  linkLookup: new Map(),
   brandNorm: new Map(),
   classNorm: new Map(),
   categoryNorm: new Map(),
@@ -1503,6 +1504,7 @@ function rebuildOffersIndex() {
   const classesSet = new Set();
   const categoriesSet = new Set();
   const modelLookup = new Map();
+  const linkLookup = new Map();
   const brandNorm = new Map();
   const classNorm = new Map();
   const categoryNorm = new Map();
@@ -1517,6 +1519,13 @@ function rebuildOffersIndex() {
     for (let j = 0; j < arr.length; j += 1) {
       const o = arr[j];
       if (o && o.model) modelLookup.set(normMatch(o.model), { brand: b, offer: o });
+
+      const link = sanitizeUrlNoQuestion((o && (o.link || o.url)) || "");
+      const linkKey = String(link || "").replace(/\/$/, "").toLowerCase();
+      if (linkKey) {
+        linkLookup.set(linkKey, { brand: b, offer: o });
+        if (!linkKey.endsWith("/")) linkLookup.set(`${linkKey}/`, { brand: b, offer: o });
+      }
 
       const cls = String((o && o.class) || "").trim();
       if (cls) {
@@ -1550,6 +1559,7 @@ function rebuildOffersIndex() {
     classes,
     categories,
     modelLookup,
+    linkLookup,
     brandNorm,
     classNorm,
     categoryNorm,
@@ -2068,6 +2078,27 @@ function detectModel(text) {
     }
   }
 
+  return null;
+}
+
+function extractUrls(text) {
+  const s = String(text || "");
+  const re = /https?:\/\/[^\s)]+/gi;
+  const out = [];
+  let m;
+  while ((m = re.exec(s)) !== null) out.push(m[0]);
+  return out;
+}
+
+function findOfferFromLinks(text) {
+  const urls = extractUrls(text || "");
+  for (let i = 0; i < urls.length; i += 1) {
+    const cleaned = sanitizeUrlNoQuestion(urls[i] || "").replace(/\/$/, "");
+    const k = cleaned.toLowerCase();
+    if (!k) continue;
+    const hit = OFFERS_INDEX.linkLookup.get(k) || OFFERS_INDEX.linkLookup.get(`${k}/`);
+    if (hit) return hit;
+  }
   return null;
 }
 
@@ -5737,6 +5768,28 @@ app.post("/wanotifier", async (req, res) => {
       return res.json({ ok: true, reply });
     }
 
+    const linkMatch = findOfferFromLinks(userTextRaw);
+    if (linkMatch && linkMatch.offer) {
+      const header = offersHeader(lang, {
+        brand: linkMatch.brand,
+        cls: linkMatch.offer.class || undefined,
+        category: linkMatch.offer.category || undefined,
+      });
+      const line = formatOfferLine(linkMatch.brand, linkMatch.offer);
+      const reply = shortenNoQuestion([header, line].filter(Boolean).join("\n"), 520);
+      const sizeVal = Number(linkMatch.offer.size);
+      setCtx(key, {
+        lastBrand: linkMatch.brand,
+        lastCategory: linkMatch.offer.category || undefined,
+        lastClass: linkMatch.offer.class || undefined,
+        lastSize: Number.isFinite(sizeVal) ? sizeVal : undefined,
+        lastOffersShown: [{ brand: linkMatch.brand, model: linkMatch.offer.model || "" }],
+      });
+      memory.push(key, "assistant", reply);
+      resetStrikes(key);
+      return res.json({ ok: true, reply });
+    }
+
     if (isPhotoRequestIntent(userTextRaw) && !supportModeStore.has(key)) {
       const resolved = resolveOfferForPhoto(userTextRaw, history, key);
 
@@ -6003,6 +6056,7 @@ export {
   maybeSendInitialGreeting,
   handleGreetingMessage,
   isGreetingLikeOpener,
+  findOfferFromLinks,
   tryWebsiteCatalogAnswer,
   tryDirectOfferAnswer,
   setOffersForTest,
