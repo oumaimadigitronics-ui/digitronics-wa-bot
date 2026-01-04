@@ -132,8 +132,8 @@ const CONTACTS = {
 
 // RULE #1 no questions
 const BRAND_PRIORITY = [
-  "Daiko",
   "TCL",
+  "Daiko",
   "Haier",
   "Samsung",
   "LG",
@@ -1507,6 +1507,13 @@ function rebuildOffersIndex() {
 function setOffersForTest(offersObj) {
   OFFERS = { offers: offersObj || {} };
   rebuildOffersIndex();
+  if (LOG_DEBUG) {
+    debugLog("set_offers_for_test", {
+      brands: (OFFERS_INDEX.brands || []).length,
+      categories: (OFFERS_INDEX.categories || []).length,
+      catBuckets: OFFERS_INDEX.categoryToOffers ? OFFERS_INDEX.categoryToOffers.size : 0,
+    });
+  }
 }
 
 function wcAuthHeader() {
@@ -2282,18 +2289,20 @@ function buildProductLink(product, fallbackName) {
 // Offer message format: clickable name + "name - price"
 function formatOfferLine(brand, o, opts = {}) {
   const safeBrand = String(brand || "").trim();
+  const type = String((o && o.type) || "").trim();
   const name = String((o && o.name) || "").trim();
   const model = String((o && o.model) || "").trim();
   const sizeNum = Number((o && o.size) || NaN);
   const sizeText = Number.isFinite(sizeNum) && sizeNum > 0 ? formatSize(opts.lang || "dzl", sizeNum) : "";
-  const fallbackName = [model, safeBrand, sizeText].filter(Boolean).join(" ").trim();
-  const displayName = name || fallbackName || model || safeBrand || "Produit";
+  const fallbackName = [safeBrand, model, sizeText].filter(Boolean).join(" ").trim();
+  const baseName = name || fallbackName || model || safeBrand || "Produit";
+  const displayName =
+    type && normMatch(baseName).indexOf(normMatch(type)) < 0 ? `${baseName} ${type}`.trim() : baseName;
   const priceNum = Number((o && o.price) || NaN);
   const pricePart = Number.isFinite(priceNum) ? `${priceNum} dh` : "Prix sur demande";
-  // RULE #4 always add links
   const url = buildProductLink(o || {}, displayName);
-  if (url) return `• [${displayName}](${url}) - ${pricePart}`.trim();
-  return `• ${displayName} - ${pricePart}`.trim();
+  const linkPart = url ? " - " + url : "";
+  return `• ${displayName} - ${pricePart}${linkPart}`.trim();
 }
 
 function priceSummaryText(lang, min, max) {
@@ -2981,6 +2990,7 @@ function selectOffersFromVision(hints) {
 }
 
 async function handleVisionMedia(mediaInput, lang, key, opts = {}) {
+  const stripUrls = opts.stripUrls === true;
   const normalizedMedia = normalizeMediaInput(mediaInput);
   if (!normalizedMedia) throw new Error("media_missing");
 
@@ -3079,8 +3089,9 @@ async function handleVisionMedia(mediaInput, lang, key, opts = {}) {
       category: category || undefined,
       size: sizeNum || undefined,
     });
-    const lines = Array.isArray(offers.lines) ? offers.lines : [];
-  const body = lines.length ? header + "\n" + lines.join("\n") : fallbackWithAgent(lang);
+    const linesRaw = Array.isArray(offers.lines) ? offers.lines : [];
+    const lines = linesRaw.map((ln) => (stripUrls ? ln.replace(/https?:\/\/\S+/g, "").trim() : ln));
+    const body = lines.length ? header + "\n" + lines.join("\n") : fallbackWithAgent(lang);
     offerReply = {
       reply: shortenNoQuestion(body, CFG.maxReplyChars),
       confidence: vision.confidence || 0,
@@ -3117,6 +3128,8 @@ async function handleVisionMedia(mediaInput, lang, key, opts = {}) {
     return { reply: ask, confidence: 0 };
   }
 
+  const finalReplyText = stripUrls ? String(offerReply.reply || "").replace(/https?:\/\/\S+/g, "").trim() : String(offerReply.reply || "");
+  const finalReply = shortenNoQuestion(finalReplyText, CFG.maxReplyChars);
   const ctxData = offerReply.ctx || {};
   setCtx(key, {
     lastBrand: ctxData.brand || undefined,
@@ -3128,7 +3141,7 @@ async function handleVisionMedia(mediaInput, lang, key, opts = {}) {
       : undefined,
   });
 
-  return { reply: offerReply.reply, confidence: offerReply.confidence || 0 };
+  return { reply: finalReply, confidence: offerReply.confidence || 0 };
 }
 
 function setVisionAnalyzerForTest(fn) {
@@ -3255,8 +3268,12 @@ function rankOffers(items, opts) {
   const capacityLiters = Number(o.capacityLiters);
   const hasCapacity = Number.isFinite(capacityLiters);
   const className = o.className || null;
-  const limitVal = Number(o.limit);
-  const limit = Number.isInteger(limitVal) && limitVal >= 0 ? limitVal : null;
+  const limitRaw = o.limit;
+  let limit = null;
+  if (limitRaw !== undefined && limitRaw !== null) {
+    const limitVal = Number(limitRaw);
+    if (Number.isInteger(limitVal) && limitVal >= 0) limit = limitVal;
+  }
   const tvClassCanon = o.tvClassCanon || OFFERS_INDEX.classCanon.tv || null;
   const priority = Array.isArray(o.priorityList) && o.priorityList.length ? o.priorityList : TV_BRAND_PRIORITY;
 
@@ -3274,20 +3291,35 @@ function rankOffers(items, opts) {
   let arr = (Array.isArray(items) ? items : [])
     .map((it, idx) => normalizeOfferItem((it && it.brand) || "", (it && it.offer) || {}, (it && it.originalIdx) ?? idx))
     .filter((it) => it.brand && it.offer && it.stock > 0);
+  if (LOG_DEBUG) {
+    debugLog("rank_offers_input", {
+      size,
+      hasSize,
+      capacityLiters: hasCapacity ? capacityLiters : null,
+      className,
+      tvClassCanon,
+      itemCount: arr.length,
+      brands: arr.map((it) => it.brand),
+    });
+  }
 
   const priorityExists = arr.some((it) => Number.isFinite(rankForBrand(it.brand)));
+  if (LOG_DEBUG) {
+    debugLog("rank_offers_priority", { priorityExists, brands: arr.map((it) => it.brand) });
+  }
   if (priorityExists) {
     arr = arr.filter((it) => Number.isFinite(rankForBrand(it.brand)));
   }
+  if (LOG_DEBUG) debugLog("rank_offers_after_priority", { count: arr.length, brands: arr.map((it) => it.brand) });
 
-    const ranked = arr
-      .map((it, idx) => {
-        const sizeScore = hasSize && Number.isFinite(it.size) ? Math.abs(it.size - size) : Number.POSITIVE_INFINITY;
-        const capacityScore = hasCapacity && Number.isFinite(it.capacity)
-          ? Math.abs(it.capacity - capacityLiters)
-          : Number.POSITIVE_INFINITY;
-        return Object.assign({}, it, { sizeScore, capacityScore, idx });
-      })
+  const ranked = arr
+    .map((it, idx) => {
+      const sizeScore = hasSize && Number.isFinite(it.size) ? Math.abs(it.size - size) : Number.POSITIVE_INFINITY;
+      const capacityScore = hasCapacity && Number.isFinite(it.capacity)
+        ? Math.abs(it.capacity - capacityLiters)
+        : Number.POSITIVE_INFINITY;
+      return Object.assign({}, it, { sizeScore, capacityScore, idx });
+    })
     .sort((a, b) => {
       const ra = rankForBrand(a.brand);
       const rb = rankForBrand(b.brand);
@@ -3308,7 +3340,12 @@ function rankOffers(items, opts) {
       if (nameCmp !== 0) return nameCmp;
       return a.originalIdx - b.originalIdx;
     });
-
+  if (LOG_DEBUG) {
+    debugLog("rank_offers_ranked", {
+      count: ranked.length,
+      sample: ranked.slice(0, 3).map((it) => ({ brand: it.brand, model: (it.offer && it.offer.model) || "" })),
+    });
+  }
   return limit !== null ? ranked.slice(0, limit) : ranked;
 }
 
@@ -3384,6 +3421,20 @@ function pickCheapestPerBrand(items) {
   });
 }
 
+function pickFirstPerBrand(items) {
+  const arr = Array.isArray(items) ? items : [];
+  const seen = new Set();
+  const out = [];
+  for (let i = 0; i < arr.length; i += 1) {
+    const it = arr[i];
+    const k = normMatch((it && it.brand) || "");
+    if (seen.has(k)) continue;
+    seen.add(k);
+    out.push(it);
+  }
+  return out;
+}
+
 
 function offersHeader(lang, ctx) {
   const L = lang || "dzl";
@@ -3399,6 +3450,7 @@ function offersHeader(lang, ctx) {
     if (brand && category) return "Options " + brand + " (" + category + ") :";
     if (brand && cls) return "Options " + brand + " (" + cls + ") :";
     if (category) return "Options (" + category + ") :";
+    if (sizeTxt) return "Options (" + sizeTxt + ") :";
     if (cls) return "Options (" + cls + ") :";
     if (brand) return "Options " + brand + " :";
     return "Options :";
@@ -3409,6 +3461,7 @@ function offersHeader(lang, ctx) {
     if (brand && category) return "خيارات " + brand + " (" + category + "):";
     if (brand && cls) return "خيارات " + brand + " (" + cls + "):";
     if (category) return "خيارات (" + category + "):";
+    if (sizeTxt) return "خيارات (" + sizeTxt + "):";
     if (cls) return "خيارات (" + cls + "):";
     if (brand) return "خيارات " + brand + ":";
     return "خيارات:";
@@ -3418,6 +3471,7 @@ function offersHeader(lang, ctx) {
   if (brand && category) return "Options dyal " + brand + " (" + category + ") :";
   if (brand && cls) return "Options dyal " + brand + " (" + cls + ") :";
   if (category) return "Options (" + category + ") :";
+  if (sizeTxt) return "Options (" + sizeTxt + ") :";
   if (cls) return "Options (" + cls + ") :";
   if (brand) return "Options dyal " + brand + " :";
   return "Options:";
@@ -4103,18 +4157,22 @@ function isCallMeIntent(text) {
 }
 
 function isBuyIntent(text) {
-  const s = normMatch(text);
-  if (s.indexOf("bghit nchri") >= 0) return true;
-  if (s.indexOf("bghit ncommandi") >= 0) return true;
-  if (s.indexOf("commander") >= 0) return true;
-  if (s.indexOf("passer commande") >= 0) return true;
-  if (s.indexOf("acheter") >= 0) return true;
-  if (s.indexOf("buy") >= 0) return true;
-  if (s.indexOf("purchase") >= 0) return true;
-  if (s.indexOf("أريد الشراء") >= 0) return true;
-  if (s.indexOf("اريد الشراء") >= 0) return true;
-  if (s.indexOf("بغيت نشري") >= 0) return true;
-  if (s.indexOf("بغيت نكموندي") >= 0) return true;
+  const raw = String(text || "");
+  const s = normMatch(raw);
+
+  const arabicPhrases = ["بغيت نطلب", "نكمل الطلب", "بغيت نشري", "أكّد", "اكد", "أكد"];
+  for (let i = 0; i < arabicPhrases.length; i += 1) {
+    const p = arabicPhrases[i];
+    if (!p) continue;
+    const norm = normMatch(p);
+    if (raw.indexOf(p) >= 0 || (norm && s.indexOf(norm) >= 0)) return true;
+  }
+
+  const keywords = ["commander", "acheter", "buy", "order", "confirm"];
+  for (let i = 0; i < keywords.length; i += 1) {
+    if (includesToken(raw, keywords[i])) return true;
+  }
+
   return false;
 }
 
@@ -4608,8 +4666,19 @@ function tryDirectOfferAnswer(userText, historyMsgs, lang, key) {
     const items = items0
       .map((it, idx) => Object.assign({}, it, { originalIdx: idx }))
       .filter((it) => Number(((it.offer || {}).stock) || 0) > 0);
+    if (LOG_DEBUG) {
+      debugLog("category_offers_pick", {
+        category: category2,
+        key: k,
+        rawCount: items0.length,
+        inStockCount: items.length,
+        sample: items.slice(0, 2).map((it) => ({ brand: it.brand, model: (it.offer && it.offer.model) || "" })),
+      });
+    }
 
     const isTvCategory2 = normMatch(category2) === tvCanonNorm || normMatch(category2) === "tv";
+    const rankedNonTv = rankOffers(items, { limit: null, capacityLiters: capacityHint });
+    const nonTvPicks = Number.isFinite(capacityHint) ? pickFirstPerBrand(rankedNonTv) : pickCheapestPerBrand(rankedNonTv);
     const sorted = isTvCategory2
       ? pickCheapestPerBrand(items)
           .map((it, idx) => Object.assign({}, it, { originalIdx: idx }))
@@ -4627,7 +4696,14 @@ function tryDirectOfferAnswer(userText, historyMsgs, lang, key) {
             return normMatch((a.offer && a.offer.model) || "").localeCompare(normMatch((b.offer && b.offer.model) || ""));
           })
           .slice(0, MAX_OFFERS)
-      : pickCheapestPerBrand(rankOffers(items, { limit: null, capacityLiters: capacityHint })).slice(0, MAX_OFFERS);
+      : nonTvPicks.slice(0, MAX_OFFERS);
+    if (LOG_DEBUG) {
+      debugLog("category_offers_ranked", {
+        category: category2,
+        sortedCount: sorted.length,
+        sortedSample: sorted.slice(0, 2).map((it) => ({ brand: it.brand, model: (it.offer && it.offer.model) || "" })),
+      });
+    }
 
     if (sorted.length) {
       setCtx(key, {
@@ -5374,7 +5450,7 @@ app.post("/wanotifier", async (req, res) => {
     // Immediate image handling with vision before deriving text
     if (mediaInfo && (mediaInfo.kind === "image" || guessMediaKind(mediaInfo) === "image")) {
       try {
-        const visionOut = await handleVisionMedia(mediaInfo, lang, key, { reqId });
+        const visionOut = await handleVisionMedia(mediaInfo, lang, key, { reqId, stripUrls: true });
         const reply = shortenNoQuestion(visionOut.reply, CFG.maxReplyChars);
         memory.push(key, "assistant", reply);
         resetStrikes(key);
@@ -5459,6 +5535,13 @@ app.post("/wanotifier", async (req, res) => {
     memory.push(key, "user", userTextRaw);
     const history = memory.get(key);
     const ctxData = getCtx(key);
+
+    const greetingReply = isBuyIntent(userTextRaw) ? null : handleGreetingMessage({ key, lang, text: userTextRaw });
+    if (greetingReply) {
+      memory.push(key, "assistant", greetingReply);
+      resetStrikes(key);
+      return res.json({ ok: true, reply: greetingReply });
+    }
 
     const contactInfo = detectContactInfo(userTextRaw, ctxData);
     if (contactInfo && contactInfo.isNewInfo) {
