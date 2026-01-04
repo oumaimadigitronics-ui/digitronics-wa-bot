@@ -2043,8 +2043,36 @@ function detectModel(text) {
   return null;
 }
 
+const BRAND_ALIASES = Object.freeze([
+  { brand: "SAMSUNG", tokens: ["سامسونج", "سيمسونج", "سانسونج"] },
+  { brand: "TCL", tokens: ["تي سي ال", "تي سي إل", "تكل"] },
+  { brand: "DAIKO", tokens: ["دايكو", "دايكو"] },
+  { brand: "HAIER", tokens: ["هاير"] },
+  { brand: "LG", tokens: ["ال جي", "الجي"] },
+  { brand: "HISENSE", tokens: ["هايسنس", "هاي سينس", "هايسينس"] },
+]);
+
+function detectBrandAlias(text) {
+  const raw = String(text || "");
+  const s = normMatch(raw);
+  if (!s) return null;
+
+  for (let i = 0; i < BRAND_ALIASES.length; i += 1) {
+    const entry = BRAND_ALIASES[i];
+    const brand = findBrandByNorm(entry.brand) || entry.brand;
+    for (let j = 0; j < entry.tokens.length; j += 1) {
+      const token = entry.tokens[j];
+      if (token && includesToken(s, token)) return brand;
+    }
+  }
+  return null;
+}
+
 function detectBrand(text) {
   const s = normMatch(text);
+  const aliasHit = detectBrandAlias(text);
+  if (aliasHit) return aliasHit;
+
   const brands = OFFERS_INDEX.brands || [];
   for (let i = 0; i < brands.length; i += 1) {
     const b = brands[i];
@@ -3354,10 +3382,11 @@ function rankOffers(items, opts) {
     .sort((a, b) => {
       const ra = rankForBrand(a.brand);
       const rb = rankForBrand(b.brand);
-      if (ra !== rb) return ra - rb;
+      const capCmp = capacityScoreCmp(a, b);
 
-      if (a.sizeScore !== b.sizeScore) return a.sizeScore - b.sizeScore;
-      if (capacityScoreCmp(a, b) !== 0) return capacityScoreCmp(a, b);
+      if (hasSize && a.sizeScore !== b.sizeScore) return a.sizeScore - b.sizeScore;
+      if (hasCapacity && capCmp !== 0) return capCmp;
+      if (ra !== rb) return ra - rb;
       if (a.price !== b.price) return a.price - b.price;
       const brandCmp = String(a.brand || "").localeCompare(String(b.brand || ""));
       if (brandCmp !== 0) return brandCmp;
