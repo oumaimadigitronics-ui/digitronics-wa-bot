@@ -279,7 +279,7 @@ function stripQuestions(text) {
     const t = String(line || "").trim();
     if (!t) return true;
     if (/[؟?]\s*$/.test(t)) return true;
-    return /^(wach|wash|chno|chnou|shno|kayen|fin|quel|quelle|quels|quelles|combien)/i.test(t);
+    return /^(wach|wash|chno|chnou|shno|kayen|fin|quel|quelle|quels|quelles|combien|comment|pourquoi|qui|quand|où|how|what|which|who|when|where|كيف|واش|شنو|فين|شحال)/i.test(t);
   };
 
   while (lines.length > 0 && looksLikeQuestionLine(lines[lines.length - 1])) lines.pop();
@@ -305,6 +305,67 @@ function shortenNoQuestion(text, max) {
   const cleaned = stripUrlQueriesInText(stripQuestions(text));
   return shorten(ensureNoQuestion(cleaned), max || CFG.maxReplyChars);
 }
+
+// --------------------
+// Loop prevention (no repeated identical bot replies)
+// --------------------
+function _normForLoop(text) {
+  return normMatch(stripQuestions(stripUrlQueriesInText(String(text || "")))).slice(0, 800);
+}
+
+function buildTopCategorySuggestions(lang, limit = 4) {
+  const minByCat = new Map();
+  const offersRoot = (OFFERS && OFFERS.offers) || {};
+  for (const [brand, arr0] of Object.entries(offersRoot)) {
+    const arr = Array.isArray(arr0) ? arr0 : [];
+    for (let i = 0; i < arr.length; i += 1) {
+      const o = arr[i];
+      if (!o || Number((o.stock || 0)) <= 0) continue;
+      const cat = String(o.category || "").trim();
+      if (!cat) continue;
+      const ncat = normMatch(cat);
+      const price = Number.isFinite(Number(o.price)) ? Number(o.price) : parsePrice(o.price);
+      if (!Number.isFinite(price) || price <= 0) continue;
+      const cur = minByCat.get(ncat);
+      if (!cur || price < cur.price) minByCat.set(ncat, { cat, price });
+    }
+  }
+
+  const items = Array.from(minByCat.values())
+    .sort((a, b) => (a.price || 0) - (b.price || 0))
+    .slice(0, limit);
+  if (!items.length) return "";
+  const L = String(lang || "dzl");
+  const lines = items.map((it) => {
+    const p = Math.round(it.price);
+    if (L === "ar") return `• ${it.cat} — ابتداءً من ${p}dh`;
+    return `• ${it.cat} — dès ${p}dh`;
+  });
+  const head = L === "ar" ? "أقرب اختيارات متوفرة دابا:" : "Options disponibles maintenant:";
+  return [head, ...lines].join("\n");
+}
+
+function avoidReplyLoop(key, reply, lang) {
+  if (!key) return reply;
+  const ctx = getCtx(key);
+  const nowNorm = _normForLoop(reply);
+  const lastNorm = _normForLoop(ctx.lastBotReply || "");
+  if (nowNorm && lastNorm && nowNorm === lastNorm) {
+    const n = Number(ctx.sameBotReplyCount || 0) + 1;
+    setCtx(key, { sameBotReplyCount: n, lastBotReply: reply });
+    if (n >= 2) {
+      const sugg = buildTopCategorySuggestions(lang, 4);
+      const altParts = [t(lang, "cannot2"), sugg].filter(Boolean);
+      const alt = ensureNoQuestion(altParts.join("\n\n"));
+      setCtx(key, { lastBotReply: alt });
+      return alt;
+    }
+  } else {
+    setCtx(key, { sameBotReplyCount: 0, lastBotReply: reply });
+  }
+  return reply;
+}
+
 
 function sniffImageMime(buf) {
   if (!Buffer.isBuffer(buf)) return "";
@@ -1172,16 +1233,21 @@ class Memory {
   }
 
   push(key, role, content) {
-    const now = Date.now();
-    const k = String(key || "").slice(0, 180);
-    const entry = this.store.get(k) || { msgs: [], lastSeen: now };
-    entry.msgs.push({ role, content: String(content || "").trim().slice(0, 2000) });
-    entry.msgs = entry.msgs.filter((m) => m && m.content).slice(-this.maxMessages);
-    entry.lastSeen = now;
-    this.store.set(k, entry);
-    this.evictIfNeeded();
-    this.flushSoon();
-    return entry.msgs;
+    if (!key) return;
+    const k = String(key || "");
+    const entry = this.get(k);
+
+    const clean = String(content || "").trim().slice(0, 2000);
+    if (!clean) return;
+
+    // Prevent simple loops: do not store duplicate consecutive messages.
+    const last = entry.msgs.length ? entry.msgs[entry.msgs.length - 1] : null;
+    const sameRole = last && last.role === role;
+    const sameText = last && normMatch(last.content) === normMatch(clean);
+    if (!sameRole || !sameText) entry.msgs.push({ role, content: clean });
+
+    this.trim(entry);
+    this.flush();
   }
 
   get(key) {
@@ -1297,10 +1363,15 @@ function addStrike(key) {
 }
 
 function initialGreetingText(lang) {
-  const L = String(lang || "dzl").trim().toLowerCase();
-  if (L === "fr") return "Bonjour ! Comment puis-je vous aider aujourd’hui ?";
-  if (L === "ar") return "مرحبا! كيفاش نعاونك اليوم؟";
-  return "Salam! kifach n3awnk lyoom?";
+  const L = String(lang || "dzl");
+  // No questions: greet + show ready-to-use examples.
+  if (L === "ar") {
+    return "مرحبا! كتب ليا شنو بغيتي: تلفاز / ثلاجة / غسالة / فرن + القياس أو الميزانية (مثال: tv 50 أو أقل من 4000dh)";
+  }
+  if (L === "fr") {
+    return "Bonjour ! Envoyez-moi ce que vous cherchez (TV / frigo / lave-linge / cuisinière) + taille ou budget (ex: tv 50, ou moins de 4000dh)";
+  }
+  return "Bonjour ! Envoyez-moi ce que vous cherchez (TV / frigo / lave-linge / cuisinière) + taille ou budget (ex: tv 50, ou moins de 4000dh)";
 }
 
 function isGreetingLikeOpener(text) {
@@ -5221,7 +5292,21 @@ function withTimeout(promise, ms) {
 async function digibotLLMReply(userText, historyMsgs, lang, key) {
   const hist = Array.isArray(historyMsgs) ? historyMsgs : [];
 
-  const messages = [{ role: "system", content: buildSystemPrompt({}, lang, { alreadyLimited: true }) }];
+  const ctx = getCtx(key) || {};
+  const facts = [];
+  if (ctx.lastCategory) facts.push(`lastCategory: ${ctx.lastCategory}`);
+  if (ctx.lastClass) facts.push(`lastClass: ${ctx.lastClass}`);
+  if (ctx.lastBrand) facts.push(`lastBrand: ${ctx.lastBrand}`);
+  if (Number.isFinite(Number(ctx.lastSize))) facts.push(`lastSize: ${ctx.lastSize}`);
+  const memNote = facts.length ? `Conversation memory (facts):
+${facts.join("
+")}` : "";
+
+  const messages = [
+    { role: "system", content: buildSystemPrompt({}, lang, { alreadyLimited: true }) },
+    ...(memNote ? [{ role: "system", content: memNote }] : [])
+  ];
+
   const maxHist = CFG.memoryMaxMessages;
   const slice = hist.slice(Math.max(0, hist.length - maxHist));
   for (let i = 0; i < slice.length; i += 1) messages.push({ role: slice[i].role, content: slice[i].content });
@@ -5794,6 +5879,8 @@ app.post("/wanotifier", async (req, res) => {
     }
 
     let reply = await digibotLLMReply(userTextRaw, history, lang, key);
+
+    reply = avoidReplyLoop(key, reply, lang);
 
     if (looksLikeFallback(reply)) {
       const n = addStrike(key);
