@@ -47,6 +47,7 @@ import {
   t,
   offerFromWooProduct,
 } from "../server.js";
+import { setDepsForTests } from "../src/deps.js";
 
 const ORIGINAL_VISION_ANALYZER = analyzeProductImage;
 
@@ -95,6 +96,7 @@ afterEach(() => {
   setAudioDownloaderForTest(null);
   setAudioTranscriberForTest(null);
   setWcFetchJsonForTest(null);
+  setDepsForTests({});
 });
 
 test("rankOffers prioritizes TV priority brands", () => {
@@ -413,6 +415,22 @@ test("parseVisionJson normalizes output", () => {
   assert.ok(!bad.ok);
   const normalizedBad = normalizeVisionResult(null);
   assert.strictEqual(normalizedBad.confidence, 0);
+});
+
+test("analyzeProductImage falls back when OpenAI returns plain text", async () => {
+  setDepsForTests({
+    openai: {
+      responses: {
+        create: async () => ({ text: "TV Samsung 55 4K" }),
+      },
+    },
+  });
+
+  const result = await analyzeProductImage(Buffer.from([1, 2, 3]), "image/jpeg");
+  assert.strictEqual(result.category, "tv");
+  assert.strictEqual(result.brand, "Samsung");
+  assert.strictEqual(result.size_inches, 55);
+  assert.ok(result.confidence > 0);
 });
 
 test("audio mime helpers map extensions", () => {

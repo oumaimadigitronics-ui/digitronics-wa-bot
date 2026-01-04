@@ -3007,6 +3007,58 @@ function parseVisionJson(rawText) {
   return { ok: false, raw: cleaned };
 }
 
+function deriveVisionHintsFromText(rawText) {
+  const txt = String(rawText || "").trim();
+  if (!txt) return null;
+
+  const normalized = normMatch(txt);
+  const out = {
+    category: "other",
+    brand: null,
+    model: null,
+    size_inches: null,
+    capacity_liters: null,
+    confidence: 0.15,
+  };
+
+  const brandsPool = [...new Set([...(OFFERS_INDEX.brands || []), ...(BRAND_PRIORITY || [])])];
+  for (let i = 0; i < brandsPool.length; i += 1) {
+    const b = brandsPool[i];
+    if (includesToken(txt, b)) {
+      out.brand = b;
+      break;
+    }
+  }
+
+  const sizeMatch = txt.match(/(\d{2,3})\s*(?:"|pouce|pouces|inch|inches|po|in)?/i);
+  if (sizeMatch) {
+    const sizeNum = Number(sizeMatch[1]);
+    if (Number.isFinite(sizeNum) && sizeNum >= 14 && sizeNum <= 120) {
+      out.size_inches = sizeNum;
+      out.category = out.category === "other" ? "tv" : out.category;
+    }
+  }
+
+  const capMatch = txt.match(/(\d{2,4})\s*(?:l|litre|litres)/i);
+  if (capMatch) {
+    const capNum = Number(capMatch[1]);
+    if (Number.isFinite(capNum) && capNum >= 20 && capNum <= 1200) {
+      out.capacity_liters = capNum;
+      out.category = out.category === "other" ? "refrigerateur" : out.category;
+    }
+  }
+
+  if (/\btv\b|tele|écran|ecran|screen|qled|oled/.test(normalized)) out.category = "tv";
+  else if (/frigo|refrigerateur|réfrigérateur/.test(normalized)) out.category = "refrigerateur";
+  else if (/cuisiniere|four/.test(normalized)) out.category = "cuisiniere";
+  else if (/lave\s*linge|machine\s*a\s*laver/.test(normalized)) out.category = "lave_linge";
+  else if (/clim|climatiseur|ac/.test(normalized)) out.category = "climatiseur";
+
+  if (!out.brand && txt.length <= 80) out.model = txt;
+
+  return out;
+}
+
 function normalizeVisionResult(obj) {
   const o = obj && typeof obj === "object" ? obj : {};
   const category = String(o.category || "").toLowerCase();
@@ -3175,9 +3227,10 @@ async function analyzeProductImage(imageBytes, mimeType, opts = {}) {
 
   const parsed = parseVisionJson(rawOut);
   if (!parsed.ok) {
+    const fallback = deriveVisionHintsFromText(parsed.raw || rawOut);
     console.error(
       JSON.stringify({
-        level: "error",
+        level: fallback ? "warn" : "error",
         msg: "vision_invalid_json",
         reqId: opts.reqId || null,
         model,
@@ -3185,9 +3238,21 @@ async function analyzeProductImage(imageBytes, mimeType, opts = {}) {
         raw: rawOut,
       })
     );
-    const e = new Error("vision_invalid_json");
-    e.rawOutput = rawOut;
-    throw e;
+    if (!fallback) {
+      const e = new Error("vision_invalid_json");
+      e.rawOutput = rawOut;
+      throw e;
+    }
+    const normFallback = normalizeVisionResult(fallback);
+    console.log(
+      JSON.stringify({
+        level: "info",
+        msg: "vision_analyzed_fallback",
+        modelUsed: model,
+        confidence: normFallback.confidence,
+      })
+    );
+    return normFallback;
   }
 
   const norm = normalizeVisionResult(parsed.obj);
