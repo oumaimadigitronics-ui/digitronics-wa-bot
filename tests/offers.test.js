@@ -568,6 +568,20 @@ test("conversation key generation is stable", () => {
   assert.notStrictEqual(keyFallback1, keyFrom);
 });
 
+test("conversation key prefers phone over other ids", () => {
+  const keyPhoneOnly = buildConversationKey({ phone: "+21260000000" });
+  const keyWithAll = buildConversationKey({
+    phone: "+21260000000",
+    remoteJid: "123@wa",
+    waId: "abc123",
+    from: "user-a",
+    sender: "user-b",
+  });
+
+  assert.ok(keyPhoneOnly.startsWith("phone:"));
+  assert.strictEqual(keyPhoneOnly, keyWithAll);
+});
+
 test("offers do not bleed between chats", () => {
   setOffersForTest({
     TVBRAND: [{ model: "TV-1", class: "Tv", category: "Tv", size: 50, price: 1000, stock: 5 }],

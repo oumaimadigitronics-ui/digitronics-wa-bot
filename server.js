@@ -951,6 +951,12 @@ function buildConversationKey(fields, req, body) {
     threadId: threadId || null,
   };
 
+  if (phone) {
+    const key = "phone:" + stableHash(phone);
+    debugLog("conversation_key", Object.assign({}, logPayload, { used: "phone", key }));
+    return key;
+  }
+
   if (remoteJid) {
     const key = "jid:" + remoteJid.slice(0, 120);
     debugLog("conversation_key", Object.assign({}, logPayload, { used: "remoteJid", key }));
@@ -972,12 +978,6 @@ function buildConversationKey(fields, req, body) {
   if (sender) {
     const key = "sender:" + stableHash(sender);
     debugLog("conversation_key", Object.assign({}, logPayload, { used: "sender", key }));
-    return key;
-  }
-
-  if (phone) {
-    const key = "phone:" + stableHash(phone);
-    debugLog("conversation_key", Object.assign({}, logPayload, { used: "phone", key }));
     return key;
   }
 
