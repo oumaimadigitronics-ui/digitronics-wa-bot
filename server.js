@@ -1607,6 +1607,8 @@ function rebuildOffersIndex() {
 function setOffersForTest(offersObj) {
   OFFERS = { offers: offersObj || {} };
   rebuildOffersIndex();
+  const hasOffers = Boolean(offersObj && Object.keys(offersObj).length);
+  lastOffersSync = { ok: hasOffers, at: nowIso(), error: hasOffers ? null : "No offers set" };
   if (LOG_DEBUG) {
     debugLog("set_offers_for_test", {
       brands: (OFFERS_INDEX.brands || []).length,
@@ -3959,6 +3961,8 @@ async function tryWebsiteCatalogAnswer(userText, lang, key) {
   if (!text) return null;
 
   const parsed = parseUserQuery(text, { ctx: getCtx(key) });
+  const hasExplicitSignal = hasProductInquirySignal(text) || Boolean(detectModel(text));
+  if (!hasExplicitSignal) return null;
   const detectedCategory = parsed.intentCategory || parsed.category || null;
   const detectedClass = parsed.intentClass || parsed.cls || null;
   const detectedBrand = parsed.brand || null;
@@ -4585,6 +4589,32 @@ function hasProductInquirySignal(text) {
   );
 }
 
+function isAcknowledgementMessage(text) {
+  const raw = normMatch(text || "");
+  if (!raw) return false;
+  const ackTokens = [
+    "شكرا",
+    "شكران",
+    "mersi",
+    "merci",
+    "thank you",
+    "thanks",
+    "tnx",
+    "ok",
+    "daccord",
+    "wa9ila",
+    "wakha",
+    "ouais",
+    "تمام",
+    "حسنا",
+    "سمعتها",
+  ];
+  for (let i = 0; i < ackTokens.length; i += 1) {
+    if (includesToken(raw, ackTokens[i])) return true;
+  }
+  return false;
+}
+
 function parseBudget(text) {
   const s0 = arabicIndicToAsciiDigits(String(text || ""));
   const s = s0.toLowerCase();
@@ -5174,6 +5204,7 @@ function handleTvSizePriceFlow(parsed, lang, key) {
 function tryDirectOfferAnswer(userText, historyMsgs, lang, key) {
   const text = String(userText || "").trim();
   if (!text) return null;
+  if (isAcknowledgementMessage(text)) return null;
   if (!OFFERS || !OFFERS.offers || !Object.keys(OFFERS.offers).length) return null;
 
   const ctx = getCtx(key);
@@ -6299,7 +6330,7 @@ app.post("/wanotifier", async (req, res) => {
 
     const greetingReply = isBuyIntent(userTextRaw) ? null : handleGreetingMessage({ key, lang, text: userTextRaw });
     if (greetingReply) {
-      const reply = applyAudioNote(greetingReply);
+      const reply = finalizeReply(greetingReply, 520);
       memory.push(key, "assistant", reply);
       resetStrikes(key);
       return res.json({ ok: true, reply });
@@ -6527,6 +6558,7 @@ app.post("/wanotifier", async (req, res) => {
       detectClass(userTextRaw) ||
       detectCategory(userTextRaw)
     );
+    const hasShoppingIntent = shoppingSignal || hasProductInquirySignal(userTextRaw);
     if (wasInSupport && shoppingSignal) supportModeStore.delete(key);
 
     if (supportModeStore.has(key)) {
@@ -6575,12 +6607,14 @@ app.post("/wanotifier", async (req, res) => {
       return res.json({ ok: true, reply });
     }
 
-    const bestGuess = bestGuessOffers(lang, key);
-    if (bestGuess) {
-      const reply = finalizeReply(bestGuess + "\n\n" + agentWillFinalize(lang), 520);
-      memory.push(key, "assistant", reply);
-      resetStrikes(key);
-      return res.json({ ok: true, reply });
+    if (hasShoppingIntent && !isAcknowledgementMessage(userTextRaw)) {
+      const bestGuess = bestGuessOffers(lang, key);
+      if (bestGuess) {
+        const reply = finalizeReply(bestGuess + "\n\n" + agentWillFinalize(lang), 520);
+        memory.push(key, "assistant", reply);
+        resetStrikes(key);
+        return res.json({ ok: true, reply });
+      }
     }
 
     let reply = await digibotLLMReply(userTextRaw, history, lang, key);
