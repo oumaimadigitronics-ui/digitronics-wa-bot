@@ -13,6 +13,7 @@ const app = express();
 app.set("trust proxy", true);
 
 const LOG_DEBUG = String(process.env.LOG_DEBUG || "0") === "1";
+const IS_TEST = String(process.env.NODE_ENV || "").toLowerCase() === "test";
 const ENTRY_FILE = fileURLToPath(import.meta.url);
 const RUN_SELF_TESTS = String(process.env.RUN_SELF_TESTS || process.env.SELF_TEST || "0") === "1";
 const REQUIRE_ENV = process.argv[1] === ENTRY_FILE && !RUN_SELF_TESTS;
@@ -1028,7 +1029,9 @@ function buildConversationKey(fields, req, body) {
   const key = "anon:" + stableHash(JSON.stringify(fallbackHint));
   const logLine = Object.assign({}, logPayload, { used: "fallback", key });
   debugLog("conversation_key", logLine);
-  console.warn(JSON.stringify({ level: "warn", msg: "conversation_key_fallback", key, hint: fallbackHint }));
+  if (!IS_TEST) {
+    console.warn(JSON.stringify({ level: "warn", msg: "conversation_key_fallback", key, hint: fallbackHint }));
+  }
   return key;
 }
 
