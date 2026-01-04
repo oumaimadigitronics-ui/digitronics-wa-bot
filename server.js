@@ -4275,6 +4275,23 @@ function contactInfoSavedMessage(lang) {
 
 function hasProductInquirySignal(text) {
   const raw = String(text || "");
+  const optionKeywords = [
+    "خيارات",
+    "خيارات اخرى",
+    "اختيارات",
+    "اختيارات اخرى",
+    "options",
+    "option",
+    "other options",
+    "another option",
+    "autres options",
+    "plus d'options",
+  ];
+
+  for (let i = 0; i < optionKeywords.length; i += 1) {
+    if (includesToken(raw, optionKeywords[i])) return true;
+  }
+
   return (
     detectPriceIntent(raw) ||
     Boolean(detectBrand(raw)) ||
@@ -6206,6 +6223,8 @@ export {
   formatOfferLine,
   stripQuestions,
   ensureNoQuestion,
+  detectContactInfo,
+  hasProductInquirySignal,
   extractCapacityLiters,
   resolveCategoryIntent,
   buildConversationKey,
