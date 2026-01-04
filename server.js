@@ -1309,6 +1309,7 @@ function isGreetingLikeOpener(text) {
   if (!s) return false;
   if (hasArabicScript(raw) && (/مرحب/.test(s) || /سلام/.test(s) || /كيفاش/.test(s) || /اهلا/.test(s))) return true;
   if (/(^|\s)(bonjour|salut|hello)/i.test(raw)) return true;
+  if (/(^|\s)(salam|salem|selam|slm)(\s|$)/i.test(raw)) return true;
   if (/kifach n3awnk/i.test(raw)) return true;
   return false;
 }
@@ -3909,7 +3910,8 @@ function detectContactInfo(text, ctx = {}) {
     const tokens = raw.split(/\s+/).filter(Boolean);
     const shortName = tokens.length >= 1 && tokens.length <= 4 && tokens.every((w) => /^[\p{L}]{2,}$/u.test(w));
     const looksLikeProductInquiry = hasProductInquirySignal(raw) || hasTvIntentTokens(raw);
-    if (shortName && !/\d/.test(raw) && lower.length <= 80 && !looksLikeProductInquiry) name = raw;
+    const greetingLike = isGreetingLikeOpener(raw);
+    if (shortName && !/\d/.test(raw) && lower.length <= 80 && !looksLikeProductInquiry && !greetingLike) name = raw;
   }
 
   let address = null;
