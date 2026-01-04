@@ -447,7 +447,13 @@ function t(lang, key, vars) {
       cannot3: "Ma qdrtch n3tik jawab bd9a daba. T9dr t3yt lina: " + CONTACTS.calls.join(" / ") + ".",
       photoLink: (x) => {
         const link = String((x || {}).link || "");
-        return "Hna link dyal l-produit: " + link;
+        const name = String((x || {}).name || "produit").trim();
+        return `Hna l-produit ${name}: ${link}`;
+      },
+      photoClosest: (x) => {
+        const link = String((x || {}).link || "");
+        const name = String((x || {}).name || "produit").trim();
+        return `Hadi qrab 7aja l talabt: ${name} - ${link}`;
       },
       photoNoLink: "Ma 3ndnach link dyal tswira daba. 3tini model wla brand+size.",
       askBrandModelSize: "سمح ليا ما فهمتش الطلب ديالك مزيان 🙏 غادي يدخل معاك وكيل بشري يكمل معاك، ولا تقدر تعيط لينا على 0605123934",
@@ -495,7 +501,13 @@ function t(lang, key, vars) {
       cannot3: "Je ne peux pas répondre avec certitude pour le moment. Vous pouvez appeler: " + CONTACTS.calls.join(" / ") + ".",
       photoLink: (x) => {
         const link = String((x || {}).link || "");
-        return "Voici le lien du produit: " + link;
+        const name = String((x || {}).name || "produit").trim();
+        return `Voici le produit ${name}: ${link}`;
+      },
+      photoClosest: (x) => {
+        const link = String((x || {}).link || "");
+        const name = String((x || {}).name || "produit").trim();
+        return `C’est le produit le plus proche de votre demande: ${name} - ${link}`;
       },
       photoNoLink: "Je n’ai pas de lien photo pour ce produit. Précisez le modèle ou marque+taille.",
       askBrandModelSize: "Désolé, je n’ai pas bien compris 🙏 Un agent humain va prendre le relais, ou appelez-nous au 0605123934",
@@ -542,7 +554,13 @@ function t(lang, key, vars) {
       cannot3: "ماقدرتش نعطيك جواب مؤكد دابا. تقدر تعيط لينا: " + CONTACTS.calls.join(" / ") + ".",
       photoLink: (x) => {
         const link = String((x || {}).link || "");
-        return "هاهو رابط المنتج: " + link;
+        const name = String((x || {}).name || "المنتوج").trim();
+        return `ها هو المنتوج ${name}: ${link}`;
+      },
+      photoClosest: (x) => {
+        const link = String((x || {}).link || "");
+        const name = String((x || {}).name || "المنتوج").trim();
+        return `ها أقرب منتوج لطلبك: ${name} - ${link}`;
       },
       photoNoLink: "ما كاينش رابط صورة لهاد المنتج دابا. عطيني الموديل ولا الماركة+الحجم.",
       askBrandModelSize: "سمح ليا ما فهمتش الطلب ديالك مزيان 🙏 غادي يدخل معاك وكيل بشري يكمل معاك، ولا تقدر تعيط لينا على 0605123934",
@@ -2295,19 +2313,22 @@ function buildProductLink(product, fallbackName) {
   return `https://digitronics.ma/search?q=${query}`;
 }
 
+function buildOfferDisplayName(brand, offer, lang = "dzl") {
+  const safeBrand = String(brand || "").trim();
+  const type = String((offer && offer.type) || "").trim();
+  const name = String((offer && offer.name) || "").trim();
+  const model = String((offer && offer.model) || "").trim();
+  const sizeNum = Number((offer && offer.size) || NaN);
+  const sizeText = Number.isFinite(sizeNum) && sizeNum > 0 ? formatSize(lang, sizeNum) : "";
+  const fallbackName = [safeBrand, model, sizeText].filter(Boolean).join(" ").trim();
+  const baseName = name || fallbackName || model || safeBrand || "Produit";
+  return type && normMatch(baseName).indexOf(normMatch(type)) < 0 ? `${baseName} ${type}`.trim() : baseName;
+}
+
 // RULE #1 no questions
 // Offer message format: clickable name + "name - price"
 function formatOfferLine(brand, o, opts = {}) {
-  const safeBrand = String(brand || "").trim();
-  const type = String((o && o.type) || "").trim();
-  const name = String((o && o.name) || "").trim();
-  const model = String((o && o.model) || "").trim();
-  const sizeNum = Number((o && o.size) || NaN);
-  const sizeText = Number.isFinite(sizeNum) && sizeNum > 0 ? formatSize(opts.lang || "dzl", sizeNum) : "";
-  const fallbackName = [safeBrand, model, sizeText].filter(Boolean).join(" ").trim();
-  const baseName = name || fallbackName || model || safeBrand || "Produit";
-  const displayName =
-    type && normMatch(baseName).indexOf(normMatch(type)) < 0 ? `${baseName} ${type}`.trim() : baseName;
+  const displayName = buildOfferDisplayName(brand, o, opts.lang || "dzl");
   const priceNum = Number((o && o.price) || NaN);
   const pricePart = Number.isFinite(priceNum) ? `${priceNum} dh` : "Prix sur demande";
   const url = buildProductLink(o || {}, displayName);
@@ -3781,6 +3802,44 @@ function collectTvOffers({ brand, size, budget }) {
   return pickCheapestPerBrand(items).slice(0, MAX_OFFERS);
 }
 
+function pickClosestOfferForPhoto({ brandHint, size, classHint }) {
+  const offersObj = (OFFERS && OFFERS.offers) || {};
+  const brands = Object.keys(offersObj);
+  const items = [];
+
+  for (let i = 0; i < brands.length; i += 1) {
+    const b = brands[i];
+    const arr = Array.isArray(offersObj[b]) ? offersObj[b] : [];
+    for (let j = 0; j < arr.length; j += 1) {
+      const offer = arr[j];
+      if (Number((offer && offer.stock) || 0) <= 0) continue;
+      items.push({ brand: b, offer, originalIdx: j });
+    }
+  }
+
+  if (!items.length) return null;
+
+  const className = classHint || null;
+  const sizeNum = Number(size);
+  const baseOpts = {
+    limit: 1,
+    className,
+    tvClassCanon: OFFERS_INDEX.classCanon.tv,
+  };
+  if (Number.isFinite(sizeNum)) baseOpts.size = sizeNum;
+
+  const canonicalBrand = brandHint ? findBrandByNorm(brandHint) : null;
+  if (canonicalBrand) {
+    const ranked = rankOffers(items, Object.assign({}, baseOpts, { priorityList: [canonicalBrand] }));
+    if (ranked.length) return { brand: ranked[0].brand, offer: ranked[0].offer, closest: true };
+  }
+
+  const rankedAny = rankOffers(items, baseOpts);
+  if (rankedAny.length) return { brand: rankedAny[0].brand, offer: rankedAny[0].offer, closest: true };
+
+  return null;
+}
+
 function resolveOfferForPhoto(userText, historyMsgs, key) {
   const text = String(userText || "");
   const hist = Array.isArray(historyMsgs) ? historyMsgs : [];
@@ -3798,7 +3857,7 @@ function resolveOfferForPhoto(userText, historyMsgs, key) {
   );
 
   const modelHit = detectModel(combined);
-  if (modelHit && Number(((modelHit.offer || {}).stock) || 0) > 0) return modelHit;
+  if (modelHit && Number(((modelHit.offer || {}).stock) || 0) > 0) return { ...modelHit, closest: false };
 
   const size = extractTvSize(text, { requireTvHint: isNonTvContext });
   let brand = detectBrand(combined);
@@ -3815,10 +3874,11 @@ function resolveOfferForPhoto(userText, historyMsgs, key) {
     const best = arr
       .filter((o) => Number.isFinite(Number(o && o.price)))
       .sort((a, b) => Number(a.price) - Number(b.price))[0];
-    if (best) return { brand, offer: best };
+    if (best) return { brand, offer: best, closest: false };
   }
 
-  return null;
+  const closest = pickClosestOfferForPhoto({ brandHint: brand, size, classHint: classHint || categoryHint || null });
+  return closest;
 }
 
 function isPreferBest(text) {
@@ -5612,9 +5672,11 @@ app.post("/wanotifier", async (req, res) => {
         return res.json({ ok: true, reply });
       }
 
-      const link = String(((resolved.offer || {}).link) || "").trim();
-      const safeLink = sanitizeUrlNoQuestion(link);
-      const reply = shortenNoQuestion(link ? t(lang, "photoLink", { link: safeLink }) : t(lang, "photoNoLink"), 520);
+      const displayName = buildOfferDisplayName(resolved.brand, resolved.offer, lang);
+      const linkRaw = buildProductLink(resolved.offer || {}, displayName);
+      const safeLink = sanitizeUrlNoQuestion(linkRaw);
+      const msgKey = resolved.closest ? "photoClosest" : "photoLink";
+      const reply = shortenNoQuestion(t(lang, msgKey, { link: safeLink, name: displayName }), 520);
       memory.push(key, "assistant", reply);
       resetStrikes(key);
       return res.json({ ok: true, reply });
