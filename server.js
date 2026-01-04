@@ -928,22 +928,40 @@ function buildConversationKey(fields, req, body) {
     f.convId,
     safeGet(b, ["conversationId"]),
     safeGet(b, ["conversation_id"]),
+    safeGet(b, ["conversation", "id"]),
+    safeGet(b, ["conversation", "uid"]),
+    safeGet(b, ["conversation", "uuid"]),
     safeGet(b, ["data", "conversationId"]),
     safeGet(b, ["data", "conversation_id"]),
+    safeGet(b, ["data", "conversation", "id"]),
+    safeGet(b, ["data", "conversation", "uid"]),
+    safeGet(b, ["data", "conversation", "uuid"]),
   ]);
   const contactId = pickFirst([
     f.contactId,
     safeGet(b, ["contactId"]),
     safeGet(b, ["contact_id"]),
+    safeGet(b, ["contact", "id"]),
+    safeGet(b, ["contact", "uid"]),
+    safeGet(b, ["contact", "uuid"]),
     safeGet(b, ["data", "contactId"]),
     safeGet(b, ["data", "contact_id"]),
+    safeGet(b, ["data", "contact", "id"]),
+    safeGet(b, ["data", "contact", "uid"]),
+    safeGet(b, ["data", "contact", "uuid"]),
   ]);
   const threadId = pickFirst([
     f.threadId,
     safeGet(b, ["threadId"]),
     safeGet(b, ["thread_id"]),
+    safeGet(b, ["thread", "id"]),
+    safeGet(b, ["thread", "uid"]),
+    safeGet(b, ["thread", "uuid"]),
     safeGet(b, ["data", "threadId"]),
     safeGet(b, ["data", "thread_id"]),
+    safeGet(b, ["data", "thread", "id"]),
+    safeGet(b, ["data", "thread", "uid"]),
+    safeGet(b, ["data", "thread", "uuid"]),
   ]);
 
   const logPayload = {
@@ -1016,23 +1034,14 @@ function buildConversationKey(fields, req, body) {
   const ua = String((req && req.headers && req.headers["user-agent"]) || "").slice(0, 120);
   const ip = String((req && (req.ip || req.connection?.remoteAddress)) || "").slice(0, 120);
   const tsBucket = Math.floor(getNowMs() / (15 * 60 * 1000));
+  const textForHash = extractTextFromBody(body);
   const fallbackHint = {
     ua,
     ip,
     ts: tsBucket,
-    textHash: stableHash(String((body && body.text) || "")),
-    contactId:
-      safeGet(body || {}, ["contact_id"]) ||
-      safeGet(body || {}, ["contactId"]) ||
-      safeGet(body || {}, ["data", "contact_id"]) ||
-      safeGet(body || {}, ["data", "contactId"]) ||
-      null,
-    threadId:
-      safeGet(body || {}, ["thread_id"]) ||
-      safeGet(body || {}, ["threadId"]) ||
-      safeGet(body || {}, ["data", "thread_id"]) ||
-      safeGet(body || {}, ["data", "threadId"]) ||
-      null,
+    textHash: stableHash(String(textForHash || safeGet(body || {}, ["text"]) || "")),
+    contactId: contactId || null,
+    threadId: threadId || null,
   };
   const key = "anon:" + stableHash(JSON.stringify(fallbackHint));
   const logLine = Object.assign({}, logPayload, { used: "fallback", key });

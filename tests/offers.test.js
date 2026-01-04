@@ -635,6 +635,16 @@ test("conversation key prefers phone over other ids", () => {
   assert.strictEqual(keyPhoneOnly, keyWithAll);
 });
 
+test("conversation key captures nested conversation/contact/thread ids", () => {
+  const keyConv = buildConversationKey({}, { headers: {} }, { conversation: { id: "conv-123" } });
+  const keyContact = buildConversationKey({}, { headers: {} }, { contact: { uuid: "contact-xyz" } });
+  const keyThread = buildConversationKey({}, { headers: {} }, { thread: { uid: "thread-555" } });
+
+  assert.strictEqual(keyConv, "conv:conv-123");
+  assert.strictEqual(keyContact, "contact:contact-xyz");
+  assert.strictEqual(keyThread, "thread:thread-555");
+});
+
 test("offers do not bleed between chats", () => {
   setOffersForTest({
     TVBRAND: [{ model: "TV-1", class: "Tv", category: "Tv", size: 50, price: 1000, stock: 5 }],
