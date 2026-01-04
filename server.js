@@ -4040,19 +4040,29 @@ function parseUserQuery(text, opts = {}) {
 
   const modelHit = detectModel(raw);
   const explicitBrand = (modelHit && modelHit.brand) || detectBrand(raw);
+  const ctxBrand = ctx.lastBrand || null;
+  const ctxBrandValid = Boolean(ctxBrand && OFFERS && OFFERS.offers && OFFERS.offers[ctxBrand]);
+  const tvCanonNorm = normMatch(OFFERS_INDEX.classCanon.tv || "tv");
+  const ctxCategoryNorm = normMatch(ctx.lastCategory || "");
+  const ctxClassNorm = normMatch(ctx.lastClass || "");
+  const ctxTvContext =
+    ctxCategoryNorm === tvCanonNorm ||
+    ctxClassNorm === tvCanonNorm ||
+    Number.isFinite(Number(ctx.lastSize)) ||
+    Boolean(ctxBrand);
   const sizeVal = extractTvSize(raw, {
     categoryHint: forcedCategory || ctx.lastCategory || null,
-    allowNoHint: hasTvSizeContext(raw) || Boolean(explicitBrand && !forcedCategory),
+    allowNoHint: hasTvSizeContext(raw) || Boolean(explicitBrand && !forcedCategory) || ctxTvContext,
     requireTvHint: false,
-    externalTvContext: hasTvSizeContext(raw) || Boolean(explicitBrand),
+    externalTvContext: hasTvSizeContext(raw) || Boolean(explicitBrand) || ctxTvContext,
   });
-  const detectedBrand = explicitBrand || (!sizeVal ? ctx.lastBrand : null) || null;
+  const detectedBrand = explicitBrand || (ctxBrandValid ? ctxBrand : null);
   const detectedCategory = forcedCategory || detectCategory(raw) || ctx.lastCategory || null;
   const detectedClass = forcedClass || (!detectedCategory ? detectClass(raw) : null) || ctx.lastClass || null;
 
   const forcedNonTv =
-    (detectedCategory && normMatch(detectedCategory) !== normMatch(OFFERS_INDEX.classCanon.tv || "tv") && normMatch(detectedCategory) !== "tv") ||
-    (detectedClass && normMatch(detectedClass) !== normMatch(OFFERS_INDEX.classCanon.tv || "tv"));
+    (detectedCategory && normMatch(detectedCategory) !== tvCanonNorm && normMatch(detectedCategory) !== "tv") ||
+    (detectedClass && normMatch(detectedClass) !== tvCanonNorm);
 
   const tvClass = OFFERS_INDEX.classCanon.tv || "Tv";
   const brand = detectedBrand || null;
@@ -5085,6 +5095,10 @@ function buildOffersSubsetForPrompt(userText, historyMsgs, key) {
   const tvCanonNorm = normMatch(tvCanon || "tv");
   const categoryNorm = normMatch(category || "");
   const clsNorm = normMatch(cls || "");
+  const ctxTvHint =
+    Boolean(ctx.lastBrand || ctx.lastSize) ||
+    normMatch(ctx.lastClass || "") === tvCanonNorm ||
+    normMatch(ctx.lastCategory || "") === tvCanonNorm;
   const hasTvHint = (() => {
     const s0 = arabicIndicToAsciiDigits(String(combined || ""));
     const s = s0.toLowerCase();
@@ -5101,7 +5115,11 @@ function buildOffersSubsetForPrompt(userText, historyMsgs, key) {
   const isTvCategory = categoryNorm === tvCanonNorm || categoryNorm === "tv";
   const isTvClass = clsNorm === tvCanonNorm;
   const isNonTvSignal = Boolean((category && !isTvCategory) || (cls && !isTvClass));
-  const sizeVal = extractTvSize(combined, { requireTvHint: isNonTvSignal });
+  const sizeVal = extractTvSize(combined, {
+    requireTvHint: isNonTvSignal,
+    allowNoHint: hasTvHint || ctxTvHint,
+    externalTvContext: hasTvHint || ctxTvHint,
+  });
   const capacityVal = extractCapacityLiters(combined);
   if (Number.isFinite(sizeVal) && (isTvClass || isTvCategory || hasTvHint) && !forcedCategory && !category) {
     cls = tvCanon;
