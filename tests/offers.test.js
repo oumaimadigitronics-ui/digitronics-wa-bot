@@ -313,6 +313,23 @@ test("fridge follow-up capacity uses context", () => {
   assertNoQuestionMarks(reply);
 });
 
+test("brand follow-up size uses context", () => {
+  const offers = {
+    TCL: [
+      { price: 1800, stock: 3, model: "T-32A", class: "Tv", category: "Tv", size: 32, url: "http://x/t32" },
+      { price: 2500, stock: 2, model: "T-43B", class: "Tv", category: "Tv", size: 43, url: "http://x/t43" },
+    ],
+    DAIKO: [{ price: 1500, stock: 4, model: "D-32", class: "Tv", category: "Tv", size: 32, url: "http://x/d32" }],
+  };
+  const key = "brand-size-followup";
+  setOffersForTest(offers);
+  const first = tryDirectOfferAnswer("TCL", [], "fr", key);
+  assert.ok(first && first.includes("TCL"));
+  const second = tryDirectOfferAnswer("32", [], "fr", key);
+  assert.ok(second && second.includes("TCL"));
+  assert.ok(second.includes("32"));
+});
+
 test("cuisiniere synonyms do not hit TV", () => {
   setOffersForTest(TEST_OFFERS);
   const reply = tryDirectOfferAnswer("فورنو", [], "dzl", "k-oven");
