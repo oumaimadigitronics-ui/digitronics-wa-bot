@@ -248,6 +248,42 @@ test("resolveCategoryIntent detects refrigerator", () => {
   assert.strictEqual(intent.category, "Refrigerateur");
 });
 
+test("resolveCategoryIntent matches no-frost fridge keywords", () => {
+  const arabizi = resolveCategoryIntent("bghit fridge no frost");
+  assert.ok(arabizi);
+  assert.strictEqual(arabizi.category, "Refrigerateur");
+
+  const arabic = resolveCategoryIntent("ثلاجة نو فروست");
+  assert.ok(arabic);
+  assert.strictEqual(arabic.category, "Refrigerateur");
+});
+
+test("resolveCategoryIntent detects all categories across languages", () => {
+  const cases = [
+    { text: "bghit tlaja no frost", category: "Refrigerateur" },
+    { text: "je cherche un réfrigérateur", category: "Refrigerateur" },
+    { text: "أحتاج براد جديد", category: "Refrigerateur" },
+    { text: "bghit lcran smart", category: "Tv" },
+    { text: "je veux une télévision oled", category: "Tv" },
+    { text: "أبحث عن تلفزيون ذكي", category: "Tv" },
+    { text: "bghit machina dial ssiab", category: "Machine A Laver" },
+    { text: "je cherche un lave-linge compact", category: "Machine A Laver" },
+    { text: "أحتاج غسالة ملابس جديدة", category: "Machine A Laver" },
+    { text: "bghit klima jdid", category: "Climatiseur" },
+    { text: "je veux un climatiseur mobile puissant", category: "Climatiseur" },
+    { text: "أحتاج مكيف هواء قوي", category: "Climatiseur" },
+    { text: "بغيت طباخة غاز", category: "Cuisiniere" },
+    { text: "je veux une cuisinière gaz", category: "Cuisiniere" },
+    { text: "أحتاج موقد غاز", category: "Cuisiniere" },
+  ];
+
+  for (const { text, category } of cases) {
+    const intent = resolveCategoryIntent(text);
+    assert.ok(intent, `No intent found for ${text}`);
+    assert.strictEqual(intent.category, category);
+  }
+});
+
 test("direct offers respond with fridge products", () => {
   setOffersForTest(TEST_OFFERS);
   const reply = tryDirectOfferAnswer("ثلاجة", [], "dzl", "k-fridge");
