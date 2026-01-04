@@ -911,6 +911,20 @@ function buildConversationKey(fields, req, body) {
     safeGet(b, ["data", "conversationId"]),
     safeGet(b, ["data", "conversation_id"]),
   ]);
+  const contactId = pickFirst([
+    f.contactId,
+    safeGet(b, ["contactId"]),
+    safeGet(b, ["contact_id"]),
+    safeGet(b, ["data", "contactId"]),
+    safeGet(b, ["data", "contact_id"]),
+  ]);
+  const threadId = pickFirst([
+    f.threadId,
+    safeGet(b, ["threadId"]),
+    safeGet(b, ["thread_id"]),
+    safeGet(b, ["data", "threadId"]),
+    safeGet(b, ["data", "thread_id"]),
+  ]);
 
   const logPayload = {
     used: null,
@@ -921,6 +935,8 @@ function buildConversationKey(fields, req, body) {
     phone: phone || null,
     chatId: chatId || null,
     convId: convId || null,
+    contactId: contactId || null,
+    threadId: threadId || null,
   };
 
   if (remoteJid) {
@@ -962,6 +978,18 @@ function buildConversationKey(fields, req, body) {
   if (convId) {
     const key = "conv:" + convId.slice(0, 120);
     debugLog("conversation_key", Object.assign({}, logPayload, { used: "convId", key }));
+    return key;
+  }
+
+  if (contactId) {
+    const key = "contact:" + contactId.slice(0, 120);
+    debugLog("conversation_key", Object.assign({}, logPayload, { used: "contactId", key }));
+    return key;
+  }
+
+  if (threadId) {
+    const key = "thread:" + threadId.slice(0, 120);
+    debugLog("conversation_key", Object.assign({}, logPayload, { used: "threadId", key }));
     return key;
   }
 
