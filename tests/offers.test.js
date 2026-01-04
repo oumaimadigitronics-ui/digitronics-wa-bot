@@ -419,6 +419,21 @@ test("brand follow-up size uses context", () => {
   assert.ok(second.includes("32"));
 });
 
+test("bare TV sizes default to TV context", () => {
+  const offers = {
+    BRANDX: [{ price: 7200, stock: 2, model: "BX-95", class: "Tv", category: "Tv", size: 95, url: "http://x/bx95" }],
+  };
+  const key = "tv-size-only";
+  setOffersForTest(offers);
+
+  const reply = tryDirectOfferAnswer("95", [], "fr", key);
+  assert.ok(reply);
+  const ctx = getCtxForTest(key);
+  assert.strictEqual(ctx.lastClass, "Tv");
+  assert.strictEqual(ctx.lastSize, 95);
+  assert.ok(reply.includes("95"));
+});
+
 test("cuisiniere synonyms do not hit TV", () => {
   setOffersForTest(TEST_OFFERS);
   const reply = tryDirectOfferAnswer("فورنو", [], "dzl", "k-oven");

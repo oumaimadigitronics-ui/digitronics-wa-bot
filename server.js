@@ -1752,8 +1752,9 @@ function getBrandFromWoo(p) {
 }
 
 const MIN_TV_SIZE = 24;
-const MAX_TV_SIZE = 85;
-const ALLOWED_TV_SIZES = Object.freeze([24, 27, 32, 40, 42, 43, 49, 50, 55, 58, 60, 65, 70, 75, 77, 82, 83, 85]);
+const MAX_TV_SIZE = 120;
+const ALLOWED_TV_SIZES = Object.freeze([24, 27, 32, 40, 42, 43, 49, 50, 55, 58, 60, 65, 70, 75, 77, 82, 83, 85, 95, 98, 100, 115]);
+const TV_SIZE_HINTS = new Set(ALLOWED_TV_SIZES);
 const SIZE_ATTR_KEYS = ["size", "taille", "pouces", "inch", "screen size", "diagonale", "pa_size"];
 
 function isSizeAttrKey(name) {
@@ -1793,12 +1794,13 @@ function extractAllowedTvSizeFromString(str, opts = {}) {
     if (/\b(4k|8k|720p|1080p|hdr|uhd|fhd|120hz|144hz|165hz)\b/i.test(before + after)) continue;
 
     const context = s.slice(Math.max(0, m.index - 12), Math.min(s.length, m.index + m[1].length + 12));
+    const hasBareSizeHint = TV_SIZE_HINTS.has(num);
     const hasUnit = tvUnitRe.test(context);
     const hasTvWord = /(tv|tele|télé|television|télévision|تلفاز|تلفزيون)/i.test(context) || globalTvHint;
     const hasSizeCue = moroccanSizeHintRe.test(context);
     const hasAttrHint = isSizeAttrKey(attrKey);
     const hasExternal = externalTvContext === true;
-    const hasAnyHint = hasUnit || hasTvWord || hasAttrHint || hasExternal || hasSizeCue;
+    const hasAnyHint = hasUnit || hasTvWord || hasAttrHint || hasExternal || hasSizeCue || hasBareSizeHint;
 
     if (requireTvHint && !hasAnyHint) continue;
     if (!allowNoHint && !hasAnyHint) continue;
@@ -1813,7 +1815,7 @@ function getSizeFromNameSku(p) {
   const combined = arabicIndicToAsciiDigits((name + " " + sku).trim());
   if (!combined) return 0;
 
-  const allowed = [24, 32, 40, 43, 50, 55, 65, 75];
+  const allowed = ALLOWED_TV_SIZES;
   const re = new RegExp(`\\b(${allowed.join("|")})(\\s*(\"|''|”|″|pouce|pouces|inch|inches|inch\\b|inch-|inchs|بوصة|بوص|بوس))?`, "gi");
   let match = null;
   while ((match = re.exec(combined))) {
