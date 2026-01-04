@@ -41,6 +41,7 @@ import {
   setCtxForTest,
   INITIAL_GREETING_TTL_MS,
   normalizeMedia,
+  deriveMediaText,
   getSizeFromNameSku,
   formatSize,
   createServerForTests,
@@ -467,6 +468,24 @@ test("analyzeProductImage falls back when OpenAI returns plain text", async () =
   assert.strictEqual(result.brand, "Samsung");
   assert.strictEqual(result.size_inches, 55);
   assert.ok(result.confidence > 0);
+});
+
+test("deriveMediaText handles base64 images", async () => {
+  const pngBase64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMB/6X5xQAAAABJRU5ErkJggg==";
+
+  setDepsForTests({
+    openai: {
+      responses: {
+        create: async () => ({ output_text: "Samsung 55 TV" }),
+      },
+    },
+  });
+
+  const result = await deriveMediaText({ kind: "image", base64: pngBase64 }, "dzl", "req-b64");
+  assert.ok(result.ok);
+  assert.strictEqual(result.path, "image");
+  assert.ok(result.sizeBytes > 0);
+  assert.ok(result.text.includes("Samsung"));
 });
 
 test("audio mime helpers map extensions", () => {
