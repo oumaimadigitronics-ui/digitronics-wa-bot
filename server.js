@@ -185,6 +185,14 @@ app.use((req, _res, next) => {
   next();
 });
 
+app.use((err, _req, res, next) => {
+  if (err && err.type === "entity.parse.failed") {
+    console.warn(JSON.stringify({ level: "warn", msg: "invalid_json", error: err.message || String(err) }));
+    return res.status(400).json({ ok: false, error: "Invalid JSON payload" });
+  }
+  return next(err);
+});
+
 function nowIso() {
   return new Date().toISOString();
 }
@@ -1617,12 +1625,13 @@ function buildWooUrl(pth, params) {
   return u.toString();
 }
 
-const fetchFn = getFetch();
-
 async function wcFetchJson(url) {
   const maxAttempts = 3;
   const baseDelayMs = 250;
   let lastErr = null;
+
+  if (typeof wcFetchJsonOverride === "function") return wcFetchJsonOverride(url);
+  const fetchImpl = getFetch();
 
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
     let ctrl = null;
@@ -1638,7 +1647,7 @@ async function wcFetchJson(url) {
         } catch {}
       }, 12000);
 
-      const res = await fetchFn(url, {
+      const res = await fetchImpl(url, {
         method: "GET",
         headers: {
           Accept: "application/json",
