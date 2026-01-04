@@ -3583,23 +3583,39 @@ async function deriveMediaText(mediaInput, lang, reqId) {
 
   if (baseKind === "image" || baseKind === "unknown") {
     try {
-      if (!normalized.url || normalized.url.startsWith("data:")) {
-        if (!normalized.url) throw new Error("media_url_missing");
+      let buffer = null;
+      let mimeType = normalized.mime || "";
+      let sizeBytes = 0;
+
+      if (normalized.url) {
+        const fetched = await fetchMedia(normalized.url, {
+          maxBytes: CFG.mediaMaxBytesImage,
+          timeoutMs: CFG.mediaFetchTimeoutMs,
+          allowHttp: CFG.mediaAllowHttp,
+        });
+        buffer = fetched.buffer;
+        sizeBytes = fetched.sizeBytes || fetched.buffer.length || 0;
+        mimeType = mimeType || fetched.mimeType || "image/jpeg";
+      } else if (normalized.base64 || raw.base64 || raw.payload || raw.data) {
+        const b64 = String(normalized.base64 || raw.base64 || raw.payload || raw.data || "");
+        const buf = Buffer.from(b64, "base64");
+        sizeBytes = buf.length;
+        if (sizeBytes > CFG.mediaMaxBytesImage) throw new Error("image_too_large");
+        const sniffed = sniffImageMime(buf);
+        mimeType = mimeType || raw.mimeType || raw.contentType || sniffed || "image/jpeg";
+        buffer = buf;
+      } else {
+        throw new Error("media_url_missing");
       }
-      const fetched = await fetchMedia(normalized.url, {
-        maxBytes: CFG.mediaMaxBytesImage,
-        timeoutMs: CFG.mediaFetchTimeoutMs,
-        allowHttp: CFG.mediaAllowHttp,
-      });
-      const mimeType = normalized.mime || fetched.mimeType || "image/jpeg";
-      const dataUrl = `data:${mimeType};base64,${fetched.buffer.toString("base64")}`;
+
+      const dataUrl = `data:${mimeType};base64,${buffer.toString("base64")}`;
       const desc = await describeImage(
         { image: dataUrl, model: CFG.openaiVisionModel || OPENAI_MODEL },
         getOpenAIClient()
       );
       const safe = ensureNoQuestion(sanitizeDerivedText(desc));
       if (!safe) throw new Error("vision_description_empty");
-      return { ok: true, text: safe.slice(0, 1800), path: "image", sizeBytes: fetched.sizeBytes || fetched.buffer.length || 0, mimeType };
+      return { ok: true, text: safe.slice(0, 1800), path: "image", sizeBytes, mimeType };
     } catch (err) {
       console.error(JSON.stringify({ level: "error", msg: "media_image_derive_fail", reqId, error: (err && err.message) || String(err) }));
       return { ok: false, error: err };
@@ -6443,6 +6459,7 @@ export {
   normalizeMedia,
   getSizeFromNameSku,
   formatSize,
+  deriveMediaText,
   offerFromWooProduct,
   createServerForTests,
   t,
