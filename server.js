@@ -425,6 +425,17 @@ function detectLang(text) {
   return "dzl";
 }
 
+function normalizeLanguageHint(lang) {
+  const L = String(lang || "").trim().toLowerCase();
+  if (!L) return null;
+  if (L === "dz" || L === "dzl" || L === "darija") return "ar";
+  if (L.startsWith("ar")) return "ar";
+  if (L.startsWith("fr")) return "fr";
+  if (L.startsWith("en")) return "en";
+  if (/^[a-z]{2}$/.test(L)) return L;
+  return null;
+}
+
 function t(lang, key, vars) {
   const L = lang || "dzl";
   const v = vars || {};
@@ -2655,7 +2666,7 @@ async function downloadMediaBuffer(mediaInput) {
 
 function isAudioMime(mime) {
   const m = String(mime || "").toLowerCase();
-  return m.startsWith("audio/");
+  return m.startsWith("audio/") || m === "application/ogg";
 }
 
 function isAudioMeta(meta) {
@@ -2666,16 +2677,20 @@ function isAudioMeta(meta) {
   const url = String(m.url || "");
   const ext = path.extname(filename || url).replace(/^\./, "").toLowerCase();
   if (kind === "audio") return true;
-  if (mime && mime.startsWith("audio/")) return true;
-  if (["ogg", "opus", "m4a", "mp3", "wav", "webm"].includes(ext)) return true;
+  if (mime && (mime.startsWith("audio/") || mime === "application/ogg")) return true;
+  if (["aac", "amr", "ogg", "opus", "m4a", "mp3", "wav", "webm", "3gp", "3gpp", "caf", "flac"].includes(ext)) return true;
   return false;
 }
 
 function extFromAudioMime(mime) {
   const m = String(mime || "").toLowerCase();
   if (m.indexOf("audio/ogg") === 0 || m.indexOf("audio/opus") === 0) return ".ogg";
+  if (m.indexOf("audio/3gpp") === 0 || m.indexOf("audio/3gp") === 0) return ".3gp";
+  if (m.indexOf("audio/amr") === 0) return ".amr";
   if (m.indexOf("audio/mpeg") === 0 || m.indexOf("audio/mp3") === 0) return ".mp3";
   if (m.indexOf("audio/mp4") === 0 || m.indexOf("audio/aac") === 0) return ".m4a";
+  if (m.indexOf("audio/x-caf") === 0) return ".caf";
+  if (m.indexOf("audio/flac") === 0) return ".flac";
   if (m.indexOf("audio/wav") === 0) return ".wav";
   return ".mp3";
 }
@@ -2684,8 +2699,14 @@ function inferMimeFromPath(filepath, fallbackMime) {
   const ext = path.extname(String(filepath || "")).toLowerCase();
   if (!ext) return fallbackMime || "";
   const map = {
+    ".3gp": "audio/3gpp",
+    ".3gpp": "audio/3gpp",
     ".ogg": "audio/ogg",
     ".opus": "audio/ogg",
+    ".amr": "audio/amr",
+    ".aac": "audio/aac",
+    ".caf": "audio/x-caf",
+    ".flac": "audio/flac",
     ".m4a": "audio/mp4",
     ".mp3": "audio/mpeg",
     ".wav": "audio/wav",
@@ -2741,7 +2762,15 @@ async function downloadAudioBuffer(mediaInput, reqId) {
   }
 }
 
-async function transcribeAudioOpenAI({ filePath, model, mimeType = "", filename = "", reqId = null }, openaiClient) {
+async function transcribeAudioOpenAI(
+  { filePath, model, mimeType = "", filename = "", reqId = null, language = null },
+  openaiClient
+) {
+  const languageHint = normalizeLanguageHint(language);
+  if (typeof audioTranscriberOverride === "function") {
+    return audioTranscriberOverride(filePath, mimeType, languageHint);
+  }
+
   const client = openaiClient || getOpenAIClient();
   const fileData = fs.readFileSync(filePath);
   const bufferSize = fileData.length;
@@ -2759,6 +2788,7 @@ async function transcribeAudioOpenAI({ filePath, model, mimeType = "", filename 
       bufferBytes: bufferSize,
       filename: chosenFilename,
       model: chosenModel,
+      language: languageHint || null,
       reqId,
     })
   );
@@ -2769,6 +2799,7 @@ async function transcribeAudioOpenAI({ filePath, model, mimeType = "", filename 
       file,
       model: chosenModel,
       response_format: "text",
+      language: languageHint || undefined,
     });
     if (resp && typeof resp === "object" && (resp.text || resp.output_text)) return String(resp.text || resp.output_text || "").trim();
     return String(resp || "").trim();
@@ -2790,20 +2821,21 @@ async function transcribeAudioOpenAI({ filePath, model, mimeType = "", filename 
   }
 }
 
-async function transcribeAudioFile(filePath, mimeType) {
-  if (typeof audioTranscriberOverride === "function") return audioTranscriberOverride(filePath, mimeType);
+async function transcribeAudioFile(filePath, mimeType, language) {
+  const languageHint = normalizeLanguageHint(language);
+  if (typeof audioTranscriberOverride === "function") return audioTranscriberOverride(filePath, mimeType, languageHint);
 
   const mime = String(mimeType || "").toLowerCase();
   const ext = path.extname(filePath) || extFromAudioMime(mime);
   const finalPath = filePath || path.join(os.tmpdir(), `audio-fallback${ext}`);
   return transcribeAudioOpenAI(
-    { filePath: finalPath, model: CFG.openaiTranscribeModel || "gpt-4o-mini-transcribe", mimeType },
+    { filePath: finalPath, model: CFG.openaiTranscribeModel || "gpt-4o-mini-transcribe", mimeType, language: languageHint },
     getOpenAIClient()
   );
 }
 
-async function transcribeAudio(filePath, mimeType) {
-  return transcribeAudioFile(filePath, mimeType);
+async function transcribeAudio(filePath, mimeType, language) {
+  return transcribeAudioFile(filePath, mimeType, language);
 }
 
 function parseVisionJson(rawText) {
@@ -3289,6 +3321,7 @@ async function deriveMediaText(mediaInput, lang, reqId) {
           mimeType: mimeType || normalized.mime || raw.mime || "",
           filename: normalized.filename || null,
           reqId,
+          language: lang,
         },
         getOpenAIClient()
       );
@@ -6214,7 +6247,7 @@ async function processIncomingMedia({ mediaInfo, mediaMeta, msgType, lang, key, 
       }
 
       const safeMime = mimeType || inferMimeFromPath(normalizedMedia.filename || normalizedMedia.url || tmpFile, "audio/ogg");
-      const transcriptText = await transcribeAudioFile((audioDl && audioDl.filePath) || tmpFile, safeMime);
+      const transcriptText = await transcribeAudioFile((audioDl && audioDl.filePath) || tmpFile, safeMime, lang);
       if (!transcriptText) throw new Error("transcription_empty");
       const userTextRaw = String(transcriptText || "").slice(0, 2000);
       const preview = userTextRaw.slice(0, 120);
