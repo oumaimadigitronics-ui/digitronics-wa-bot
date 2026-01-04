@@ -56,7 +56,7 @@ const {
   FOCUS_BRAND = "",
   FOCUS_MODE = "preferred",
 
-  MAX_WA_REPLY_CHARS = "4000",
+  MAX_WA_REPLY_CHARS = "6000",
 
   WANOTIFIER_TOKEN = "",
   WANOTIFIER_HMAC_SECRET = "",
@@ -90,7 +90,7 @@ const CFG = {
   refreshMs: Number(OFFERS_REFRESH_MS) || 300000,
   rateWindowMs: Number(RATE_LIMIT_WINDOW_MS) || 60000,
   rateMax: Number(RATE_LIMIT_MAX) || 25,
-  maxReplyChars: Math.max(200, Number(MAX_WA_REPLY_CHARS) || 4000),
+  maxReplyChars: Math.max(200, Number(MAX_WA_REPLY_CHARS) || 6000),
 
   memoryTtlMs: (Number(MEMORY_TTL_HOURS) || 24) * 60 * 60 * 1000,
   memoryMaxMessages: Math.max(6, Number(MEMORY_MAX_MESSAGES) || 12),
