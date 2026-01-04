@@ -5640,6 +5640,11 @@ function buildSystemPrompt(offersSubset, lang, opts) {
     "- ALWAYS recommend exactly 3 options, never more or less.\n" +
     "- Do NOT output any URL in normal replies. Only output a product link in the photo flow handled outside.\n" +
     "- Do NOT ask questions. Never output question marks.\n\n" +
+    "ANSWER LOGIC:\n" +
+    "- First, understand what the user is asking for: product info, price/budget, delivery/payment/warranty, support, or order status.\n" +
+    "- Use the intent hints provided in the extra system message to stay consistent with previous context (brand, class/category, size, budget, last shown offers).\n" +
+    "- Reply with a short, direct statement and a clear next step instead of repeating a generic greeting.\n" +
+    "- If the user just says thanks or asks how to proceed, guide them to share brand/model/size/budget or to use the order form without adding any question marks.\n\n" +
     "Company:\n" +
     "- Address: " +
     COMPANY.address +
@@ -5653,6 +5658,41 @@ function buildSystemPrompt(offersSubset, lang, opts) {
     "Standard rules (localized):\n" +
     JSON.stringify(rulesForLang, null, 2)
   ).trim();
+}
+
+function buildIntentHintsForLLM(userText, historyMsgs, key) {
+  const ctx = getCtx(key);
+  const parsed = parseUserQuery(userText, { ctx });
+  const hints = [];
+
+  if (parsed.brand) hints.push("brand: " + parsed.brand);
+  if (parsed.cls) hints.push("class: " + parsed.cls);
+  if (parsed.category) hints.push("category: " + parsed.category);
+  if (Number.isFinite(parsed.size)) hints.push("size: " + parsed.size + '\"');
+  if (parsed.model) hints.push("model: " + parsed.model);
+  if (parsed.priceIntent) hints.push("price intent detected");
+  if (Number.isFinite(parsed.budgetDh)) hints.push("budget: " + parsed.budgetDh + " dh");
+  if (parsed.wantsPhotoLink) hints.push("user asked for photo/link");
+  if (Number.isFinite(parsed.capacityLiters)) hints.push("capacity: " + parsed.capacityLiters + " L");
+
+  const ctxHints = [];
+  if (ctx.lastBrand) ctxHints.push("last brand: " + ctx.lastBrand);
+  if (ctx.lastCategory) ctxHints.push("last category: " + ctx.lastCategory);
+  if (ctx.lastClass) ctxHints.push("last class: " + ctx.lastClass);
+  if (Number.isFinite(ctx.lastSize)) ctxHints.push("last size: " + ctx.lastSize + '\"');
+  if (Array.isArray(ctx.lastOffersShown) && ctx.lastOffersShown.length) {
+    const listed = ctx.lastOffersShown
+      .map((o) => (o ? [o.brand, o.model].filter(Boolean).join(" ") : null))
+      .filter(Boolean)
+      .slice(0, 5);
+    if (listed.length) ctxHints.push("last shown offers: " + listed.join(" | "));
+  }
+
+  const parts = [];
+  if (hints.length) parts.push("Intent hints:\n- " + hints.join("\n- "));
+  if (ctxHints.length) parts.push("Context carryover:\n- " + ctxHints.join("\n- "));
+
+  return parts.length ? parts.join("\n") : null;
 }
 
 async function callOpenAIChat(messages, maxOut) {
@@ -5693,6 +5733,8 @@ async function digibotLLMReply(userText, historyMsgs, lang, key) {
   const hist = Array.isArray(historyMsgs) ? historyMsgs : [];
 
   const messages = [{ role: "system", content: buildSystemPrompt({}, lang, { alreadyLimited: true }) }];
+  const intentHints = buildIntentHintsForLLM(userText, hist, key);
+  if (intentHints) messages.push({ role: "system", content: intentHints });
   const maxHist = CFG.memoryMaxMessages;
   const slice = hist.slice(Math.max(0, hist.length - maxHist));
   for (let i = 0; i < slice.length; i += 1) messages.push({ role: slice[i].role, content: slice[i].content });
