@@ -8,6 +8,8 @@ import { test, beforeEach, afterEach } from "node:test";
 import {
   ensureNoQuestion,
   formatOfferLine,
+  detectContactInfo,
+  hasProductInquirySignal,
   analyzeProductImage,
   handleVisionMediaForTest,
   limitOffersForPromptPayload,
@@ -282,6 +284,13 @@ test("resolveCategoryIntent detects all categories across languages", () => {
     assert.ok(intent, `No intent found for ${text}`);
     assert.strictEqual(intent.category, category);
   }
+});
+
+test("option-only follow ups are treated as product inquiries", () => {
+  assert.ok(hasProductInquirySignal("اعطيني خيارات اخرى"));
+  const contact = detectContactInfo("اعطيني خيارات اخرى");
+  assert.strictEqual(contact.hasName, false);
+  assert.strictEqual(contact.isNewInfo, false);
 });
 
 test("direct offers respond with fridge products", () => {
