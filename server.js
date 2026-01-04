@@ -5667,11 +5667,18 @@ app.post("/wanotifier", async (req, res) => {
     const lang = detectLang(userTextRaw || incoming.lang || "");
     const ip = String(req.ip || "");
 
+    let audioAnswerNoteText = null;
+    const applyAudioNote = (text) => {
+      if (!audioAnswerNoteText) return text;
+      return `${audioAnswerNoteText}\n\n${text}`;
+    };
+    const finalizeReply = (text, limit) => shortenNoQuestion(applyAudioNote(text), limit);
+
     // Immediate image handling with vision before deriving text
     if (mediaInfo && (mediaInfo.kind === "image" || guessMediaKind(mediaInfo) === "image")) {
       try {
         const visionOut = await handleVisionMedia(mediaInfo, lang, key, { reqId, stripUrls: true });
-        const reply = shortenNoQuestion(visionOut.reply, CFG.maxReplyChars);
+        const reply = finalizeReply(visionOut.reply, CFG.maxReplyChars);
         memory.push(key, "assistant", reply);
         resetStrikes(key);
         console.log(JSON.stringify({ level: "info", msg: "vision_reply_sent", reqId, confidence: visionOut.confidence || 0 }));
@@ -5692,6 +5699,10 @@ app.post("/wanotifier", async (req, res) => {
       if (mediaResult && mediaResult.ok && mediaResult.text) {
         mediaDerivedText = mediaResult.text;
       }
+    }
+
+    if (mediaResult && mediaResult.ok && mediaResult.path === "audio") {
+      audioAnswerNoteText = audioAnswerNote(lang);
     }
 
     if (mediaDerivedText) {
@@ -5732,21 +5743,21 @@ app.post("/wanotifier", async (req, res) => {
       (mediaResult && mediaResult.ok === false && !userTextRaw && !mediaDerivedText) ||
       (normalizedMedia && CFG.mediaMode === "disabled" && !userTextRaw)
     ) {
-      const reply = shortenNoQuestion(t(lang, "askTextInsteadMedia"), 420);
+      const reply = finalizeReply(t(lang, "askTextInsteadMedia"), 420);
       memory.push(key, "assistant", reply);
       resetStrikes(key);
       return res.json({ ok: true, reply });
     }
 
     if (!offersAvailable) {
-      const reply = shortenNoQuestion(t(lang, "cannot3"), 420);
+      const reply = finalizeReply(t(lang, "cannot3"), 420);
       console.error(JSON.stringify({ level: "error", msg: "offers_unavailable", lastOffersSync }));
       memory.push(key, "assistant", reply);
       return res.json({ ok: true, reply });
     }
 
     if (!userTextRaw) {
-      const reply = shortenNoQuestion(t(lang, "typeYourMessage"), 420);
+      const reply = finalizeReply(t(lang, "typeYourMessage"), 420);
       memory.push(key, "assistant", reply);
       resetStrikes(key);
       return res.json({ ok: true, reply });
@@ -5758,9 +5769,10 @@ app.post("/wanotifier", async (req, res) => {
 
     const greetingReply = isBuyIntent(userTextRaw) ? null : handleGreetingMessage({ key, lang, text: userTextRaw });
     if (greetingReply) {
-      memory.push(key, "assistant", greetingReply);
+      const reply = applyAudioNote(greetingReply);
+      memory.push(key, "assistant", reply);
       resetStrikes(key);
-      return res.json({ ok: true, reply: greetingReply });
+      return res.json({ ok: true, reply });
     }
 
     const contactInfo = detectContactInfo(userTextRaw, ctxData);
@@ -5779,7 +5791,7 @@ app.post("/wanotifier", async (req, res) => {
         hasProductInquirySignal(userTextRaw) ||
         Boolean(ctxData.lastOffersShown || ctxData.lastBrand || ctxData.lastClass || ctxData.lastSize);
       const followUp = hasPurchaseSignal && hasProductInquirySignal(userTextRaw) ? "\n\nشنو هو الموديل/الحجم اللي بغيتي؟" : "";
-      const reply = shortenNoQuestion(
+      const reply = finalizeReply(
         hasPurchaseSignal ? contactCtaMessage(lang) + followUp : contactInfoSavedMessage(lang),
         520
       );
@@ -5788,14 +5800,14 @@ app.post("/wanotifier", async (req, res) => {
       return res.json({ ok: true, reply });
     }
     if (isIptvIntent(userTextRaw)) {
-      const out = shortenNoQuestion(t(lang, "iptvCall"), 220);
+      const out = finalizeReply(t(lang, "iptvCall"), 220);
       memory.push(key, "assistant", out);
       resetStrikes(key);
       return res.json({ ok: true, reply: out });
     }
 
     if (isLocationIntent(userTextRaw)) {
-      const reply = shortenNoQuestion(t(lang, "address"), 420);
+      const reply = finalizeReply(t(lang, "address"), 420);
       memory.push(key, "assistant", reply);
       resetStrikes(key);
       return res.json({ ok: true, reply });
@@ -5809,7 +5821,7 @@ app.post("/wanotifier", async (req, res) => {
         category: linkMatch.offer.category || undefined,
       });
       const line = formatOfferLine(linkMatch.brand, linkMatch.offer);
-      const reply = shortenNoQuestion([header, line].filter(Boolean).join("\n"), 520);
+      const reply = finalizeReply([header, line].filter(Boolean).join("\n"), 520);
       const sizeVal = Number(linkMatch.offer.size);
       setCtx(key, {
         lastBrand: linkMatch.brand,
@@ -5827,7 +5839,7 @@ app.post("/wanotifier", async (req, res) => {
       const resolved = resolveOfferForPhoto(userTextRaw, history, key);
 
       if (!resolved) {
-        const reply = shortenNoQuestion(fallbackWithAgent(lang), 420);
+        const reply = finalizeReply(fallbackWithAgent(lang), 420);
         memory.push(key, "assistant", reply);
         resetStrikes(key);
         return res.json({ ok: true, reply });
@@ -5837,14 +5849,14 @@ app.post("/wanotifier", async (req, res) => {
       const linkRaw = buildProductLink(resolved.offer || {}, displayName);
       const safeLink = sanitizeUrlNoQuestion(linkRaw);
       const msgKey = resolved.closest ? "photoClosest" : "photoLink";
-      const reply = shortenNoQuestion(t(lang, msgKey, { link: safeLink, name: displayName }), 520);
+      const reply = finalizeReply(t(lang, msgKey, { link: safeLink, name: displayName }), 520);
       memory.push(key, "assistant", reply);
       resetStrikes(key);
       return res.json({ ok: true, reply });
     }
 
     if (isBankTransferIntent(userTextRaw)) {
-      const reply = shortenNoQuestion(t(lang, "bankTransferHow"), 520);
+      const reply = finalizeReply(t(lang, "bankTransferHow"), 520);
       memory.push(key, "assistant", reply);
       resetStrikes(key);
       return res.json({ ok: true, reply });
@@ -5881,7 +5893,7 @@ app.post("/wanotifier", async (req, res) => {
 
       if (s.indexOf("wall mount") >= 0 || s.indexOf("support") >= 0 || s.indexOf("حامل") >= 0 || s.indexOf("براكي") >= 0) parts.push(r.wall_mount);
 
-      const reply = shortenNoQuestion(parts.length ? parts.join("\n") : fallbackWithAgent(lang), 520);
+      const reply = finalizeReply(parts.length ? parts.join("\n") : fallbackWithAgent(lang), 520);
       memory.push(key, "assistant", reply);
       resetStrikes(key);
       return res.json({ ok: true, reply });
@@ -5891,13 +5903,13 @@ app.post("/wanotifier", async (req, res) => {
       supportModeStore.delete(key);
       const direct = tryDirectOfferAnswer(userTextRaw, history, lang, key);
       if (direct) {
-        const withForm = shortenNoQuestion(direct + "\n\n" + t(lang, "orderForm"), 520);
-        const reply = withForm || shortenNoQuestion(direct, 520);
+        const withForm = finalizeReply(direct + "\n\n" + t(lang, "orderForm"), 520);
+        const reply = withForm || finalizeReply(direct, 520);
         memory.push(key, "assistant", reply);
         resetStrikes(key);
         return res.json({ ok: true, reply });
       }
-      const reply = shortenNoQuestion(t(lang, "orderForm"), 520);
+      const reply = finalizeReply(t(lang, "orderForm"), 520);
       memory.push(key, "assistant", reply);
       resetStrikes(key);
       return res.json({ ok: true, reply });
@@ -5913,7 +5925,7 @@ app.post("/wanotifier", async (req, res) => {
       if (lang === "fr") reply = "D’accord. Sans numéro de commande, vous pouvez appeler: " + CONTACTS.calls.join(" / ") + ".";
       else if (lang === "ar") reply = "تمام. إلا ما كانش رقم الطلب، تقدر تعيط لينا: " + CONTACTS.calls.join(" / ") + ".";
       else reply = "Mzyan. Ila ma3ndkch رقم الطلب، t9dr t3ayet lina: " + CONTACTS.calls.join(" / ") + ".";
-      const out = shortenNoQuestion(reply, 420);
+      const out = finalizeReply(reply, 420);
       memory.push(key, "assistant", out);
       resetStrikes(key);
       return res.json({ ok: true, reply: out });
@@ -5924,14 +5936,14 @@ app.post("/wanotifier", async (req, res) => {
         pendingOrderStore.delete(key);
         lastOrderAckStore.set(key, { at: Date.now(), orderNo });
         clearOrderAsk(key);
-        const out = shortenNoQuestion(t(lang, "gotOrderNo"), 520);
+        const out = finalizeReply(t(lang, "gotOrderNo"), 520);
         memory.push(key, "assistant", out);
         resetStrikes(key);
         return res.json({ ok: true, reply: out });
       }
       pendingOrderStore.delete(key);
       clearOrderAsk(key);
-      const out = shortenNoQuestion(t(lang, "orderHumanHandoff"), 420);
+      const out = finalizeReply(t(lang, "orderHumanHandoff"), 420);
       memory.push(key, "assistant", out);
       resetStrikes(key);
       return res.json({ ok: true, reply: out });
@@ -5940,7 +5952,7 @@ app.post("/wanotifier", async (req, res) => {
     if (isCallMeIntent(userTextRaw)) {
       const recent = lastOrderAckStore.get(key);
       const okRecent = Boolean(recent && recent.at && Date.now() - recent.at < PENDING_TTL_MS);
-      const out = shortenNoQuestion(
+      const out = finalizeReply(
         okRecent || !shouldAskOrderNo(key) ? t(lang, "callSoon") : t(lang, "callSoonNeedOrder"),
         420
       );
@@ -5955,12 +5967,12 @@ app.post("/wanotifier", async (req, res) => {
       if (orderNo) {
         lastOrderAckStore.set(key, { at: Date.now(), orderNo });
         clearOrderAsk(key);
-        const out = shortenNoQuestion(t(lang, "gotOrderNo"), 520);
+        const out = finalizeReply(t(lang, "gotOrderNo"), 520);
         memory.push(key, "assistant", out);
         resetStrikes(key);
         return res.json({ ok: true, reply: out });
       }
-      const out = shortenNoQuestion(t(lang, "orderHumanHandoff"), 420);
+      const out = finalizeReply(t(lang, "orderHumanHandoff"), 420);
       pendingOrderStore.delete(key);
       clearOrderAsk(key);
       memory.push(key, "assistant", out);
@@ -5985,7 +5997,7 @@ app.post("/wanotifier", async (req, res) => {
       if (lang === "ar") reply = "تمام. صيفط ليا موديل الجهاز وشرح المشكل بالضبط: ما كيشعلش، ما كايناش الصورة، ما كايناش الصوت، ولا كايبان كود خطأ";
       else if (lang === "fr") reply = "D’accord. Envoyez le modèle de l’appareil et décrivez le problème: ne s’allume pas, pas d’image, pas de son, ou code erreur";
       else reply = "Mzyan. Sift modèle dyal l-appareil w chrah l-mochkil: ma kaych3elch / ma kaynach tswira / ma kaynach s-sout / code d’erreur";
-      const out = shortenNoQuestion(reply, 520);
+      const out = finalizeReply(reply, 520);
       memory.push(key, "assistant", out);
       resetStrikes(key);
       return res.json({ ok: true, reply: out });
@@ -5998,13 +6010,13 @@ app.post("/wanotifier", async (req, res) => {
       if (picked) {
         const line = formatOfferLine(picked.brand, picked.offer);
         const msg = prefer === "cheapest" ? t(lang, "preferCheapest") : t(lang, "preferBest");
-        const out = shortenNoQuestion(msg + "\n" + line, 520);
+        const out = finalizeReply(msg + "\n" + line, 520);
         memory.push(key, "assistant", out);
         resetStrikes(key);
         return res.json({ ok: true, reply: out });
       }
 
-      const out = shortenNoQuestion(t(lang, "preferNeedContext"), 420);
+      const out = finalizeReply(t(lang, "preferNeedContext"), 420);
       memory.push(key, "assistant", out);
       resetStrikes(key);
       return res.json({ ok: true, reply: out });
@@ -6012,7 +6024,7 @@ app.post("/wanotifier", async (req, res) => {
 
     const directReply = tryDirectOfferAnswer(userTextRaw, history, lang, key);
     if (directReply) {
-      const reply = shortenNoQuestion(directReply, 520);
+      const reply = finalizeReply(directReply, 520);
       memory.push(key, "assistant", reply);
       resetStrikes(key);
       return res.json({ ok: true, reply });
@@ -6020,7 +6032,7 @@ app.post("/wanotifier", async (req, res) => {
 
     const siteReply = await tryWebsiteCatalogAnswer(userTextRaw, lang, key);
     if (siteReply) {
-      const reply = shortenNoQuestion(siteReply, 520);
+      const reply = finalizeReply(siteReply, 520);
       memory.push(key, "assistant", reply);
       resetStrikes(key);
       return res.json({ ok: true, reply });
@@ -6028,7 +6040,7 @@ app.post("/wanotifier", async (req, res) => {
 
     const bestGuess = bestGuessOffers(lang, key);
     if (bestGuess) {
-      const reply = shortenNoQuestion(bestGuess + "\n\n" + agentWillFinalize(lang), 520);
+      const reply = finalizeReply(bestGuess + "\n\n" + agentWillFinalize(lang), 520);
       memory.push(key, "assistant", reply);
       resetStrikes(key);
       return res.json({ ok: true, reply });
@@ -6043,7 +6055,7 @@ app.post("/wanotifier", async (req, res) => {
       resetStrikes(key);
     }
 
-    reply = shortenNoQuestion(reply, 520);
+    reply = finalizeReply(reply, 520);
     memory.push(key, "assistant", reply);
 
     const ms = Date.now() - t0;
@@ -6242,6 +6254,14 @@ function audioReminderText(lang) {
     return "Pour vous aider rapidement, merci d’écrire votre demande en message au lieu d’un vocal 🙏";
   }
   return "باش نعاونك بسرعة، عفاك كتب ليا الطلب فمِساج بدل الصوت 🙏";
+}
+
+function audioAnswerNote(lang) {
+  const L = String(lang || "dzl");
+  if (L === "fr") {
+    return "Je suis un bot IA. Voici ce que j’ai compris de votre audio et ma réponse. Si c’est correct, parfait ! Sinon, il se peut que je n’aie pas bien entendu—désolé. Merci d’écrire votre message pour que je puisse mieux répondre.";
+  }
+  return "أنا بوت بالذكاء الاصطناعي. هاد الشي اللي فهمت من الصوت ديالك وهدي هي الجواب ديالي. إلا كان هذا هو القصد ديالك مزيان! إلا ما كانش، يمكن ما فهمتش مزيان الصوت ديالك كنعتذر، وكتب ليا الرسالة باش نجاوبك أحسن.";
 }
 
 function shouldSendAudioReminder(key) {
