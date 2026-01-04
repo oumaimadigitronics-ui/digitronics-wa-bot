@@ -43,7 +43,12 @@ function removeOutOfStock(text, { offersByModel }) {
   return filtered.join('\n');
 }
 
-export function enforceReplyPolicy(text, { offersByModel = new Map(), allowUrls = false, isPhotoFlow = false, maxChars = 4000 }) {
+export function enforceReplyPolicy(text, {
+  offersByModel = new Map(),
+  allowUrls = false,
+  isPhotoFlow = false,
+  maxChars = 6000,
+}) {
   let out = text || '';
   out = removeQuestions(out);
   out = stripUrls(out, { allowUrls, isPhotoFlow, offersByModel });
