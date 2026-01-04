@@ -1748,6 +1748,17 @@ function getBrandFromWoo(p) {
   const brandAttr = getAttr(p, "Brand") || getAttr(p, "Marque") || getAttr(p, "pa_brand");
   if (brandAttr) return String(brandAttr).trim().toUpperCase();
 
+   const inferenceText = [p && p.name, p && p.sku]
+     .map((val) => normMatch(val || ""))
+     .filter(Boolean)
+     .join(" ");
+
+   const brandsForInference = Array.from(new Set([...BRAND_PRIORITY, "Morsat"]));
+   for (let i = 0; i < brandsForInference.length; i += 1) {
+     const candidate = String(brandsForInference[i] || "").trim();
+     if (candidate && includesToken(inferenceText, candidate)) return candidate.toUpperCase();
+   }
+
   return "UNKNOWN";
 }
 
@@ -1957,6 +1968,16 @@ function getTypeFromProduct(p) {
   if (name.indexOf("oled") >= 0) return "OLED";
   if (name.indexOf("smart") >= 0) return "Smart TV";
   if (name.indexOf("led") >= 0) return "LED TV";
+
+  const brandForType = getBrandFromWoo(p);
+  const brandModelKey = normMatch((brandForType || "") + " " + (p && p.sku ? p.sku : p && p.name ? p.name : ""));
+  const BRAND_TYPE_DEFAULTS = {
+    VISIO: () => (brandModelKey.indexOf("32vb23e") >= 0 ? "LED TV" : "Google TV"),
+    MORSAT: () => "Android TV",
+  };
+
+  const typeFn = BRAND_TYPE_DEFAULTS[brandForType];
+  if (typeof typeFn === "function") return typeFn();
   return "";
 }
 
