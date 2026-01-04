@@ -4079,7 +4079,7 @@ function listOffersForBrand(brand, opts) {
     className: cls,
     limit: null,
   });
-  const picked = pickCheapestPerBrand(ranked).slice(0, limit);
+  const picked = (brand ? ranked : pickCheapestPerBrand(ranked)).slice(0, limit);
   const offers = picked.map((r) => r.offer || r);
   const lines = picked.map((r) => formatOfferLine(r.brand, r.offer || r));
   debugLog("rank_offers_for_brand", { brand, cls, category, size: hasSize ? sizeNum : null, count: picked.length });
@@ -5271,6 +5271,20 @@ function bestGuessOffers(lang, key, limit = MAX_OFFERS) {
   const sizeVal = Number(ctx.lastSize);
   if (Number.isFinite(sizeVal)) {
     const cls = ctx.lastClass || tvCanon || null;
+    if (ctx.lastBrand) {
+      const pack = listOffersForBrand(ctx.lastBrand, { cls, size: sizeVal, limit: max, withOffers: true });
+      if (pack.lines.length) {
+        setCtx(key, {
+          lastBrand: ctx.lastBrand,
+          lastClass: cls || undefined,
+          lastCategory: undefined,
+          lastSize: sizeVal,
+          lastOffersShown: (pack.offers || []).map((o) => ({ brand: ctx.lastBrand, model: (o && o.model) || "" })),
+        });
+        const header = offersHeader(L, { brand: ctx.lastBrand, size: sizeVal, cls });
+        return ensureNoQuestion([header, pack.lines.join("\n\n")].filter(Boolean).join("\n"));
+      }
+    }
     const picks = listOffersForSizeAcrossBrands(sizeVal, { cls, limit: max }) || [];
     if (picks.length) {
       setCtx(key, {
