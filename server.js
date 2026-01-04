@@ -379,28 +379,31 @@ function looksLikeFallback(reply) {
 
 
 const RULES_I18N = {
-  dzl: {
-    delivery: "Livraison: 1–7 ayam.",
-    payment: "Paiement: cash 3nd ttsslim wla virement (zid note f formulaire).",
-    warranty: "Garantie: 1 an.",
-    wall_mount: "TV kayji m3ah support/bracket mural free.",
-    deliveryCallback: "Sift lina coordonnées dyalk (smia, l-mdina, رقم الهاتف) w ghadi n3yto lik.",
-  },
-  fr: {
-    delivery: "Livraison : entre 1 et 7 jours selon la ville.",
-    payment: "Paiement : cash à la livraison ou virement (note à ajouter dans le formulaire).",
-    warranty: "Garantie : 1 an.",
-    wall_mount: "Support mural gratuit avec les TV.",
-    deliveryCallback: "Merci d’envoyer vos coordonnées (nom, ville, numéro). Nous vous rappellerons.",
-  },
-  ar: {
-    delivery: "التوصيل: من 1 إلى 7 أيام.",
-    payment: "الدفع: نقداً عند التسليم أو تحويل بنكي (أضف ملاحظة في الاستمارة).",
-    warranty: "الضمان: سنة واحدة.",
-    wall_mount: "حامل/براكيط مجاني مع التلفاز.",
-    deliveryCallback: "من فضلك صيفط لينا معلومات التواصل ديالك (الاسم، المدينة، رقم الهاتف) وغادي نعيطو ليك.",
-  },
-};
+    dzl: {
+      delivery: "Livraison: 1–7 ayam.",
+      payment: "Paiement: cash 3nd ttsslim wla virement (zid note f formulaire).",
+      warranty: "Garantie: 1 an.",
+      wall_mount: "TV kayji m3ah support/bracket mural free.",
+      deliveryCallback: "Sift lina coordonnées dyalk (smia, l-mdina, رقم الهاتف) w ghadi n3yto lik.",
+      noNegotiation: "Smah lia, had thaman dyal l-offre w sâbet, ma nqdrch nnegocier.",
+    },
+    fr: {
+      delivery: "Livraison : entre 1 et 7 jours selon la ville.",
+      payment: "Paiement : cash à la livraison ou virement (note à ajouter dans le formulaire).",
+      warranty: "Garantie : 1 an.",
+      wall_mount: "Support mural gratuit avec les TV.",
+      deliveryCallback: "Merci d’envoyer vos coordonnées (nom, ville, numéro). Nous vous rappellerons.",
+      noNegotiation: "Désolé, c’est un prix offre et fixe, on ne peut pas négocier.",
+    },
+    ar: {
+      delivery: "التوصيل: من 1 إلى 7 أيام.",
+      payment: "الدفع: نقداً عند التسليم أو تحويل بنكي (أضف ملاحظة في الاستمارة).",
+      warranty: "الضمان: سنة واحدة.",
+      wall_mount: "حامل/براكيط مجاني مع التلفاز.",
+      deliveryCallback: "من فضلك صيفط لينا معلومات التواصل ديالك (الاسم، المدينة، رقم الهاتف) وغادي نعيطو ليك.",
+      noNegotiation: "سمح ليا، هاد الثمن عرض نهائي ما نقدروش نفاوضو فيه.",
+    },
+  };
 
 function warrantyTextForBrand(lang, brand, cls) {
   const L = lang || "dzl";
@@ -4727,6 +4730,39 @@ function isBankTransferIntent(text) {
   return false;
 }
 
+function isNegotiationIntent(text) {
+  const s = normMatch(text);
+  if (!s) return false;
+
+  const tokens = [
+    "negocier",
+    "negotier",
+    "negotiation",
+    "remise",
+    "discount",
+    "baisse prix",
+    "prix bas",
+    "prix khfif",
+    "takhfid",
+    "takhfidat",
+    "khasm",
+    "khfif",
+    "n9ass",
+    "bgha tkhasm",
+    "bghit nkhfi",
+    "bgha nqes",
+  ];
+
+  for (let i = 0; i < tokens.length; i += 1) {
+    if (includesToken(s, tokens[i])) return true;
+  }
+
+  if (/(bghit|bgha).{0,12}(nqes|n9s|n9ass|khfi)/i.test(s)) return true;
+  if (/prix\s*(moins|baisser|moins cher)/i.test(s)) return true;
+  if (/خفض|خصم|تنقيص/.test(text || "")) return true;
+  return false;
+}
+
 function isIptvIntent(text) {
   const s = normMatch(text);
   if (!s) return false;
@@ -6241,6 +6277,13 @@ app.post("/wanotifier", async (req, res) => {
       return res.json({ ok: true, reply });
     }
 
+    if (isNegotiationIntent(userTextRaw)) {
+      const reply = finalizeReply(t(lang, "noNegotiation"), 320);
+      memory.push(key, "assistant", reply);
+      resetStrikes(key);
+      return res.json({ ok: true, reply });
+    }
+
     if (asksAboutDeliveryPaymentWarranty(userTextRaw)) {
       const s = normMatch(userTextRaw);
       const parts = [];
@@ -6512,6 +6555,7 @@ export {
   offerFromWooProduct,
   createServerForTests,
   t,
+  isNegotiationIntent,
   INITIAL_GREETING_TTL_MS,
   describeImage,
 };

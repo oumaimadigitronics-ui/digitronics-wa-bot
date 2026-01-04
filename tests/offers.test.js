@@ -46,6 +46,7 @@ import {
   formatSize,
   createServerForTests,
   t,
+  isNegotiationIntent,
   offerFromWooProduct,
 } from "../server.js";
 import { setDepsForTests } from "../src/deps.js";
@@ -196,6 +197,13 @@ test("maybeSendInitialGreeting greets once", () => {
   assert.strictEqual(countQuestions(reply), 1);
   const ctx = getCtxForTest(key);
   assert.strictEqual(ctx.didSendInitialGreeting, true);
+});
+
+test("isNegotiationIntent catches price discount attempts", () => {
+  assert.ok(isNegotiationIntent("bghit n9ass chwya f thaman"));
+  assert.ok(isNegotiationIntent("on peut négocier le prix ?"));
+  assert.ok(isNegotiationIntent("خصم من فضلك"));
+  assert.ok(!isNegotiationIntent("bghit n9is taille dial tv"));
 });
 
 test("maybeSendInitialGreeting skips repeat within ttl", () => {
