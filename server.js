@@ -144,7 +144,7 @@ const BRAND_PRIORITY = [
   "Hisense",
   "Tivoli",
 ];
-const MAX_OFFERS = 5;
+const MAX_OFFERS = 3;
 
 const COMPANY = {
   name: "Digitronics",
@@ -2543,7 +2543,7 @@ function formatOfferLine(brand, o, opts = {}) {
   const pricePart = Number.isFinite(priceNum) ? `${priceNum} dh` : "Prix sur demande";
   const url = buildProductLink(o || {}, displayName);
   const linkPart = url ? " - " + url : "";
-  return `• ${displayName} - ${pricePart}${linkPart}`.trim();
+  return `• ${displayName} - **${pricePart}**${linkPart}`.trim();
 }
 
 function priceSummaryText(lang, min, max) {
@@ -5498,7 +5498,7 @@ function buildSystemPrompt(offersSubset, lang, opts) {
     "- Mention delivery/payment/warranty ONLY if the client asks.\n" +
     "- If client asks about products/prices/options, DO NOT invent or use OFFERS. Catalog replies are handled separately. Provide only short helpful text if needed.\n" +
     "- If client asks for photo/picture/image: ONLY provide product link if present, else write ONE short instruction sentence without question marks.\n" +
-    "- Recommend at most 3 options.\n" +
+    "- ALWAYS recommend exactly 3 options, never more or less.\n" +
     "- Do NOT output any URL in normal replies. Only output a product link in the photo flow handled outside.\n" +
     "- Do NOT ask questions. Never output question marks.\n\n" +
     "Company:\n" +
