@@ -272,6 +272,7 @@ test("resolveCategoryIntent detects all categories across languages", () => {
     { text: "أبحث عن تلفزيون ذكي", category: "Tv" },
     { text: "bghit machina dial ssiab", category: "Machine A Laver" },
     { text: "je cherche un lave-linge compact", category: "Machine A Laver" },
+    { text: "بغيت ماكينة اوطوماتيك", category: "Machine A Laver" },
     { text: "أحتاج غسالة ملابس جديدة", category: "Machine A Laver" },
     { text: "bghit klima jdid", category: "Climatiseur" },
     { text: "je veux un climatiseur mobile puissant", category: "Climatiseur" },

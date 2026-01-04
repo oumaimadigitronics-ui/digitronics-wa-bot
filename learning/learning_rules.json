@@ -3,13 +3,39 @@
   "synonyms": {
     "tv": ["tele", "television", "télé", "tlv"],
     "refrigerateur": ["frigo", "réfrigérateur", "refrigerator"],
-    "machine_a_laver": ["machine a laver", "machine à laver", "lave linge", "washing machine"],
+    "machine_a_laver": [
+      "machine a laver",
+      "machine à laver",
+      "lave linge",
+      "washing machine",
+      "machine automatique",
+      "ماكينة اوتوماتيك",
+      "ماكينة أوتوماتيك",
+      "ماكينة اوطوماتيك",
+      "ماكينة أوطوماتيك",
+      "ماكينة اتوماتيك",
+      "مكينة اوتوماتيك",
+      "مكينة اوطوماتيك"
+    ],
     "chauffe_eau": ["chauffe-eau", "chauffe eau", "boiler"]
   },
   "class_aliases": {
     "tv": ["tv", "television"],
     "refrigerateur": ["refrigerateur", "frigo"],
-    "machine a laver": ["machine a laver", "machine_a_laver", "lave linge"],
+    "machine a laver": [
+      "machine a laver",
+      "machine_a_laver",
+      "lave linge",
+      "machine automatique",
+      "washing machine",
+      "ماكينة اوتوماتيك",
+      "ماكينة أوتوماتيك",
+      "ماكينة اوطوماتيك",
+      "ماكينة أوطوماتيك",
+      "ماكينة اتوماتيك",
+      "مكينة اوتوماتيك",
+      "مكينة اوطوماتيك"
+    ],
     "chauffe-eau": ["chauffe-eau", "chauffe_eau", "boiler"]
   },
   "intent_keywords": {
