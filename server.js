@@ -5144,8 +5144,10 @@ function tryDirectOfferAnswer(userText, historyMsgs, lang, key) {
     const isTvCategory2 = normMatch(category2) === tvCanonNorm || normMatch(category2) === "tv";
     const rankedNonTv = rankOffers(items, { limit: null, capacityLiters: capacityHint });
     const nonTvPicks = Number.isFinite(capacityHint) ? pickFirstPerBrand(rankedNonTv) : pickCheapestPerBrand(rankedNonTv);
-    const sorted = isTvCategory2
-      ? pickCheapestPerBrand(items)
+
+    const sorted = (() => {
+      if (isTvCategory2) {
+        return pickCheapestPerBrand(items)
           .map((it, idx) => Object.assign({}, it, { originalIdx: idx }))
           .sort((a, b) => {
             const ra = tvPriorityRank.has(normMatch(a.brand))
@@ -5160,8 +5162,26 @@ function tryDirectOfferAnswer(userText, historyMsgs, lang, key) {
             if (pa !== pb) return pa - pb;
             return normMatch((a.offer && a.offer.model) || "").localeCompare(normMatch((b.offer && b.offer.model) || ""));
           })
-          .slice(0, MAX_OFFERS)
-      : nonTvPicks.slice(0, MAX_OFFERS);
+          .slice(0, MAX_OFFERS);
+      }
+
+      const picked = nonTvPicks.slice(0, MAX_OFFERS);
+      if (picked.length >= MAX_OFFERS) return picked;
+
+      const seen = new Set(
+        picked.map((it) => `${normMatch(it.brand || "")}|${normMatch((it.offer && it.offer.model) || (it.offer && it.offer.name) || "")}`)
+      );
+
+      for (let i = 0; i < rankedNonTv.length && picked.length < MAX_OFFERS; i += 1) {
+        const it = rankedNonTv[i];
+        const key = `${normMatch(it.brand || "")}|${normMatch((it.offer && it.offer.model) || (it.offer && it.offer.name) || "")}`;
+        if (seen.has(key)) continue;
+        picked.push(it);
+        seen.add(key);
+      }
+
+      return picked;
+    })();
     if (LOG_DEBUG) {
       debugLog("category_offers_ranked", {
         category: category2,
