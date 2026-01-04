@@ -587,6 +587,12 @@ function fallbackWithAgent(lang) {
   return "سمح ليا ما فهمتش الطلب ديالك مزيان 🙏 غادي يدخل معاك وكيل بشري يكمل معاك، ولا تقدر تعيط لينا على 0605123934";
 }
 
+function agentWillFinalize(lang) {
+  const L = String(lang || "dzl");
+  if (L === "fr") return "Un agent humain va finaliser les détails avec vous et proposer la meilleure option disponible.";
+  return "وكيل بشري غادي يكمل معاك التفاصيل ويعطيك أحسن اختيار متوفر.";
+}
+
 function stableHash(input) {
   try {
     return crypto.createHash("sha256").update(String(input || "")).digest("hex").slice(0, 18);
@@ -5789,6 +5795,14 @@ app.post("/wanotifier", async (req, res) => {
     const siteReply = await tryWebsiteCatalogAnswer(userTextRaw, lang, key);
     if (siteReply) {
       const reply = shortenNoQuestion(siteReply, 520);
+      memory.push(key, "assistant", reply);
+      resetStrikes(key);
+      return res.json({ ok: true, reply });
+    }
+
+    const bestGuess = bestGuessOffers(lang, key);
+    if (bestGuess) {
+      const reply = shortenNoQuestion(bestGuess + "\n\n" + agentWillFinalize(lang), 520);
       memory.push(key, "assistant", reply);
       resetStrikes(key);
       return res.json({ ok: true, reply });
