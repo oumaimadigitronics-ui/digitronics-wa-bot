@@ -389,6 +389,12 @@ test("extractMediaMetaFromBody handles audio", () => {
   assert.ok(isAudioMeta(meta));
 });
 
+test("audio detection covers common WhatsApp formats", () => {
+  assert.ok(isAudioMeta({ mimeType: "application/ogg" }));
+  assert.ok(isAudioMeta({ filename: "voice.3gp" }));
+  assert.ok(isAudioMime("application/ogg"));
+});
+
 test("vision routing uses offers and analyzer", async () => {
   setOffersForTest(TEST_OFFERS);
   setMediaFetcherForTest(async () => ({ buffer: Buffer.from("test"), mimeType: "image/png" }));
@@ -413,7 +419,11 @@ test("audio media routes through transcription flow", async () => {
   fs.writeFileSync(tmpFile, "dummy");
 
   setAudioDownloaderForTest(() => ({ filePath: tmpFile, mimeType: "", tmpDir: dir, sizeBytes: 5 }));
-  setAudioTranscriberForTest(() => "ثلاجة");
+  let transcribeLang = null;
+  setAudioTranscriberForTest((_path, _mime, langHint) => {
+    transcribeLang = langHint;
+    return "ثلاجة";
+  });
   setOffersForTest(TEST_OFFERS);
 
   const body = {
@@ -440,6 +450,7 @@ test("audio media routes through transcription flow", async () => {
   assert.strictEqual(res.path, "audio");
   assert.strictEqual(res.userText, "ثلاجة");
   assert.ok(res.transcriptChars >= 3);
+  assert.strictEqual(transcribeLang, "ar");
   const reply = tryDirectOfferAnswer(res.userText, [], "dzl", "k-audio");
   assert.ok(reply.includes("FR-1"));
 
