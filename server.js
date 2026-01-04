@@ -4303,7 +4303,7 @@ function detectContactInfo(text, ctx = {}) {
 
   let name = null;
   const namePatterns = [
-    /(?:سميتي|الاسم|انا اسمي|أنا اسمي|أنا|انا)\s*[:\-]?\s*([\p{L}]{2,}(?:\s+[\p{L}]{2,}){0,3})/iu,
+    /(?:سميتي|الاسم|انا اسمي|أنا اسمي)\s*[:\-]?\s*([\p{L}]{2,}(?:\s+[\p{L}]{2,}){0,3})/iu,
     /(?:je m'appelle|mon nom est|je suis)\s*[:\-]?\s*([^,.;\n]{2,60})/iu,
     /(?:my name is|i am|i'm)\s*[:\-]?\s*([^,.;\n]{2,60})/iu,
   ];
@@ -4317,14 +4317,6 @@ function detectContactInfo(text, ctx = {}) {
       }
     }
   }
-  if (!name) {
-    const tokens = raw.split(/\s+/).filter(Boolean);
-    const shortName = tokens.length >= 1 && tokens.length <= 4 && tokens.every((w) => /^[\p{L}]{2,}$/u.test(w));
-    const looksLikeProductInquiry = hasProductInquirySignal(raw) || hasTvIntentTokens(raw);
-    const greetingLike = isGreetingLikeOpener(raw);
-    if (shortName && !/\d/.test(raw) && lower.length <= 80 && !looksLikeProductInquiry && !greetingLike) name = raw;
-  }
-
   let address = null;
   const addressMatch = ascii.match(
     /(?:العنوان|ساكن\s*ف?|حي|زنقة|شارع|اقامة|إقامة|شقة|residence|quartier|adresse|address|rue|immeuble|apartment|appartement)[:\-\s]*([^\n]{6,120})/i
@@ -5255,6 +5247,11 @@ function tryDirectOfferAnswer(userText, historyMsgs, lang, key) {
       const base = offersHeader(lang, { category: ctx.lastCategory });
       return ensureNoQuestion(base + "\n" + lines);
     }
+  }
+
+  if (parsed.priceIntent) {
+    const guess = bestGuessOffers(lang, key);
+    if (guess) return ensureNoQuestion(guess);
   }
 
   return null;

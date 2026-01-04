@@ -295,6 +295,13 @@ test("option-only follow ups are treated as product inquiries", () => {
   assert.strictEqual(contact.isNewInfo, false);
 });
 
+test("price-only messages are not treated as contact info", () => {
+  const contact = detectContactInfo("بشحال؟");
+  assert.strictEqual(contact.hasName, false);
+  assert.strictEqual(contact.hasPhone, false);
+  assert.strictEqual(contact.isNewInfo, false);
+});
+
 test("direct offers respond with fridge products", () => {
   setOffersForTest(TEST_OFFERS);
   const reply = tryDirectOfferAnswer("ثلاجة", [], "dzl", "k-fridge");
@@ -326,6 +333,19 @@ test("context resets across categories", () => {
   const reply = tryDirectOfferAnswer("ثلاجة", [], "dzl", "k-switch");
   assert.ok(reply.includes("FR-1"));
   assert.ok(!reply.includes("TV-50"));
+  assertNoQuestionMarks(reply);
+});
+
+test("price intent without product uses best-guess offers by priority", () => {
+  setOffersForTest({
+    TCL: [{ price: 3200, stock: 2, model: "T-50", class: "Tv", category: "Tv", size: 50 }],
+    LG: [{ price: 3100, stock: 2, model: "LG-50", class: "Tv", category: "Tv", size: 50 }],
+    SAMSUNG: [{ price: 3300, stock: 2, model: "SM-50", class: "Tv", category: "Tv", size: 50 }],
+  });
+
+  const reply = tryDirectOfferAnswer("price ?", [], "fr", "k-price-fallback");
+  assert.ok(reply.includes("TCL"));
+  assert.ok(reply.indexOf("TCL") < reply.indexOf("LG"));
   assertNoQuestionMarks(reply);
 });
 
