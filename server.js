@@ -4212,6 +4212,118 @@ function collectTvOffers({ brand, size, budget }) {
   return pickCheapestPerBrand(items).slice(0, MAX_OFFERS);
 }
 
+function normalizeTvTypeName(typeStr) {
+  const t0 = normMatch(typeStr || "");
+  if (!t0) return "";
+  if (t0.indexOf("mini led") >= 0 || t0.indexOf("mini-led") >= 0) return "Mini LED";
+  if (t0.indexOf("qled") >= 0) return "QLED";
+  if (t0.indexOf("oled") >= 0) return "OLED";
+  if (t0.indexOf("google") >= 0) return "Google TV";
+  if (t0.indexOf("android") >= 0) return "Android TV";
+  if (t0.indexOf("smart") >= 0) return "Smart TV";
+  if (t0.indexOf("led") >= 0) return "LED TV";
+  return String(typeStr || "").trim();
+}
+
+function collectTvKnowledge({ size } = {}) {
+  const tvCanon = OFFERS_INDEX.classCanon.tv;
+  const tvNorm = normMatch(tvCanon || "");
+  if (!tvCanon) return { types: [], brands: [] };
+
+  const offersObj = (OFFERS && OFFERS.offers) || {};
+  const brands = Object.keys(offersObj);
+  const typeCounts = new Map();
+  const brandSeen = new Set();
+  const sizeNum = Number(size);
+  const hasSize = Number.isFinite(sizeNum);
+
+  const considerOffer = (brand, offer) => {
+    if (Number((offer && offer.stock) || 0) <= 0) return false;
+    if (normMatch((offer && offer.class) || "") !== tvNorm) return false;
+    if (hasSize && Number(offer.size) !== sizeNum) return false;
+    const typeName = normalizeTvTypeName((offer && offer.type) || "");
+    if (typeName) typeCounts.set(typeName, (typeCounts.get(typeName) || 0) + 1);
+    brandSeen.add(brand);
+    return true;
+  };
+
+  let sizeHits = 0;
+  for (let i = 0; i < brands.length; i += 1) {
+    const b = brands[i];
+    const arr = Array.isArray(offersObj[b]) ? offersObj[b] : [];
+    for (let j = 0; j < arr.length; j += 1) {
+      if (considerOffer(b, arr[j])) sizeHits += 1;
+    }
+  }
+
+  if (!sizeHits && hasSize) {
+    for (let i = 0; i < brands.length; i += 1) {
+      const b = brands[i];
+      const arr = Array.isArray(offersObj[b]) ? offersObj[b] : [];
+      for (let j = 0; j < arr.length; j += 1) {
+        const offer = arr[j];
+        if (Number((offer && offer.stock) || 0) <= 0) continue;
+        if (normMatch((offer && offer.class) || "") !== tvNorm) continue;
+        const typeName = normalizeTvTypeName((offer && offer.type) || "");
+        if (typeName) typeCounts.set(typeName, (typeCounts.get(typeName) || 0) + 1);
+        brandSeen.add(b);
+      }
+    }
+  }
+
+  const types = Array.from(typeCounts.entries())
+    .sort((a, b) => b[1] - a[1] || String(a[0]).localeCompare(String(b[0])))
+    .map((x) => x[0]);
+
+  const sortedBrands = Array.from(brandSeen).sort(
+    (a, b) => brandRank(a, TV_BRAND_PRIORITY) - brandRank(b, TV_BRAND_PRIORITY)
+  );
+
+  return { types, brands: sortedBrands };
+}
+
+function tvKnowledgeText(lang, { size } = {}) {
+  const L = lang || "dzl";
+  const sizeNum = Number(size);
+  const sizeTxt = Number.isFinite(sizeNum) ? formatSize(L, sizeNum) : "";
+  const knowledge = collectTvKnowledge({ size: Number.isFinite(sizeNum) ? sizeNum : null });
+  if (!knowledge.types.length && !knowledge.brands.length) return "";
+
+  const typeList = knowledge.types.slice(0, 3).join(" / ");
+  const brandList = knowledge.brands.slice(0, 3).join(", ");
+
+  if (L === "fr") {
+    const typePart = typeList
+      ? sizeTxt
+        ? `Pour TV ${sizeTxt}, on a surtout ${typeList}.`
+        : `Types TV populaires: ${typeList}.`
+      : "";
+    const brandPart = brandList ? `Marques phares: ${brandList}.` : "";
+    const note = "Toutes nos TV ont récepteur + TNT intégrés et support mural offert.";
+    return [typePart, brandPart, note].filter(Boolean).join(" ");
+  }
+
+  if (L === "ar") {
+    const typePart = typeList
+      ? sizeTxt
+        ? `تلفاز ${sizeTxt} المتوفر غالبا: ${typeList}.`
+        : `أنواع التلفاز الشائعة: ${typeList}.`
+      : "";
+    const brandPart = brandList ? `الماركات المميزة: ${brandList}.` : "";
+    const note = "كل التلفازات فيها ريسيفر + TNT مدمج وحامل جداري مجاني.";
+    return [typePart, brandPart, note].filter(Boolean).join(" ");
+  }
+
+  const typePart = typeList
+    ? sizeTxt
+      ? `TV ${sizeTxt} l-kaynin ktar: ${typeList}.`
+      : `Types popular dyal TV: ${typeList}.`
+    : "";
+  const brandPart = brandList ? `Marques l-kbar: ${brandList}.` : "";
+  const note = "Koulchi TV 3ndna fih récepteur + TNT w support mural cadeau.";
+  return [typePart, brandPart, note].filter(Boolean).join(" ");
+}
+
 function pickClosestOfferForPhoto({ brandHint, size, classHint }) {
   const offersObj = (OFFERS && OFFERS.offers) || {};
   const brands = Object.keys(offersObj);
@@ -4961,6 +5073,7 @@ function handleTvSizePriceFlow(parsed, lang, key) {
   const budget = parsed.budgetDh;
   const priceIntent = parsed.priceIntent || false;
   const cheapIntent = detectCheapIntent(String(parsed.raw || ""));
+  const knowledge = tvKnowledgeText(lang, { size: sizeVal });
 
   const matches = collectTvOffers({ brand, size: sizeVal, budget });
   if (!matches.length) {
@@ -4986,10 +5099,11 @@ function handleTvSizePriceFlow(parsed, lang, key) {
       });
       const header = offersHeader(lang, { brand: brand || undefined, size: sizeVal, cls: tvCanon || undefined });
       const lines = limited.map((it) => formatOfferLine(it.brand, it.offer, { lang }));
-      return ensureNoQuestion([header, ...lines].filter(Boolean).join("\n"));
+      return ensureNoQuestion([header, ...lines, knowledge].filter(Boolean).join("\n"));
     }
 
-    return ensureNoQuestion(fallbackWithAgent(lang));
+    const fallback = fallbackWithAgent(lang);
+    return ensureNoQuestion([knowledge, fallback].filter(Boolean).join("\n\n"));
   }
 
   const prices = matches.map((m) => Number(m.offer.price)).filter((p) => Number.isFinite(p));
@@ -5015,6 +5129,7 @@ function handleTvSizePriceFlow(parsed, lang, key) {
   if (wantPrice && Number.isFinite(minPrice)) parts.push(priceSummaryText(lang, minPrice, Number.isFinite(maxPrice) ? maxPrice : minPrice));
   parts.push(offersHeader(lang, { brand: brand || undefined, size: sizeVal, cls: tvCanon || undefined }));
   if (lines.length) parts.push(lines.join("\n\n"));
+  if (knowledge) parts.push(knowledge);
 
   const reply = ensureNoQuestion(parts.filter(Boolean).join("\n"));
   return reply;

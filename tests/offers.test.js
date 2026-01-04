@@ -183,6 +183,22 @@ test("formatOfferLine preserves catalog TV type", () => {
   assert.ok(!line.includes("Android TV"));
 });
 
+test("tv knowledge is included for size-only queries", () => {
+  setOffersForTest({
+    TCL: [
+      { model: "TCL-55G", price: 4000, stock: 2, class: "Tv", category: "Tv", size: 55, type: "Google TV", link: "http://x/tcl55" },
+    ],
+    SAMSUNG: [
+      { model: "SM-55Q", price: 5200, stock: 1, class: "Tv", category: "Tv", size: 55, type: "QLED", link: "http://x/sm55" },
+    ],
+  });
+
+  const reply = tryDirectOfferAnswer('55"', [], "fr", "tv_knowledge");
+  assert.ok(reply.includes("55″"));
+  assert.ok(reply.toLowerCase().includes("récepteur") || reply.toLowerCase().includes("recepteur"));
+  assert.ok(reply.includes("Google TV") || reply.includes("QLED"));
+});
+
 test("stripQuestions removes trailing questions", () => {
   const cleaned = stripQuestions("Wash bghiti?\nChno size?\n\n");
   assert.ok(!cleaned.includes("?"));
