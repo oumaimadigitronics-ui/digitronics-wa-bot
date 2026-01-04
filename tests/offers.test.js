@@ -304,6 +304,46 @@ test("price-only messages are not treated as contact info", () => {
   assert.strictEqual(contact.isNewInfo, false);
 });
 
+test("bestGuess requires current shopping signal", async () => {
+  setOffersForTest({
+    TCL: [{ price: 2999, stock: 2, model: "TCL-43", class: "Tv", category: "Tv", size: 43, link: "http://example.com/tcl-43" }],
+  });
+
+  const mockOpenAI = {
+    chat: {
+      completions: {
+        create: async () => ({ choices: [{ message: { content: "Noted." } }] }),
+      },
+    },
+  };
+
+  const { urlBase, close } = await createServerForTests({ openai: mockOpenAI });
+
+  try {
+    const initial = await fetch(`${urlBase}/wanotifier`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ text: "tv 43", waId: "user-bestguess" }),
+    });
+    const firstReply = await initial.json();
+    assert.ok(firstReply.ok);
+    assert.ok(firstReply.reply && firstReply.reply.length > 0);
+    assert.notStrictEqual(firstReply.reply, "Noted.");
+
+    const followUp = await fetch(`${urlBase}/wanotifier`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ text: "شكرا", waId: "user-bestguess" }),
+    });
+    const followReply = await followUp.json();
+    assert.strictEqual(followReply.reply, "Noted.");
+    assert.ok(!followReply.reply.includes("•"));
+  } finally {
+    await close();
+    setOffersForTest(null);
+  }
+});
+
 test("direct offers respond with fridge products", () => {
   setOffersForTest(TEST_OFFERS);
   const reply = tryDirectOfferAnswer("ثلاجة", [], "dzl", "k-fridge");
