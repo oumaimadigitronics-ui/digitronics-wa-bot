@@ -3970,6 +3970,13 @@ function contactCtaMessage(lang) {
   );
 }
 
+function contactInfoSavedMessage(lang) {
+  const L = lang || "dzl";
+  if (L === "fr") return "Merci pour les infos 👍 Dites-moi comment vous aider.";
+  if (L === "ar") return "شكراً على المعلومات 👍 قل لي كيف نقدر نعاونك.";
+  return "Shokran 3la l-infos 👍 Goul lia kifach n3awnk.";
+}
+
 function hasProductInquirySignal(text) {
   const raw = String(text || "");
   return (
@@ -4168,6 +4175,8 @@ function isCallMeIntent(text) {
 function isBuyIntent(text) {
   const raw = String(text || "");
   const s = normMatch(raw);
+
+  if (isOrderStatusIntent(text)) return false;
 
   const arabicPhrases = ["بغيت نطلب", "نكمل الطلب", "بغيت نشري", "أكّد", "اكد", "أكد"];
   for (let i = 0; i < arabicPhrases.length; i += 1) {
@@ -5563,8 +5572,15 @@ app.post("/wanotifier", async (req, res) => {
       };
       setCtx(key, Object.assign({}, ctxData, { customer: nextCustomer }));
 
-      const followUp = hasProductInquirySignal(userTextRaw) ? "\n\nشنو هو الموديل/الحجم اللي بغيتي؟" : "";
-      const reply = shortenNoQuestion(contactCtaMessage(lang) + followUp, 520);
+      const hasPurchaseSignal =
+        isBuyIntent(userTextRaw) ||
+        hasProductInquirySignal(userTextRaw) ||
+        Boolean(ctxData.lastOffersShown || ctxData.lastBrand || ctxData.lastClass || ctxData.lastSize);
+      const followUp = hasPurchaseSignal && hasProductInquirySignal(userTextRaw) ? "\n\nشنو هو الموديل/الحجم اللي بغيتي؟" : "";
+      const reply = shortenNoQuestion(
+        hasPurchaseSignal ? contactCtaMessage(lang) + followUp : contactInfoSavedMessage(lang),
+        520
+      );
       memory.push(key, "assistant", reply);
       resetStrikes(key);
       return res.json({ ok: true, reply });
