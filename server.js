@@ -3908,7 +3908,8 @@ function detectContactInfo(text, ctx = {}) {
   if (!name) {
     const tokens = raw.split(/\s+/).filter(Boolean);
     const shortName = tokens.length >= 1 && tokens.length <= 4 && tokens.every((w) => /^[\p{L}]{2,}$/u.test(w));
-    if (shortName && !/\d/.test(raw) && lower.length <= 80) name = raw;
+    const looksLikeProductInquiry = hasProductInquirySignal(raw) || hasTvIntentTokens(raw);
+    if (shortName && !/\d/.test(raw) && lower.length <= 80 && !looksLikeProductInquiry) name = raw;
   }
 
   let address = null;
