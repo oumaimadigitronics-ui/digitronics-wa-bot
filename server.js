@@ -130,10 +130,17 @@ const CONTACTS = {
   calls: ["0605123934", "0522895746"],
 };
 
+const ORDER_FORM_COOLDOWN_MS = 6 * 60 * 60 * 1000;
+const POLICY_LINKS = {
+  warranty: "https://digitronics.ma/service-apres-vente-digitronics/",
+  shipping: "https://digitronics.ma/politique-dexpedition/",
+  return: "https://digitronics.ma/politique-de-retour/",
+};
+
 // RULE #1 no questions
 const BRAND_PRIORITY = [
-  "Daiko",
   "TCL",
+  "Daiko",
   "Haier",
   "Samsung",
   "LG",
@@ -144,6 +151,28 @@ const BRAND_PRIORITY = [
   "Hisense",
   "Tivoli",
 ];
+const BRAND_ALIASES = {
+  samsung: "Samsung",
+  samsong: "Samsung",
+  samsoung: "Samsung",
+  "سامسونج": "Samsung",
+  "سامسونق": "Samsung",
+  "سامسونك": "Samsung",
+  tcl: "TCL",
+  "تي سي ال": "TCL",
+  "تي سي إل": "TCL",
+  haier: "Haier",
+  "هاير": "Haier",
+  echolink: "Echolink",
+  "ايكولينك": "Echolink",
+  "إيكولينك": "Echolink",
+  lg: "LG",
+  "l g": "LG",
+  "الجي": "LG",
+  "إل جي": "LG",
+  hisense: "Hisense",
+  "هايسنس": "Hisense",
+};
 const MAX_OFFERS = 5;
 
 const COMPANY = {
@@ -249,6 +278,32 @@ function normMatch(text) {
   return stripDiacritics(t).toLowerCase().trim();
 }
 
+function normalizeUserText(raw) {
+  let txt = String(raw || "");
+  const replacements = [
+    { re: /\bكوليدد?\b/gi, val: " QLED " },
+    { re: /\bكيو[-\s]?ليد\b/gi, val: " QLED " },
+    { re: /\bqled\b/gi, val: " QLED " },
+    { re: /\bgoogle\s*tv\b/gi, val: " GOOGLE_TV " },
+    { re: /\bgoogletv\b/gi, val: " GOOGLE_TV " },
+    { re: /\bغوغل\s*تيفي\b/gi, val: " GOOGLE_TV " },
+    { re: /\bandroid\s*tv\b/gi, val: " ANDROID_TV " },
+    { re: /\bandroid\b/gi, val: " ANDROID_TV " },
+    { re: /\bأندرويد\b/gi, val: " ANDROID_TV " },
+    { re: /\b4k\b/gi, val: " UHD_4K " },
+    { re: /\buhd\b/gi, val: " UHD_4K " },
+    { re: /\bultra\s*hd\b/gi, val: " UHD_4K " },
+    { re: /\bفوركي\b/gi, val: " UHD_4K " },
+  ];
+
+  for (let i = 0; i < replacements.length; i += 1) {
+    const { re, val } = replacements[i];
+    txt = txt.replace(re, val);
+  }
+
+  return txt.replace(/\s+/g, " ").trim();
+}
+
 function hasArabicScript(text) {
   return /[\u0600-\u06FF]/.test(String(text || ""));
 }
@@ -306,6 +361,22 @@ function shortenNoQuestion(text, max) {
   return shorten(ensureNoQuestion(cleaned), max || CFG.maxReplyChars);
 }
 
+function enforceArabicIfNeeded(reply, lang) {
+  const L = String(lang || "dzl");
+  const out = String(reply || "").trim();
+
+  if (L !== "ar" && L !== "dzl") return out;
+  if (hasArabicScript(out)) return out;
+
+  const allowLatinTemplates = [t(L, "askTextInsteadMedia"), t(L, "typeYourMessage")].filter(Boolean);
+  if (allowLatinTemplates.includes(out)) return out;
+
+  const prefix = "ها جواب مختصر بالعربية:";
+  const fallback = fallbackWithAgent(L);
+  if (!out) return `${prefix} ${fallback}`.trim();
+  return `${prefix} ${fallback}\n${out}`.trim();
+}
+
 function sniffImageMime(buf) {
   if (!Buffer.isBuffer(buf)) return "";
   if (buf.length >= 3 && buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff) return "image/jpeg";
@@ -334,6 +405,18 @@ function formatSize(lang, size) {
   if (L === "ar") return `${num} بوصة`;
   if (L === "fr" || L === "dzl") return `${num}″`;
   return `${num}″`;
+}
+
+function parseUserQueryForTest(text, ctx) {
+  return parseUserQuery(text, { ctx });
+}
+
+function getOffersForTest() {
+  return OFFERS;
+}
+
+function getOffersIndexForTest() {
+  return OFFERS_INDEX;
 }
 
 function sanitizeUrlNoQuestion(urlStr) {
@@ -711,7 +794,7 @@ function extractMediaMetaFromBody(body) {
     }
   }
 
-  return null;
+  return ensureNoQuestion(fallbackWithAgent(lang));
 }
 
 function extractMediaFromBody(body) {
@@ -1223,10 +1306,26 @@ function clearOrderAsk(key) {
   setCtx(key, { lastAskOrderAt: 0, lastAskOrderType: "" });
 }
 
+function shouldSendOrderForm(key, now = Date.now()) {
+  const ctx = getCtx(key);
+  const last = ctx.lastOrderFormAt || 0;
+  return !last || now - last > ORDER_FORM_COOLDOWN_MS;
+}
+
+function markOrderFormSent(key, when = Date.now()) {
+  setCtx(key, { lastOrderFormAt: when });
+}
+
 function neutralOrderReply(lang) {
   if (lang === "fr") return "D’accord.";
   if (lang === "ar") return "حسناً.";
   return "OK.";
+}
+
+function orderFormCooldownMessage(lang) {
+  if (lang === "fr") return "Formulaire déjà envoyé récemment، utilise le même lien pour confirmer.";
+  if (lang === "en") return "Order form already shared recently, use the same link to confirm.";
+  return "سبق صيفطت لك الفورم، استعمل نفس الرابط لتأكيد الطلب.";
 }
 
 function alternativeSupportReply(lang) {
@@ -1507,6 +1606,7 @@ function rebuildOffersIndex() {
 function setOffersForTest(offersObj) {
   OFFERS = { offers: offersObj || {} };
   rebuildOffersIndex();
+  lastOffersSync = { ok: Boolean(offersObj && Object.keys(offersObj).length), at: nowIso(), error: null };
 }
 
 function wcAuthHeader() {
@@ -2010,6 +2110,13 @@ function detectModel(text) {
 
 function detectBrand(text) {
   const s = normMatch(text);
+  const entries = Object.entries(BRAND_ALIASES);
+  for (let i = 0; i < entries.length; i += 1) {
+    const alias = entries[i][0];
+    const brand = entries[i][1];
+    if (includesToken(s, alias)) return brand;
+  }
+
   const brands = OFFERS_INDEX.brands || [];
   for (let i = 0; i < brands.length; i += 1) {
     const b = brands[i];
@@ -2286,14 +2393,23 @@ function formatOfferLine(brand, o, opts = {}) {
   const model = String((o && o.model) || "").trim();
   const sizeNum = Number((o && o.size) || NaN);
   const sizeText = Number.isFinite(sizeNum) && sizeNum > 0 ? formatSize(opts.lang || "dzl", sizeNum) : "";
+  const typeLabel = String((o && o.type) || "").trim();
   const fallbackName = [model, safeBrand, sizeText].filter(Boolean).join(" ").trim();
   const displayName = name || fallbackName || model || safeBrand || "Produit";
   const priceNum = Number((o && o.price) || NaN);
   const pricePart = Number.isFinite(priceNum) ? `${priceNum} dh` : "Prix sur demande";
+  const typePart = typeLabel && normMatch(typeLabel).indexOf("tv") >= 0 ? typeLabel : "";
   // RULE #4 always add links
   const url = buildProductLink(o || {}, displayName);
-  if (url) return `• [${displayName}](${url}) - ${pricePart}`.trim();
-  return `• ${displayName} - ${pricePart}`.trim();
+  const namePart = url ? `[${displayName}](${url})` : displayName;
+  const lead = safeBrand ? `${safeBrand} - ${namePart}` : namePart;
+  const line = [`• ${lead}`, typePart, "-", pricePart]
+    .filter(Boolean)
+    .join(" ")
+    .replace(/\s+-\s+$/, "")
+    .trim();
+
+  return line;
 }
 
 function priceSummaryText(lang, min, max) {
@@ -2733,6 +2849,46 @@ function parseVisionJson(rawText) {
   return { ok: false, raw: cleaned };
 }
 
+function parseVisionTextFallback(rawText) {
+  const txt = arabicIndicToAsciiDigits(String(rawText || "").trim());
+  if (!txt) return null;
+  const lower = txt.toLowerCase();
+  const tokens = txt.split(/[^\w]+/).filter(Boolean);
+
+  let size = null;
+  const numMatch = lower.match(/\b(\d{2,3})\b/);
+  if (numMatch && Number(numMatch[1]) >= 20 && Number(numMatch[1]) <= 100) size = Number(numMatch[1]);
+
+  const ignoreWords = new Set(["tv", "uhd", "4k", "qled", "oled", "smart", "google", "android", "led"]);
+  let brand = null;
+  for (let i = 0; i < tokens.length; i += 1) {
+    const t0 = tokens[i];
+    const norm = normMatch(t0);
+    if (!norm || ignoreWords.has(norm)) continue;
+    if (/^\d+$/.test(norm)) continue;
+    brand = t0.toUpperCase();
+    break;
+  }
+
+  const category = lower.includes("tv") || size ? "tv" : null;
+  const tags = [];
+  if (lower.includes("qled")) tags.push("qled");
+  if (lower.includes("4k") || lower.includes("uhd")) tags.push("uhd_4k");
+
+  if (!category && !brand && !size && !tags.length) return null;
+
+  return {
+    category,
+    cls: category ? "Tv" : null,
+    categoryReadable: category ? "Tv" : null,
+    brand: brand || null,
+    size_inches: size || null,
+    capacity_liters: null,
+    confidence: 0.35,
+    tags,
+  };
+}
+
 function normalizeVisionResult(obj) {
   const o = obj && typeof obj === "object" ? obj : {};
   const category = String(o.category || "").toLowerCase();
@@ -2900,23 +3056,27 @@ async function analyzeProductImage(imageBytes, mimeType, opts = {}) {
   else if (resp && Array.isArray(resp.output)) rawOut = resp.output.map((it) => (typeof it === "string" ? it : it?.content || it?.text || "")).join("\n");
 
   const parsed = parseVisionJson(rawOut);
+  let norm = parsed.ok ? normalizeVisionResult(parsed.obj) : null;
   if (!parsed.ok) {
-    console.error(
-      JSON.stringify({
-        level: "error",
-        msg: "vision_invalid_json",
-        reqId: opts.reqId || null,
-        model,
-        formatting: formattingEnabled,
-        raw: rawOut,
-      })
-    );
-    const e = new Error("vision_invalid_json");
-    e.rawOutput = rawOut;
-    throw e;
+    const fallback = parseVisionTextFallback(rawOut);
+    if (fallback) {
+      norm = normalizeVisionResult(fallback);
+    } else {
+      console.error(
+        JSON.stringify({
+          level: "error",
+          msg: "vision_invalid_json",
+          reqId: opts.reqId || null,
+          model,
+          formatting: formattingEnabled,
+          raw: rawOut,
+        })
+      );
+      const e = new Error("vision_invalid_json");
+      e.rawOutput = rawOut;
+      throw e;
+    }
   }
-
-  const norm = normalizeVisionResult(parsed.obj);
 
   console.log(
     JSON.stringify({
@@ -3080,9 +3240,24 @@ async function handleVisionMedia(mediaInput, lang, key, opts = {}) {
       size: sizeNum || undefined,
     });
     const lines = Array.isArray(offers.lines) ? offers.lines : [];
-  const body = lines.length ? header + "\n" + lines.join("\n") : fallbackWithAgent(lang);
+    if (!lines.length && brand) {
+      const directText = [brand, sizeNum ? String(sizeNum) : ""].filter(Boolean).join(" ");
+      const direct = tryDirectOfferAnswer(normalizeUserText(directText), [], lang, key, directText);
+      if (direct) {
+        const cleanedDirect = opts.stripLinks
+          ? stripUrlQueriesInText(String(direct || "").replace(/https?:\/\/\S+/g, "")).trim()
+          : direct;
+        const finalDirect = cleanedDirect || fallbackWithAgent(lang);
+        return { reply: shortenNoQuestion(finalDirect, CFG.maxReplyChars), confidence: vision.confidence || 0 };
+      }
+    }
+    const rawBody = lines.length ? header + "\n" + lines.join("\n") : fallbackWithAgent(lang);
+    const body = opts.stripLinks
+      ? stripUrlQueriesInText(String(rawBody || "").replace(/https?:\/\/\S+/g, "")).trim()
+      : rawBody;
+    const finalBody = body || fallbackWithAgent(lang);
     offerReply = {
-      reply: shortenNoQuestion(body, CFG.maxReplyChars),
+      reply: shortenNoQuestion(finalBody, CFG.maxReplyChars),
       confidence: vision.confidence || 0,
       ctx: { brand, cls, category, sizeNum, offers },
     };
@@ -3095,7 +3270,8 @@ async function handleVisionMedia(mediaInput, lang, key, opts = {}) {
       const desc = await describeImage({ image: dataUrl, model: pickVisionModel() }, getOpenAIClient());
       const safeDesc = ensureNoQuestion(sanitizeDerivedText(desc)).slice(0, 1800);
       if (safeDesc) {
-        const direct = tryDirectOfferAnswer(safeDesc, [], lang, key);
+        const normalizedDesc = normalizeUserText(safeDesc);
+        const direct = tryDirectOfferAnswer(normalizedDesc, [], lang, key, safeDesc);
         if (direct) {
           offerReply = { reply: shortenNoQuestion(direct, CFG.maxReplyChars), confidence: 0 };
         }
@@ -3148,7 +3324,7 @@ function setAudioTranscriberForTest(fn) {
 }
 
 function handleVisionMediaForTest(mediaInput, lang, key) {
-  return handleVisionMedia(mediaInput, lang, key);
+  return handleVisionMedia(mediaInput, lang, key, { stripLinks: false });
 }
 
 function sanitizeDerivedText(text) {
@@ -3255,7 +3431,7 @@ function rankOffers(items, opts) {
   const capacityLiters = Number(o.capacityLiters);
   const hasCapacity = Number.isFinite(capacityLiters);
   const className = o.className || null;
-  const limitVal = Number(o.limit);
+  const limitVal = o.limit;
   const limit = Number.isInteger(limitVal) && limitVal >= 0 ? limitVal : null;
   const tvClassCanon = o.tvClassCanon || OFFERS_INDEX.classCanon.tv || null;
   const priority = Array.isArray(o.priorityList) && o.priorityList.length ? o.priorityList : TV_BRAND_PRIORITY;
@@ -3398,6 +3574,7 @@ function offersHeader(lang, ctx) {
     if (brand && sizeTxt) return "Options " + brand + " " + sizeTxt + " :";
     if (brand && category) return "Options " + brand + " (" + category + ") :";
     if (brand && cls) return "Options " + brand + " (" + cls + ") :";
+    if (sizeTxt && cls) return "Options " + sizeTxt + " (" + cls + ") :";
     if (category) return "Options (" + category + ") :";
     if (cls) return "Options (" + cls + ") :";
     if (brand) return "Options " + brand + " :";
@@ -3408,6 +3585,7 @@ function offersHeader(lang, ctx) {
     if (brand && sizeTxt) return "خيارات " + brand + " " + sizeTxt + ":";
     if (brand && category) return "خيارات " + brand + " (" + category + "):";
     if (brand && cls) return "خيارات " + brand + " (" + cls + "):";
+    if (sizeTxt && cls) return "خيارات " + sizeTxt + " (" + cls + "):";
     if (category) return "خيارات (" + category + "):";
     if (cls) return "خيارات (" + cls + "):";
     if (brand) return "خيارات " + brand + ":";
@@ -3417,6 +3595,7 @@ function offersHeader(lang, ctx) {
   if (brand && sizeTxt) return "Options dyal " + brand + " " + sizeTxt + " :";
   if (brand && category) return "Options dyal " + brand + " (" + category + ") :";
   if (brand && cls) return "Options dyal " + brand + " (" + cls + ") :";
+  if (sizeTxt && cls) return "Options dyal " + sizeTxt + " (" + cls + ") :";
   if (category) return "Options (" + category + ") :";
   if (cls) return "Options (" + cls + ") :";
   if (brand) return "Options dyal " + brand + " :";
@@ -3456,11 +3635,11 @@ function catalogHeader(lang, ctx) {
   return "Produits disponibles:";
 }
 
-async function tryWebsiteCatalogAnswer(userText, lang, key) {
+async function tryWebsiteCatalogAnswer(userText, lang, key, originalRaw) {
   const text = String(userText || "").trim();
   if (!text) return null;
 
-  const parsed = parseUserQuery(text, { ctx: getCtx(key) });
+  const parsed = parseUserQuery(text, { ctx: getCtx(key), originalRaw });
   const detectedCategory = parsed.intentCategory || parsed.category || null;
   const detectedClass = parsed.intentClass || parsed.cls || null;
   const detectedBrand = parsed.brand || null;
@@ -3635,6 +3814,7 @@ function listOffersForBrand(brand, opts) {
   const hasCapacity = Number.isFinite(capacityNum);
   const limit = Number(o.limit) || MAX_OFFERS;
   const withOffers = Boolean(o.withOffers);
+  const constraints = Array.isArray(o.constraints) ? o.constraints.filter(Boolean) : [];
 
   const filtered = ((OFFERS && OFFERS.offers && OFFERS.offers[brand]) || [])
     .map((offer, idx) => ({ brand, offer, originalIdx: idx }))
@@ -3646,17 +3826,41 @@ function listOffersForBrand(brand, opts) {
       return true;
     });
 
-  const ranked = rankOffers(filtered, {
+  const constrained = filterItemsByConstraints(filtered, constraints);
+
+  const ranked = rankOffers(constrained, {
     size: hasSize ? sizeNum : null,
     capacityLiters: hasCapacity ? capacityNum : null,
     className: cls,
     limit: null,
   });
   const picked = pickCheapestPerBrand(ranked).slice(0, limit);
+  const alt = constraints.length && !picked.length
+    ? relaxConstraints(filtered, constraints, (items) => {
+        const rankedAlt = rankOffers(items, {
+          size: hasSize ? sizeNum : null,
+          capacityLiters: hasCapacity ? capacityNum : null,
+          className: cls,
+          limit: null,
+        });
+        return pickCheapestPerBrand(rankedAlt).slice(0, limit);
+      })
+    : null;
   const offers = picked.map((r) => r.offer || r);
   const lines = picked.map((r) => formatOfferLine(r.brand, r.offer || r));
   debugLog("rank_offers_for_brand", { brand, cls, category, size: hasSize ? sizeNum : null, count: picked.length });
-  if (withOffers) return { lines, offers };
+  if (withOffers)
+    return {
+      lines,
+      offers,
+      alt: alt
+        ? {
+            dropped: alt.dropped,
+            lines: (alt.picks || []).map((r) => formatOfferLine(r.brand, r.offer || r)),
+            offers: (alt.picks || []).map((r) => r.offer || r),
+          }
+        : null,
+    };
   return lines;
 }
 
@@ -3664,6 +3868,8 @@ function listOffersForSizeAcrossBrands(size, opts) {
   const o = opts || {};
   const cls = o.cls || null;
   const limit = Number(o.limit) || MAX_OFFERS;
+  const constraints = Array.isArray(o.constraints) ? o.constraints.filter(Boolean) : [];
+  const withMeta = Boolean(o.withMeta);
 
   const items = [];
   const brands = OFFERS_INDEX.brands || [];
@@ -3680,21 +3886,25 @@ function listOffersForSizeAcrossBrands(size, opts) {
     items.push(...arr);
   }
 
-  const ranked = rankOffers(items, { size: Number(size), className: cls, limit: null });
+  const constrained = filterItemsByConstraints(items, constraints);
+
+  const ranked = rankOffers(constrained, { size: Number(size), className: cls, limit: null });
   const uniqueRanked = pickCheapestPerBrand(ranked);
+  const alt = constraints.length && !uniqueRanked.length ? relaxConstraints(items, constraints, pickCheapestPerBrand) : null;
   debugLog("rank_offers_across_brands", { size, cls, count: uniqueRanked.length });
 
   if (hasFocusBrand() && FOCUS.mode === "preferred") {
     const focus = uniqueRanked.filter((x) => x.brand === FOCUS.brand);
     const combined = focus.concat(uniqueRanked.filter((x) => x.brand !== FOCUS.brand));
     const picks = pickCheapestPerBrand(combined).slice(0, limit);
-    if (picks.length) return picks;
+    if (picks.length) return withMeta ? { picks, alt } : picks;
   }
 
-  return uniqueRanked.slice(0, limit);
+  const picks = uniqueRanked.slice(0, limit);
+  return withMeta ? { picks, alt } : picks;
 }
 
-function collectTvOffers({ brand, size, budget }) {
+function collectTvOffers({ brand, size, budget, constraints }) {
   const tvCanon = OFFERS_INDEX.classCanon.tv;
   const tvNorm = normMatch(tvCanon || "");
   if (!tvCanon) return [];
@@ -3714,7 +3924,10 @@ function collectTvOffers({ brand, size, budget }) {
       items.push({ brand: b, offer: o });
     }
   }
-  return pickCheapestPerBrand(items).slice(0, MAX_OFFERS);
+  const constrained = filterItemsByConstraints(items, constraints);
+  const picks = pickCheapestPerBrand(constrained).slice(0, MAX_OFFERS);
+  const alt = constraints && constraints.length && !picks.length ? relaxConstraints(items, constraints, pickCheapestPerBrand) : null;
+  return { matches: picks, alt };
 }
 
 function resolveOfferForPhoto(userText, historyMsgs, key) {
@@ -3781,6 +3994,15 @@ function isPreferCheapest(text) {
 const PRICE_KEYWORDS = ["prix", "price", "combien", "tarif", "coute", "coûte", "bch7al", "بشحال", "ثمن"];
 const CHEAP_KEYWORDS = ["pas cher", "cheap", "moins cher", "affordable"];
 
+function detectPriceNumberAmbiguity(text) {
+  const raw = arabicIndicToAsciiDigits(String(text || ""));
+  if (!detectPriceIntent(raw)) return null;
+  const nums = (raw.match(/\b(\d{2,3})\b/g) || []).map((n) => Number(n));
+  const val = nums.find((n) => Number.isFinite(n) && n >= 24 && n <= 100) || null;
+  if (!val) return null;
+  return val;
+}
+
 function detectPriceIntent(text) {
   const s = normMatch(text || "");
   for (let i = 0; i < PRICE_KEYWORDS.length; i += 1) {
@@ -3817,6 +4039,7 @@ function detectContactInfo(text, ctx = {}) {
   const raw = String(text || "").trim();
   const ascii = arabicIndicToAsciiDigits(raw);
   const lower = normMatch(raw);
+  const awaitingName = Boolean(ctx.awaitingName);
   const prev = ctx.customer || { name: null, phone: null, address: null };
   const sameVal = (a, b) => {
     const aa = String(a || "").trim().toLowerCase();
@@ -3837,9 +4060,9 @@ function detectContactInfo(text, ctx = {}) {
 
   let name = null;
   const namePatterns = [
-    /(?:سميتي|الاسم|انا اسمي|أنا اسمي|أنا|انا)\s*[:\-]?\s*([\p{L}]{2,}(?:\s+[\p{L}]{2,}){0,3})/iu,
-    /(?:je m'appelle|mon nom est|je suis)\s*[:\-]?\s*([^,.;\n]{2,60})/iu,
-    /(?:my name is|i am|i'm)\s*[:\-]?\s*([^,.;\n]{2,60})/iu,
+    /(?:سميتي|الاسم|انا اسمي|أنا اسمي|كنسمي)\s*[:\-]?\s*([\p{L}]{2,}(?:\s+[\p{L}]{2,}){0,3})/iu,
+    /(?:je m'appelle)\s*[:\-]?\s*([^,.;\n]{2,60})/iu,
+    /(?:my name is)\s*[:\-]?\s*([^,.;\n]{2,60})/iu,
   ];
   for (let i = 0; i < namePatterns.length; i += 1) {
     const m = ascii.match(namePatterns[i]);
@@ -3851,10 +4074,15 @@ function detectContactInfo(text, ctx = {}) {
       }
     }
   }
-  if (!name) {
+  if (!name && awaitingName) {
     const tokens = raw.split(/\s+/).filter(Boolean);
-    const shortName = tokens.length >= 1 && tokens.length <= 4 && tokens.every((w) => /^[\p{L}]{2,}$/u.test(w));
-    if (shortName && !/\d/.test(raw) && lower.length <= 80) name = raw;
+    const shortName =
+      tokens.length >= 1 &&
+      tokens.length <= 4 &&
+      tokens.every((w) => /^[\p{L}]{2,}$/u.test(w)) &&
+      !/\d/.test(raw) &&
+      lower.length <= 80;
+    if (shortName) name = raw;
   }
 
   let address = null;
@@ -3905,6 +4133,12 @@ function contactCtaMessage(lang) {
     form +
     "\n\nوغادي يتّاصلوا بيك الفريق ديالنا لتأكيد الطلب 📞"
   );
+}
+
+function contactInfoAckMessage(lang) {
+  if (lang === "fr") return "Coordonnées reçues، on garde ça pour suivre la commande.";
+  if (lang === "en") return "Contact details saved، we will keep it to move forward.";
+  return "توصلت بالمعلومات وخديتها بعين الاعتبار.";
 }
 
 function hasProductInquirySignal(text) {
@@ -3958,25 +4192,26 @@ function hasTvSizeContext(text) {
 }
 
 function parseUserQuery(text, opts = {}) {
-  const raw = String(text || "");
+  const rawNormalized = String(text || "");
+  const originalRaw = String(opts.originalRaw ?? text ?? "");
   const ctx = opts.ctx || {};
 
-  const forcedIntent = resolveCategoryIntent(raw);
+  const forcedIntent = resolveCategoryIntent(rawNormalized);
   const forcedCategory = (forcedIntent && forcedIntent.category) || null;
   const forcedClass = (forcedIntent && forcedIntent.cls) || null;
 
-  const modelHit = detectModel(raw);
-  const explicitBrand = (modelHit && modelHit.brand) || detectBrand(raw);
-  const sizeVal = extractTvSize(raw, {
+  const modelHit = detectModel(rawNormalized);
+  const explicitBrand = (modelHit && modelHit.brand) || detectBrand(rawNormalized);
+  const sizeVal = extractTvSize(rawNormalized, {
     categoryHint: forcedCategory || ctx.lastCategory || null,
-    allowNoHint: hasTvSizeContext(raw) || Boolean(explicitBrand && !forcedCategory),
+    allowNoHint: hasTvSizeContext(rawNormalized) || Boolean(explicitBrand && !forcedCategory),
     requireTvHint: false,
-    externalTvContext: hasTvSizeContext(raw) || Boolean(explicitBrand),
+    externalTvContext: hasTvSizeContext(rawNormalized) || Boolean(explicitBrand),
   });
   const detectedBrand = explicitBrand || (!sizeVal ? ctx.lastBrand : null) || null;
-  const detectedCategory = forcedCategory || detectCategory(raw) || ctx.lastCategory || null;
-  const detectedClass = forcedClass || (!detectedCategory ? detectClass(raw) : null) || ctx.lastClass || null;
-
+  const detectedCategory = forcedCategory || detectCategory(rawNormalized) || ctx.lastCategory || null;
+  const detectedClass = forcedClass || (!detectedCategory ? detectClass(rawNormalized) : null) || ctx.lastClass || null;
+  
   const forcedNonTv =
     (detectedCategory && normMatch(detectedCategory) !== normMatch(OFFERS_INDEX.classCanon.tv || "tv") && normMatch(detectedCategory) !== "tv") ||
     (detectedClass && normMatch(detectedClass) !== normMatch(OFFERS_INDEX.classCanon.tv || "tv"));
@@ -3989,10 +4224,11 @@ function parseUserQuery(text, opts = {}) {
       (cls && normMatch(cls) === normMatch(OFFERS_INDEX.classCanon.tv || "tv") ? cls : OFFERS_INDEX.classCanon.tv || null)
     : detectedCategory || null;
   const model = modelHit && modelHit.offer ? modelHit.offer.model || modelHit.offer.sku || modelHit.offer.name || null : null;
-  const priceIntent = detectPriceIntent(raw);
-  const budgetDh = parseBudget(raw);
-  const wantsPhotoLink = isPhotoRequestIntent(raw);
-  const capacityLiters = extractCapacityLiters(raw);
+  const constraints = detectHardConstraints(rawNormalized);
+  const priceIntent = detectPriceIntent(rawNormalized);
+  const budgetDh = parseBudget(rawNormalized);
+  const wantsPhotoLink = isPhotoRequestIntent(rawNormalized);
+  const capacityLiters = extractCapacityLiters(rawNormalized);
 
   let confidence = 0.2;
   if (brand) confidence += 0.15;
@@ -4003,7 +4239,8 @@ function parseUserQuery(text, opts = {}) {
   confidence = Math.max(0, Math.min(1, confidence));
 
   const parsed = {
-    raw,
+    raw: originalRaw,
+    normalized: rawNormalized,
     brand,
     cls,
     size: Number.isFinite(sizeVal) ? sizeVal : null,
@@ -4016,6 +4253,7 @@ function parseUserQuery(text, opts = {}) {
     wantsPhotoLink,
     confidence,
     capacityLiters: Number.isFinite(capacityLiters) ? capacityLiters : null,
+    constraints,
     modelHit: modelHit
       ? {
           brand: modelHit.brand,
@@ -4104,18 +4342,17 @@ function isCallMeIntent(text) {
 
 function isBuyIntent(text) {
   const s = normMatch(text);
-  if (s.indexOf("bghit nchri") >= 0) return true;
-  if (s.indexOf("bghit ncommandi") >= 0) return true;
-  if (s.indexOf("commander") >= 0) return true;
-  if (s.indexOf("passer commande") >= 0) return true;
-  if (s.indexOf("acheter") >= 0) return true;
-  if (s.indexOf("buy") >= 0) return true;
-  if (s.indexOf("purchase") >= 0) return true;
-  if (s.indexOf("أريد الشراء") >= 0) return true;
-  if (s.indexOf("اريد الشراء") >= 0) return true;
-  if (s.indexOf("بغيت نشري") >= 0) return true;
-  if (s.indexOf("بغيت نكموندي") >= 0) return true;
-  return false;
+  const intents = [
+    "بغيت نطلب",
+    "نكمل الطلب",
+    "بغيت نكمل",
+    "أكد الطلب",
+    "commander",
+    "confirm order",
+    "buy",
+    "order",
+  ];
+  return intents.some((phrase) => s.indexOf(normMatch(phrase)) >= 0);
 }
 
 function isSupportIntent(text) {
@@ -4222,6 +4459,29 @@ function isTivoliOvenIntent(text) {
 }
 
 
+function detectPolicyIntents(text) {
+  const s = normMatch(text);
+  if (!s) return [];
+
+  const hits = new Set();
+
+  const warrantyTokens = ["garantie", "ضمان", "الضمان", "sav", "service apres vente", "panne", "عطب"];
+  const shippingTokens = ["livraison", "توصيل", "شحن", "expedition", "tracking", "تتبع", "التوصيل"];
+  const returnTokens = ["retour", "إرجاع", "ارجاع", "echange", "échange", "تبديل", "remboursement", "استرجاع"];
+
+  warrantyTokens.forEach((tok) => {
+    if (includesToken(s, tok)) hits.add("warranty");
+  });
+  shippingTokens.forEach((tok) => {
+    if (includesToken(s, tok)) hits.add("shipping");
+  });
+  returnTokens.forEach((tok) => {
+    if (includesToken(s, tok)) hits.add("return");
+  });
+
+  return Array.from(hits);
+}
+
 function asksAboutDeliveryPaymentWarranty(text) {
   const s = normMatch(text);
   if (s.indexOf("delivery") >= 0) return true;
@@ -4253,6 +4513,97 @@ function isPhotoRequestIntent(text) {
   if (s.indexOf("صورة") >= 0) return true;
   if (s.indexOf("صور") >= 0) return true;
   return false;
+}
+
+const HARD_CONSTRAINT_TOKENS = ["QLED", "GOOGLE_TV", "ANDROID_TV", "UHD_4K"];
+
+function detectHardConstraints(text) {
+  const s = normMatch(text || "");
+  const found = [];
+  const push = (c) => {
+    if (HARD_CONSTRAINT_TOKENS.indexOf(c) >= 0 && found.indexOf(c) < 0) found.push(c);
+  };
+
+  if (includesToken(s, "qled")) push("QLED");
+  if (includesToken(s, "google tv")) push("GOOGLE_TV");
+  if (includesToken(s, "android tv") || includesToken(s, "android")) push("ANDROID_TV");
+  if (includesToken(s, "4k") || includesToken(s, "uhd") || includesToken(s, "ultra hd") || includesToken(s, "فوركي"))
+    push("UHD_4K");
+
+  return found;
+}
+
+function offerMatchesConstraint(offer, constraint) {
+  const typeNorm = normMatch((offer && offer.type) || "");
+  const nameNorm = normMatch((offer && offer.name) || "");
+
+  if (constraint === "QLED") return typeNorm.indexOf("qled") >= 0 || nameNorm.indexOf("qled") >= 0;
+  if (constraint === "GOOGLE_TV") return typeNorm.indexOf("google tv") >= 0 || nameNorm.indexOf("google tv") >= 0;
+  if (constraint === "ANDROID_TV")
+    return typeNorm.indexOf("android tv") >= 0 || typeNorm.indexOf("android") >= 0 || nameNorm.indexOf("android") >= 0;
+  if (constraint === "UHD_4K")
+    return (
+      typeNorm.indexOf("4k") >= 0 ||
+      typeNorm.indexOf("uhd") >= 0 ||
+      nameNorm.indexOf("4k") >= 0 ||
+      nameNorm.indexOf("uhd") >= 0 ||
+      nameNorm.indexOf("ultra hd") >= 0
+    );
+  return true;
+}
+
+function offerMatchesConstraints(offer, constraints) {
+  const list = Array.isArray(constraints) ? constraints : [];
+  for (let i = 0; i < list.length; i += 1) {
+    if (!offerMatchesConstraint(offer, list[i])) return false;
+  }
+  return true;
+}
+
+function filterItemsByConstraints(items, constraints) {
+  const list = Array.isArray(items) ? items : [];
+  if (!Array.isArray(constraints) || !constraints.length) return list;
+  const tvNorm = normMatch((OFFERS_INDEX && OFFERS_INDEX.classCanon && OFFERS_INDEX.classCanon.tv) || "tv");
+  const hasTvItem = list.some((it) => {
+    const offer = (it && it.offer) || it || {};
+    const clsNorm = normMatch(offer.class || "");
+    const catNorm = normMatch(offer.category || "");
+    return clsNorm === tvNorm || catNorm === tvNorm || catNorm === "tv";
+  });
+  if (!hasTvItem) return list;
+  return list.filter((it) => offerMatchesConstraints((it && it.offer) || it, constraints));
+}
+
+function relaxConstraints(items, constraints, pickerFn) {
+  const list = Array.isArray(items) ? items : [];
+  const cs = Array.isArray(constraints) ? constraints : [];
+  if (!cs.length) return null;
+
+  for (let i = 0; i < cs.length; i += 1) {
+    const subset = cs.filter((_, idx) => idx !== i);
+    const filtered = filterItemsByConstraints(list, subset);
+    const picked = typeof pickerFn === "function" ? pickerFn(filtered) : filtered;
+    if (picked && picked.length) return { dropped: cs[i], picks: picked };
+  }
+
+  return null;
+}
+
+function constraintLabel(constraints) {
+  const cs = Array.isArray(constraints) ? constraints.filter(Boolean) : [];
+  return cs.join(" + ");
+}
+
+function constraintsUnavailableText(lang, constraints, { withAlternatives = false } = {}) {
+  const label = constraintLabel(constraints) || "المواصفات";
+  if (lang === "fr") return withAlternatives ? `Pas dispo avec (${label}), voici des alternatives proches:` : `Pas disponible avec (${label}) en ce moment.`;
+  if (lang === "ar")
+    return withAlternatives
+      ? `ما كايناش بهد المواصفات (${label})، هادو أقرب اختيارات متوفرة:`
+      : `ما كايناش بهد المواصفات (${label}) دابا.`;
+  return withAlternatives
+    ? `ما كايناش بهاد المواصفات (${label})، هادو أقرب اختيارات قريبة:`
+    : `ما متوفراش بهاد المواصفات (${label}) دابا.`;
 }
 
 function isNoOrderNumberIntent(text) {
@@ -4393,9 +4744,45 @@ function handleTvSizePriceFlow(parsed, lang, key) {
   const budget = parsed.budgetDh;
   const priceIntent = parsed.priceIntent || false;
   const cheapIntent = detectCheapIntent(String(parsed.raw || ""));
+  const constraints = parsed.constraints || [];
 
-  const matches = collectTvOffers({ brand, size: sizeVal, budget });
+  const tvResult = collectTvOffers({ brand, size: sizeVal, budget, constraints });
+  const matches = (tvResult && tvResult.matches) || [];
   if (!matches.length) {
+    if (constraints.length) {
+      if (tvResult && tvResult.alt && tvResult.alt.picks && tvResult.alt.picks.length) {
+        const altLines = tvResult.alt.picks
+          .map((it) => formatOfferLine(it.brand, it.offer || it))
+          .filter(Boolean)
+          .slice(0, MAX_OFFERS);
+        if (altLines.length) {
+          const reply = constraintsUnavailableText(lang, constraints, { withAlternatives: true }) + "\n" + altLines.join("\n\n");
+          return ensureNoQuestion(reply);
+        }
+      }
+      return ensureNoQuestion(constraintsUnavailableText(lang, constraints, { withAlternatives: false }));
+    }
+
+    if (brand) {
+      const sizePack = listOffersForSizeAcrossBrands(sizeVal, { cls: tvCanon, limit: MAX_OFFERS, constraints, withMeta: true });
+      const picks = (sizePack && sizePack.picks ? sizePack.picks : []).filter(
+        (it) => normMatch(it.brand) !== normMatch(brand)
+      );
+      const lines = picks.map((it) => formatOfferLine(it.brand, it.offer)).slice(0, MAX_OFFERS);
+      if (lines.length) {
+        setCtx(key, {
+          lastBrand: undefined,
+          lastClass: tvCanon || undefined,
+          lastCategory: undefined,
+          lastSize: sizeVal,
+          lastOffersShown: picks.map((it) => ({ brand: it.brand, model: (it.offer && it.offer.model) || "" })),
+        });
+        const msg = t(lang, "notAvailableSize", { brand, size: sizeVal });
+        return ensureNoQuestion(msg + "\n" + lines.join("\n\n"));
+      }
+      return ensureNoQuestion(t(lang, "notAvailableSize", { brand, size: sizeVal }));
+    }
+
     const tvCanon = OFFERS_INDEX.classCanon.tv || "Tv";
     const fallbackItems = [];
     const brandsPool = brand ? [brand] : OFFERS_INDEX.brands || [];
@@ -4421,7 +4808,7 @@ function handleTvSizePriceFlow(parsed, lang, key) {
       return ensureNoQuestion([header, ...lines].filter(Boolean).join("\n"));
     }
 
-    return ensureNoQuestion(fallbackWithAgent(lang));
+    return null;
   }
 
   const prices = matches.map((m) => Number(m.offer.price)).filter((p) => Number.isFinite(p));
@@ -4452,21 +4839,112 @@ function handleTvSizePriceFlow(parsed, lang, key) {
   return reply;
 }
 
-function tryDirectOfferAnswer(userText, historyMsgs, lang, key) {
+function replyWithLastOffersPrices(ctxData, lang) {
+  const shown = Array.isArray(ctxData && ctxData.lastOffersShown) ? ctxData.lastOffersShown : [];
+  const lines = [];
+  for (let i = 0; i < shown.length; i += 1) {
+    const b = (shown[i] && shown[i].brand) || null;
+    const m = (shown[i] && shown[i].model) || null;
+    if (!b || !m) continue;
+    const offer = findOfferByBrandModel(b, m);
+    if (!offer) continue;
+    const line = formatOfferLine(b, offer, { lang });
+    if (line) lines.push(line);
+  }
+  if (!lines.length) return null;
+
+  const header =
+    lang === "fr"
+      ? "Prix des options qu’on a vues juste avant:"
+      : lang === "ar"
+        ? "أثمان العروض لي وريتك دابا:"
+        : "Thaman dial l3orod li werytek daba:";
+  return ensureNoQuestion([header, lines.join("\n\n")].filter(Boolean).join("\n"));
+}
+
+function ambiguousPriceReply(numberVal, lang, key, userText, userTextRaw) {
+  const ctx = getCtx(key);
+  const parsed = parseUserQuery(userText, { ctx, originalRaw: userTextRaw });
+  const sizeVal = Number.isFinite(parsed.size) ? parsed.size : Number(numberVal);
+  const constraints = parsed.constraints || [];
+  const brand = parsed.brand || ctx.lastBrand || null;
+  const tvResult = collectTvOffers({ brand, size: sizeVal, budget: null, constraints });
+  const matches = (tvResult && tvResult.matches) || [];
+  let tvPart = "";
+
+  if (matches.length) {
+    const top = pickCheapestPerBrand(matches).slice(0, MAX_OFFERS);
+    const orderedTop = [...top].sort(
+      (a, b) => brandRank(a.brand, TV_BRAND_PRIORITY) - brandRank(b.brand, TV_BRAND_PRIORITY) || Number(a.offer.price) - Number(b.offer.price)
+    );
+    const lines = orderedTop.map((it) => formatOfferLine(it.brand, it.offer, { lang }));
+    setCtx(key, {
+      lastBrand: brand || undefined,
+      lastClass: OFFERS_INDEX.classCanon.tv || undefined,
+      lastCategory: undefined,
+      lastSize: sizeVal,
+      lastOffersShown: orderedTop.map((it) => ({ brand: it.brand, model: (it.offer && it.offer.model) || "" })),
+    });
+    const intro =
+      lang === "fr"
+        ? `Si tu parlais de ${sizeVal}\" en taille، voici ce qui est dispo:`
+        : lang === "ar"
+          ? `إلا كنتي كتقصد ${sizeVal} بوصة، هادو الخيارات المتوفرة:`
+          : `Ila kent kats9ed ${sizeVal} pouces، hadi l-ikhtiyarat l-mwjoda:`;
+    tvPart = [intro, lines.join("\n\n")].filter(Boolean).join("\n");
+  } else if (constraints.length) {
+    const altMsg = constraintsUnavailableText(lang, constraints, { withAlternatives: Boolean(tvResult && tvResult.alt && tvResult.alt.picks && tvResult.alt.picks.length) });
+    const altLines =
+      tvResult && tvResult.alt && tvResult.alt.picks
+        ? tvResult.alt.picks.map((it) => formatOfferLine(it.brand, it.offer || it, { lang })).filter(Boolean).slice(0, MAX_OFFERS)
+        : [];
+    tvPart = [
+      lang === "fr"
+        ? `Si tu parlais de ${sizeVal}\"، pas dispo avec ces contraintes:`
+        : lang === "ar"
+          ? `إلا كنتي كتقصد ${sizeVal} بوصة، ما متوفرش بهاد الشروط:`
+          : `Ila kent kats9ed ${sizeVal} pouces، ma kaynach b had chchourout:`,
+      altMsg,
+      altLines.length ? altLines.join("\n\n") : "",
+    ]
+      .filter(Boolean)
+      .join("\n");
+  } else {
+    tvPart =
+      lang === "fr"
+        ? `Si tu parlais de ${sizeVal}\" en taille، précise si tu veux QLED / Google TV / Android TV ou la marque.`
+        : lang === "ar"
+          ? `إلا كنتي كتقصد ${sizeVal} بوصة، قول ليا واش باغي QLED ولا GOOGLE_TV ولا ANDROID_TV ولا ماركة معينة.`
+          : `Ila kent kats9ed ${sizeVal} pouces، gol lia wach baghi QLED wla GOOGLE_TV wla ANDROID_TV wla marque m3ayana.`;
+  }
+
+  const dhPart =
+    lang === "fr"
+      ? `${numberVal} dh c’est souvent pour accessoires، dis-moi le modèle ou le produit pour t’orienter.`
+      : lang === "ar"
+        ? `${numberVal} درهم غالباً ديال إكسسوارات، عطيني الموديل أو النوع باش نعاونك.`
+        : `${numberVal} dh ghaliban dial accessoires، atini l-model wla naw3 bach n3awnk.`;
+
+  return ensureNoQuestion([tvPart, dhPart].filter(Boolean).join("\n\n"));
+}
+
+function tryDirectOfferAnswer(userText, historyMsgs, lang, key, originalRaw) {
   const text = String(userText || "").trim();
   if (!text) return null;
   if (!OFFERS || !OFFERS.offers || !Object.keys(OFFERS.offers).length) return null;
 
   const ctx = getCtx(key);
-  const parsed = parseUserQuery(text, { ctx });
+  const normalizedText = normalizeUserText(text);
+  const parsed = parseUserQuery(normalizedText, { ctx, originalRaw: originalRaw ?? text });
   const tvCanon = OFFERS_INDEX.classCanon.tv || "Tv";
   const tvCanonNorm = normMatch(tvCanon || "tv");
   const hasForced = Boolean(parsed.intentCategory || parsed.intentClass);
   if (hasForced) resetCtxForCategoryChange(key, parsed.intentCategory, parsed.intentClass);
+  const constraints = parsed.constraints || [];
 
   const modelOffer =
     parsed.modelHit && parsed.modelHit.model ? findOfferByBrandModel(parsed.modelHit.brand, parsed.modelHit.model) : null;
-  if (modelOffer && Number(((modelOffer || {}).stock) || 0) > 0) {
+  if (modelOffer && Number(((modelOffer || {}).stock) || 0) > 0 && offerMatchesConstraints(modelOffer, constraints)) {
     setCtx(key, {
       lastBrand: parsed.modelHit.brand,
       lastClass: (modelOffer && modelOffer.class) || undefined,
@@ -4476,6 +4954,54 @@ function tryDirectOfferAnswer(userText, historyMsgs, lang, key) {
     });
     const reply = offersHeader(lang, { brand: parsed.modelHit.brand }) + "\n" + formatOfferLine(parsed.modelHit.brand, modelOffer);
     return ensureNoQuestion(reply);
+  }
+
+  if (!parsed.brand && parsed.category && normMatch(parsed.category) !== tvCanonNorm) {
+    const kCat = normMatch(parsed.category);
+    const matches = [];
+    const brandsAll = Object.keys((OFFERS && OFFERS.offers) || {});
+    for (let i = 0; i < brandsAll.length; i += 1) {
+      const b = brandsAll[i];
+      const arr = OFFERS.offers[b] || [];
+      for (let j = 0; j < arr.length; j += 1) {
+        const o = arr[j];
+        const oCat = normMatch(o.category || "");
+        if (oCat !== kCat && oCat.indexOf(kCat) < 0 && kCat.indexOf(oCat) < 0) continue;
+        if (Number((o && o.stock) || 0) <= 0) continue;
+        matches.push({ brand: b, offer: o, originalIdx: j });
+      }
+    }
+
+    const ranked = matches
+      .map((it, idx) => Object.assign({}, it, { price: Number((it.offer && it.offer.price) || Number.POSITIVE_INFINITY), idx }))
+      .sort((a, b) => {
+        const capTarget = Number.isFinite(parsed.capacityLiters) ? parsed.capacityLiters : null;
+        if (capTarget !== null) {
+          const capA = Number((a.offer && (a.offer.capacity_l || a.offer.capacity_liters || a.offer.capacity)) || NaN);
+          const capB = Number((b.offer && (b.offer.capacity_l || b.offer.capacity_liters || b.offer.capacity)) || NaN);
+          const diffA = Number.isFinite(capA) ? Math.abs(capA - capTarget) : Number.POSITIVE_INFINITY;
+          const diffB = Number.isFinite(capB) ? Math.abs(capB - capTarget) : Number.POSITIVE_INFINITY;
+          if (diffA !== diffB) return diffA - diffB;
+        }
+        if (a.price !== b.price) return a.price - b.price;
+        return String(a.brand || "").localeCompare(String(b.brand || "")) || a.idx - b.idx;
+      })
+      .filter(Boolean)
+      .slice(0, MAX_OFFERS);
+
+    if (ranked.length) {
+      setCtx(key, {
+        lastBrand: undefined,
+        lastCategory: parsed.category || undefined,
+        lastClass: undefined,
+        lastSize: undefined,
+        lastCapacity: parsed.capacityLiters || undefined,
+        lastOffersShown: ranked.map((it) => ({ brand: it.brand, model: (it.offer && it.offer.model) || "" })),
+      });
+      const lines = ranked.map((it) => formatOfferLine(it.brand, it.offer)).join("\n\n");
+      const base = offersHeader(lang, { category: parsed.category });
+      return ensureNoQuestion(base + "\n" + lines);
+    }
   }
 
   const tvFlow = handleTvSizePriceFlow(parsed, lang, key);
@@ -4524,7 +5050,7 @@ function tryDirectOfferAnswer(userText, historyMsgs, lang, key) {
       : ctx.lastCapacity || null;
 
   if (brand && Number.isFinite(sizeVal)) {
-    const pack = listOffersForBrand(brand, { cls: tvCanon, size: sizeVal, limit: MAX_OFFERS, withOffers: true });
+    const pack = listOffersForBrand(brand, { cls: tvCanon, size: sizeVal, limit: MAX_OFFERS, withOffers: true, constraints });
     if (pack.lines.length) {
       setCtx(key, {
         lastBrand: brand,
@@ -4536,11 +5062,16 @@ function tryDirectOfferAnswer(userText, historyMsgs, lang, key) {
       const base = offersHeader(lang, { brand, size: sizeVal, cls: tvCanon }) + "\n" + pack.lines.join("\n\n");
       return ensureNoQuestion(base);
     }
+    if (constraints.length && pack.alt && Array.isArray(pack.alt.lines) && pack.alt.lines.length) {
+      const msg = constraintsUnavailableText(lang, constraints, { withAlternatives: true });
+      return ensureNoQuestion(msg + "\n" + pack.alt.lines.slice(0, MAX_OFFERS).join("\n\n"));
+    }
     return ensureNoQuestion(t(lang, "notAvailableSize", { brand, size: sizeVal }));
   }
 
   if (!brand && Number.isFinite(sizeVal)) {
-    const picks = listOffersForSizeAcrossBrands(sizeVal, { cls: tvCanon, limit: MAX_OFFERS }) || [];
+    const sizePack = listOffersForSizeAcrossBrands(sizeVal, { cls: tvCanon, limit: MAX_OFFERS, constraints, withMeta: true });
+    const picks = (sizePack && sizePack.picks) || [];
     if (picks.length) {
       const lines = picks.map((it) => formatOfferLine(it.brand, it.offer)).join("\n\n");
       setCtx(key, {
@@ -4553,11 +5084,60 @@ function tryDirectOfferAnswer(userText, historyMsgs, lang, key) {
       const base = salesIntro(lang, { size: sizeVal, cls: tvCanon }) + "\n\n" + lines;
       return ensureNoQuestion(base);
     }
+    if (constraints.length && sizePack && sizePack.alt && sizePack.alt.picks && sizePack.alt.picks.length) {
+      const altLines = sizePack.alt.picks
+        .map((it) => formatOfferLine(it.brand, it.offer || it))
+        .filter(Boolean)
+        .slice(0, MAX_OFFERS);
+      if (altLines.length) {
+        const msg = constraintsUnavailableText(lang, constraints, { withAlternatives: true });
+        return ensureNoQuestion(msg + "\n" + altLines.join("\n\n"));
+      }
+    }
     return ensureNoQuestion(t(lang, "askBrandForSize", { size: sizeVal }));
   }
 
+  if (!brand && category2 && normMatch(category2) !== tvCanonNorm) {
+    const matches = [];
+    const brandsAll = Object.keys((OFFERS && OFFERS.offers) || {});
+    for (let i = 0; i < brandsAll.length; i += 1) {
+      const b = brandsAll[i];
+      const arr = OFFERS.offers[b] || [];
+      for (let j = 0; j < arr.length; j += 1) {
+        const o = arr[j];
+        if (normMatch(o.category || "") !== normMatch(category2)) continue;
+        if (Number((o && o.stock) || 0) <= 0) continue;
+        matches.push({ brand: b, offer: o, originalIdx: j });
+      }
+    }
+
+    const ranked = pickCheapestPerBrand(rankOffers(matches, { limit: null, capacityLiters: capacityHint, className: category2 }))
+      .filter(Boolean)
+      .slice(0, MAX_OFFERS);
+
+    if (ranked.length) {
+      setCtx(key, {
+        lastBrand: undefined,
+        lastCategory: category2 || undefined,
+        lastClass: undefined,
+        lastSize: undefined,
+        lastCapacity: capacityHint || undefined,
+        lastOffersShown: ranked.map((it) => ({ brand: it.brand, model: (it.offer && it.offer.model) || "" })),
+      });
+      const lines = ranked.map((it) => formatOfferLine(it.brand, it.offer)).join("\n\n");
+      const base = offersHeader(lang, { category: category2 });
+      return ensureNoQuestion(base + "\n" + lines);
+    }
+  }
+
   if (brand && category2) {
-    const pack = listOffersForBrand(brand, { category: category2, limit: MAX_OFFERS, withOffers: true, capacityLiters: capacityHint });
+    const pack = listOffersForBrand(brand, {
+      category: category2,
+      limit: MAX_OFFERS,
+      withOffers: true,
+      capacityLiters: capacityHint,
+      constraints,
+    });
     if (pack.lines.length) {
       setCtx(key, {
         lastBrand: brand,
@@ -4570,11 +5150,15 @@ function tryDirectOfferAnswer(userText, historyMsgs, lang, key) {
       const base = offersHeader(lang, { brand, category: category2 }) + "\n" + pack.lines.join("\n\n");
       return ensureNoQuestion(base);
     }
+    if (constraints.length && pack.alt && pack.alt.lines && pack.alt.lines.length) {
+      const msg = constraintsUnavailableText(lang, constraints, { withAlternatives: true });
+      return ensureNoQuestion(msg + "\n" + pack.alt.lines.slice(0, MAX_OFFERS).join("\n\n"));
+    }
     return ensureNoQuestion(t(lang, "categoryUnavailable", { category: category2 }));
   }
 
   if (brand && cls2) {
-    const pack = listOffersForBrand(brand, { cls: cls2, limit: MAX_OFFERS, withOffers: true });
+    const pack = listOffersForBrand(brand, { cls: cls2, limit: MAX_OFFERS, withOffers: true, constraints });
     if (pack.lines.length) {
       setCtx(key, {
         lastBrand: brand,
@@ -4609,9 +5193,13 @@ function tryDirectOfferAnswer(userText, historyMsgs, lang, key) {
       .map((it, idx) => Object.assign({}, it, { originalIdx: idx }))
       .filter((it) => Number(((it.offer || {}).stock) || 0) > 0);
 
+    const constrainedItems = filterItemsByConstraints(items, constraints);
+    const baseItems = constraints.length ? constrainedItems : items;
+    const alt = constraints.length && !baseItems.length ? relaxConstraints(items, constraints, pickCheapestPerBrand) : null;
+
     const isTvCategory2 = normMatch(category2) === tvCanonNorm || normMatch(category2) === "tv";
-    const sorted = isTvCategory2
-      ? pickCheapestPerBrand(items)
+    let sorted = isTvCategory2
+      ? pickCheapestPerBrand(baseItems)
           .map((it, idx) => Object.assign({}, it, { originalIdx: idx }))
           .sort((a, b) => {
             const ra = tvPriorityRank.has(normMatch(a.brand))
@@ -4627,7 +5215,25 @@ function tryDirectOfferAnswer(userText, historyMsgs, lang, key) {
             return normMatch((a.offer && a.offer.model) || "").localeCompare(normMatch((b.offer && b.offer.model) || ""));
           })
           .slice(0, MAX_OFFERS)
-      : pickCheapestPerBrand(rankOffers(items, { limit: null, capacityLiters: capacityHint })).slice(0, MAX_OFFERS);
+      : pickCheapestPerBrand(rankOffers(baseItems, { limit: null, capacityLiters: capacityHint })).slice(0, MAX_OFFERS);
+
+    if (!sorted.length && !isTvCategory2) {
+      const rebuilt = [];
+      const brandsAll = Object.keys((OFFERS && OFFERS.offers) || {});
+      for (let i = 0; i < brandsAll.length; i += 1) {
+        const b = brandsAll[i];
+        const arr = OFFERS.offers[b] || [];
+        for (let j = 0; j < arr.length; j += 1) {
+          const o = arr[j];
+          if (normMatch(o.category || "") !== k) continue;
+          if (Number((o && o.stock) || 0) <= 0) continue;
+          rebuilt.push({ brand: b, offer: o, originalIdx: j });
+        }
+      }
+      if (rebuilt.length) {
+        sorted = pickCheapestPerBrand(rankOffers(rebuilt, { limit: null, capacityLiters: capacityHint })).slice(0, MAX_OFFERS);
+      }
+    }
 
     if (sorted.length) {
       setCtx(key, {
@@ -4642,6 +5248,16 @@ function tryDirectOfferAnswer(userText, historyMsgs, lang, key) {
       const base = offersHeader(lang, { category: category2 }) + "\n" + lines;
       return ensureNoQuestion(base);
     }
+    if (constraints.length && alt && alt.picks && alt.picks.length) {
+      const altLines = alt.picks
+        .map((it) => formatOfferLine(it.brand, it.offer || it))
+        .filter(Boolean)
+        .slice(0, MAX_OFFERS);
+      if (altLines.length) {
+        const msg = constraintsUnavailableText(lang, constraints, { withAlternatives: true });
+        return ensureNoQuestion(msg + "\n" + altLines.join("\n\n"));
+      }
+    }
     if (hasForced) return ensureNoQuestion(t(lang, "categoryUnavailable", { category: category2 }));
   }
 
@@ -4652,9 +5268,13 @@ function tryDirectOfferAnswer(userText, historyMsgs, lang, key) {
       .map((it, idx) => Object.assign({}, it, { originalIdx: idx }))
       .filter((it) => Number(((it.offer || {}).stock) || 0) > 0);
 
+    const constrainedItems = filterItemsByConstraints(items, constraints);
+    const baseItems = constraints.length ? constrainedItems : items;
+    const alt = constraints.length && !baseItems.length ? relaxConstraints(items, constraints, pickCheapestPerBrand) : null;
+
     const isTvClass2 = normMatch(cls2) === tvCanonNorm;
     const sorted = isTvClass2
-      ? pickCheapestPerBrand(items)
+      ? pickCheapestPerBrand(baseItems)
           .map((it, idx) => Object.assign({}, it, { originalIdx: idx }))
           .sort((a, b) => {
             const ra = tvPriorityRank.has(normMatch(a.brand))
@@ -4670,7 +5290,7 @@ function tryDirectOfferAnswer(userText, historyMsgs, lang, key) {
             return normMatch((a.offer && a.offer.model) || "").localeCompare(normMatch((b.offer && b.offer.model) || ""));
           })
           .slice(0, MAX_OFFERS)
-      : pickCheapestPerBrand(rankOffers(items, { limit: null, capacityLiters: capacityHint })).slice(0, MAX_OFFERS);
+      : pickCheapestPerBrand(rankOffers(baseItems, { limit: null, capacityLiters: capacityHint })).slice(0, MAX_OFFERS);
 
     if (sorted.length) {
       setCtx(key, {
@@ -4685,15 +5305,33 @@ function tryDirectOfferAnswer(userText, historyMsgs, lang, key) {
       const base = offersHeader(lang, { cls: cls2 }) + "\n" + lines;
       return ensureNoQuestion(base);
     }
+    if (constraints.length && alt && alt.picks && alt.picks.length) {
+      const altLines = alt.picks
+        .map((it) => formatOfferLine(it.brand, it.offer || it))
+        .filter(Boolean)
+        .slice(0, MAX_OFFERS);
+      if (altLines.length) {
+        const msg = constraintsUnavailableText(lang, constraints, { withAlternatives: true });
+        return ensureNoQuestion(msg + "\n" + altLines.join("\n\n"));
+      }
+    }
     if (hasForced && cls2) return ensureNoQuestion(t(lang, "categoryUnavailable", { category: cls2 }));
   }
 
   if (brand && !sizeVal) {
-    const packTv = tvHint ? listOffersForBrand(brand, { cls: tvCanon, limit: MAX_OFFERS, withOffers: true }) : { lines: [], offers: [] };
+    const packTv = tvHint
+      ? listOffersForBrand(brand, { cls: tvCanon, limit: MAX_OFFERS, withOffers: true, constraints })
+      : { lines: [], offers: [] };
     const pack =
       packTv.lines && packTv.lines.length
         ? packTv
-        : listOffersForBrand(brand, { cls: cls || null, limit: MAX_OFFERS, withOffers: true, capacityLiters: capacityHint });
+        : listOffersForBrand(brand, {
+            cls: cls || null,
+            limit: MAX_OFFERS,
+            withOffers: true,
+            capacityLiters: capacityHint,
+            constraints,
+          });
     if (pack.lines && pack.lines.length) {
       setCtx(key, {
         lastBrand: brand,
@@ -4705,6 +5343,10 @@ function tryDirectOfferAnswer(userText, historyMsgs, lang, key) {
       });
       const base = offersHeader(lang, { brand, cls: tvHint ? tvCanon : cls || undefined }) + "\n" + pack.lines.join("\n\n");
       return ensureNoQuestion(base);
+    }
+    if (constraints.length && pack.alt && pack.alt.lines && pack.alt.lines.length) {
+      const msg = constraintsUnavailableText(lang, constraints, { withAlternatives: true });
+      return ensureNoQuestion(msg + "\n" + pack.alt.lines.slice(0, MAX_OFFERS).join("\n\n"));
     }
   }
 
@@ -5160,7 +5802,7 @@ async function digibotLLMReply(userText, historyMsgs, lang, key) {
     if (!reply) reply = ensureNoQuestion(fallbackWithAgent(lang));
     return reply;
   } catch (_err) {
-    const direct = tryDirectOfferAnswer(userText, historyMsgs, lang, key);
+    const direct = tryDirectOfferAnswer(normalizeUserText(userText), historyMsgs, lang, key, userText);
     if (direct) return ensureNoQuestion(direct);
     return ensureNoQuestion(fallbackWithAgent(lang));
   }
@@ -5371,15 +6013,33 @@ app.post("/wanotifier", async (req, res) => {
     const lang = detectLang(userTextRaw || incoming.lang || "");
     const ip = String(req.ip || "");
 
+    const hasImageAttachment = Boolean(mediaInfo && (mediaInfo.kind === "image" || guessMediaKind(mediaInfo) === "image"));
+
     // Immediate image handling with vision before deriving text
-    if (mediaInfo && (mediaInfo.kind === "image" || guessMediaKind(mediaInfo) === "image")) {
+    if (hasImageAttachment) {
       try {
-        const visionOut = await handleVisionMedia(mediaInfo, lang, key, { reqId });
-        const reply = shortenNoQuestion(visionOut.reply, CFG.maxReplyChars);
-        memory.push(key, "assistant", reply);
+        const history = memory.get(key) || [];
+        const directFromText = userTextRaw
+          ? tryDirectOfferAnswer(normalizeUserText(userTextRaw), history, lang, key, userTextRaw)
+          : null;
+      const visionOut = await handleVisionMedia(mediaInfo, lang, key, { reqId, stripLinks: true });
+        let reply = visionOut && visionOut.reply ? shortenNoQuestion(visionOut.reply, CFG.maxReplyChars) : "";
+
+        if ((!reply || looksLikeFallback(reply)) && directFromText) {
+          reply = shortenNoQuestion(directFromText, CFG.maxReplyChars);
+        }
+
+        if (!reply) {
+          if (lang === "fr") reply = "Ma kaynach taille ou marque واضحة فالصورة، عطيني الحجم والمارque باش نكمل ليك";
+          else if (lang === "ar") reply = "ما بانش الحجم ولا الماركة فالصورة، عطيني الحجم والماركة باش نرشح ليك المناسب";
+          else reply = "Ma kaynach taille ou marque واضحة، 3tini l-size w l-brand باش نقترح ليك المناسب";
+        }
+
+        const safeReply = enforceArabicIfNeeded(reply, lang);
+        memory.push(key, "assistant", safeReply);
         resetStrikes(key);
         console.log(JSON.stringify({ level: "info", msg: "vision_reply_sent", reqId, confidence: visionOut.confidence || 0 }));
-        return res.json({ ok: true, reply });
+        return res.json({ ok: true, reply: safeReply });
       } catch (e) {
         console.error(JSON.stringify({ level: "error", msg: "vision_entry_failed", reqId, error: (e && e.message) || String(e) }));
       }
@@ -5437,87 +6097,119 @@ app.post("/wanotifier", async (req, res) => {
       (normalizedMedia && CFG.mediaMode === "disabled" && !userTextRaw)
     ) {
       const reply = shortenNoQuestion(t(lang, "askTextInsteadMedia"), 420);
-      memory.push(key, "assistant", reply);
+      const safeReply = enforceArabicIfNeeded(reply, lang);
+      memory.push(key, "assistant", safeReply);
       resetStrikes(key);
-      return res.json({ ok: true, reply });
+      return res.json({ ok: true, reply: safeReply });
     }
 
     if (!offersAvailable) {
       const reply = shortenNoQuestion(t(lang, "cannot3"), 420);
+      const safeReply = enforceArabicIfNeeded(reply, lang);
       console.error(JSON.stringify({ level: "error", msg: "offers_unavailable", lastOffersSync }));
-      memory.push(key, "assistant", reply);
-      return res.json({ ok: true, reply });
+      memory.push(key, "assistant", safeReply);
+      return res.json({ ok: true, reply: safeReply });
     }
 
     if (!userTextRaw) {
       const reply = shortenNoQuestion(t(lang, "typeYourMessage"), 420);
-      memory.push(key, "assistant", reply);
+      const safeReply = enforceArabicIfNeeded(reply, lang);
+      memory.push(key, "assistant", safeReply);
       resetStrikes(key);
-      return res.json({ ok: true, reply });
+      return res.json({ ok: true, reply: safeReply });
     }
+
+    const userText = normalizeUserText(userTextRaw);
 
     memory.push(key, "user", userTextRaw);
     const history = memory.get(key);
     const ctxData = getCtx(key);
-
-    const contactInfo = detectContactInfo(userTextRaw, ctxData);
-    if (contactInfo && contactInfo.isNewInfo) {
-      const prevCustomer = ctxData.customer || { name: null, phone: null, address: null };
-      const nextCustomer = {
-        name: contactInfo.extracted.name || prevCustomer.name || null,
-        phone: contactInfo.extracted.phone || prevCustomer.phone || null,
-        address: contactInfo.extracted.address || prevCustomer.address || null,
-        updatedAt: getNowMs(),
-      };
-      setCtx(key, Object.assign({}, ctxData, { customer: nextCustomer }));
-
-      const followUp = hasProductInquirySignal(userTextRaw) ? "\n\nشنو هو الموديل/الحجم اللي بغيتي؟" : "";
-      const reply = shortenNoQuestion(contactCtaMessage(lang) + followUp, 520);
-      memory.push(key, "assistant", reply);
-      resetStrikes(key);
-      return res.json({ ok: true, reply });
-    }
-    if (isIptvIntent(userTextRaw)) {
-      const out = shortenNoQuestion(t(lang, "iptvCall"), 220);
-      memory.push(key, "assistant", out);
-      resetStrikes(key);
-      return res.json({ ok: true, reply: out });
-    }
-
-    if (isLocationIntent(userTextRaw)) {
-      const reply = shortenNoQuestion(t(lang, "address"), 420);
-      memory.push(key, "assistant", reply);
-      resetStrikes(key);
-      return res.json({ ok: true, reply });
-    }
-
-    if (isPhotoRequestIntent(userTextRaw) && !supportModeStore.has(key)) {
-      const resolved = resolveOfferForPhoto(userTextRaw, history, key);
+    if (isPhotoRequestIntent(userText) && !supportModeStore.has(key)) {
+      const resolved = resolveOfferForPhoto(userText, history, key);
 
       if (!resolved) {
-        const reply = shortenNoQuestion(fallbackWithAgent(lang), 420);
-        memory.push(key, "assistant", reply);
+        const reply = shortenNoQuestion(t(lang, "photoNoLink"), 420);
+        const safeReply = enforceArabicIfNeeded(reply, lang);
+        memory.push(key, "assistant", safeReply);
         resetStrikes(key);
-        return res.json({ ok: true, reply });
+        return res.json({ ok: true, reply: safeReply });
       }
 
       const link = String(((resolved.offer || {}).link) || "").trim();
       const safeLink = sanitizeUrlNoQuestion(link);
-      const reply = shortenNoQuestion(link ? t(lang, "photoLink", { link: safeLink }) : t(lang, "photoNoLink"), 520);
-      memory.push(key, "assistant", reply);
+      let reply = "";
+      if (link) {
+        reply = shortenNoQuestion(t(lang, "photoLink", { link: safeLink }), 520);
+      } else {
+        const alt = ctxData.lastOffersShown || [];
+        const altLines = alt
+          .slice(0, 3)
+          .map((o) => formatOfferLine((o && o.brand) || "", (o && o.offer) || {}))
+          .filter(Boolean);
+        const altFallback =
+          lang === "fr"
+            ? "Pas de lien direct pour cette référence، voici des alternatives proches:"
+            : lang === "ar"
+              ? "ما كاينش رابط صورة لهاد الريفرنس، هادو بدائل قريبة متوفرة:" 
+              : "Ma kaynach photo directe لهاد الريفرنس، hadi بدائل قريبة:";
+        const altMsg = altLines.length ? "\n" + altLines.join("\n") : "\n" + altFallback;
+        reply = shortenNoQuestion(t(lang, "photoNoLink") + altMsg, 520);
+      }
+      const safeReply = enforceArabicIfNeeded(reply, lang);
+      memory.push(key, "assistant", safeReply);
       resetStrikes(key);
-      return res.json({ ok: true, reply });
+      return res.json({ ok: true, reply: safeReply });
     }
 
-    if (isBankTransferIntent(userTextRaw)) {
+    if (isIptvIntent(userText)) {
+      const out = shortenNoQuestion(t(lang, "iptvCall"), 220);
+      const safeReply = enforceArabicIfNeeded(out, lang);
+      memory.push(key, "assistant", safeReply);
+      resetStrikes(key);
+      return res.json({ ok: true, reply: safeReply });
+    }
+
+    if (isLocationIntent(userText)) {
+      const reply = shortenNoQuestion(t(lang, "address"), 420);
+      const safeReply = enforceArabicIfNeeded(reply, lang);
+      memory.push(key, "assistant", safeReply);
+      resetStrikes(key);
+      return res.json({ ok: true, reply: safeReply });
+    }
+
+    if (isBankTransferIntent(userText)) {
       const reply = shortenNoQuestion(t(lang, "bankTransferHow"), 520);
-      memory.push(key, "assistant", reply);
+      const safeReply = enforceArabicIfNeeded(reply, lang);
+      memory.push(key, "assistant", safeReply);
       resetStrikes(key);
-      return res.json({ ok: true, reply });
+      return res.json({ ok: true, reply: safeReply });
     }
 
-    if (asksAboutDeliveryPaymentWarranty(userTextRaw)) {
-      const s = normMatch(userTextRaw);
+    const policyIntents = detectPolicyIntents(userText);
+    if (policyIntents.length) {
+      const lines = [];
+      if (policyIntents.includes("warranty")) {
+        const base = lang === "fr" ? "Garantie / SAV:" : "الضمان / SAV:";
+        lines.push(`${base} ${POLICY_LINKS.warranty}`);
+      }
+      if (policyIntents.includes("shipping")) {
+        const base = lang === "fr" ? "Livraison / Suivi:" : "التوصيل والتتبع:";
+        lines.push(`${base} ${POLICY_LINKS.shipping}`);
+      }
+      if (policyIntents.includes("return")) {
+        const base = lang === "fr" ? "Retour / Échange:" : "الإرجاع / التبديل:";
+        lines.push(`${base} ${POLICY_LINKS.return}`);
+      }
+
+      const reply = shortenNoQuestion(lines.join("\n"), 520);
+      const safeReply = enforceArabicIfNeeded(reply, lang);
+      memory.push(key, "assistant", safeReply);
+      resetStrikes(key);
+      return res.json({ ok: true, reply: safeReply });
+    }
+
+    if (asksAboutDeliveryPaymentWarranty(userText)) {
+      const s = normMatch(userText);
       const parts = [];
       const r = RULES_I18N[lang] || RULES_I18N.dzl;
 
@@ -5548,25 +6240,10 @@ app.post("/wanotifier", async (req, res) => {
       if (s.indexOf("wall mount") >= 0 || s.indexOf("support") >= 0 || s.indexOf("حامل") >= 0 || s.indexOf("براكي") >= 0) parts.push(r.wall_mount);
 
       const reply = shortenNoQuestion(parts.length ? parts.join("\n") : fallbackWithAgent(lang), 520);
-      memory.push(key, "assistant", reply);
+      const safeReply = enforceArabicIfNeeded(reply, lang);
+      memory.push(key, "assistant", safeReply);
       resetStrikes(key);
-      return res.json({ ok: true, reply });
-    }
-
-    if (isBuyIntent(userTextRaw)) {
-      supportModeStore.delete(key);
-      const direct = tryDirectOfferAnswer(userTextRaw, history, lang, key);
-      if (direct) {
-        const withForm = shortenNoQuestion(direct + "\n\n" + t(lang, "orderForm"), 520);
-        const reply = withForm || shortenNoQuestion(direct, 520);
-        memory.push(key, "assistant", reply);
-        resetStrikes(key);
-        return res.json({ ok: true, reply });
-      }
-      const reply = shortenNoQuestion(t(lang, "orderForm"), 520);
-      memory.push(key, "assistant", reply);
-      resetStrikes(key);
-      return res.json({ ok: true, reply });
+      return res.json({ ok: true, reply: safeReply });
     }
 
     const pending = pendingOrderStore.get(key);
@@ -5580,9 +6257,10 @@ app.post("/wanotifier", async (req, res) => {
       else if (lang === "ar") reply = "تمام. إلا ما كانش رقم الطلب، تقدر تعيط لينا: " + CONTACTS.calls.join(" / ") + ".";
       else reply = "Mzyan. Ila ma3ndkch رقم الطلب، t9dr t3ayet lina: " + CONTACTS.calls.join(" / ") + ".";
       const out = shortenNoQuestion(reply, 420);
-      memory.push(key, "assistant", out);
+      const safeReply = enforceArabicIfNeeded(out, lang);
+      memory.push(key, "assistant", safeReply);
       resetStrikes(key);
-      return res.json({ ok: true, reply: out });
+      return res.json({ ok: true, reply: safeReply });
     }
 
     if (pending && pending.waiting) {
@@ -5591,9 +6269,10 @@ app.post("/wanotifier", async (req, res) => {
         lastOrderAckStore.set(key, { at: Date.now(), orderNo });
         clearOrderAsk(key);
         const out = shortenNoQuestion(t(lang, "gotOrderNo"), 520);
-        memory.push(key, "assistant", out);
+        const safeReply = enforceArabicIfNeeded(out, lang);
+        memory.push(key, "assistant", safeReply);
         resetStrikes(key);
-        return res.json({ ok: true, reply: out });
+        return res.json({ ok: true, reply: safeReply });
       }
       const ctx = getCtx(key);
       const askedRecently = !shouldAskOrderNo(key);
@@ -5601,66 +6280,72 @@ app.post("/wanotifier", async (req, res) => {
       // Avoid looping on asking for order numbers; suggest alternatives after the first ask.
       if (askedRecently && lastAskType === "ask") {
         const out = shortenNoQuestion(alternativeSupportReply(lang), 420);
+        const safeReply = enforceArabicIfNeeded(out, lang);
         markOrderAsk(key, "alt");
-        memory.push(key, "assistant", out);
+        memory.push(key, "assistant", safeReply);
         resetStrikes(key);
-        return res.json({ ok: true, reply: out });
+        return res.json({ ok: true, reply: safeReply });
       }
       if (askedRecently) {
         const out = shortenNoQuestion(neutralOrderReply(lang), 220);
+        const safeReply = enforceArabicIfNeeded(out, lang);
         markOrderAsk(key, "neutral");
-        memory.push(key, "assistant", out);
+        memory.push(key, "assistant", safeReply);
         resetStrikes(key);
-        return res.json({ ok: true, reply: out });
+        return res.json({ ok: true, reply: safeReply });
       }
       const out = shortenNoQuestion(t(lang, "askOrderNo"), 420);
       markOrderAsk(key, "ask");
-      memory.push(key, "assistant", out);
-      return res.json({ ok: true, reply: out });
+      const safeReply = enforceArabicIfNeeded(out, lang);
+      memory.push(key, "assistant", safeReply);
+      return res.json({ ok: true, reply: safeReply });
     }
 
-    if (isCallMeIntent(userTextRaw)) {
+    if (isCallMeIntent(userText)) {
       const recent = lastOrderAckStore.get(key);
       const okRecent = Boolean(recent && recent.at && Date.now() - recent.at < PENDING_TTL_MS);
       const out = shortenNoQuestion(
         okRecent || !shouldAskOrderNo(key) ? t(lang, "callSoon") : t(lang, "callSoonNeedOrder"),
         420
       );
+      const safeReply = enforceArabicIfNeeded(out, lang);
       if (!okRecent && out === t(lang, "callSoonNeedOrder")) markOrderAsk(key, "callSoonNeedOrder");
-      memory.push(key, "assistant", out);
+      memory.push(key, "assistant", safeReply);
       resetStrikes(key);
-      return res.json({ ok: true, reply: out });
+      return res.json({ ok: true, reply: safeReply });
     }
 
-    if (isOrderStatusIntent(userTextRaw)) {
+    if (isOrderStatusIntent(userText)) {
       supportModeStore.delete(key);
       if (orderNo) {
         lastOrderAckStore.set(key, { at: Date.now(), orderNo });
         clearOrderAsk(key);
         const out = shortenNoQuestion(t(lang, "gotOrderNo"), 520);
-        memory.push(key, "assistant", out);
+        const safeReply = enforceArabicIfNeeded(out, lang);
+        memory.push(key, "assistant", safeReply);
         resetStrikes(key);
-        return res.json({ ok: true, reply: out });
+        return res.json({ ok: true, reply: safeReply });
       }
       pendingOrderStore.set(key, { waiting: true, at: Date.now() });
       const shouldAsk = shouldAskOrderNo(key);
       const out = shortenNoQuestion(shouldAsk ? t(lang, "askOrderNo") : neutralOrderReply(lang), 420);
       if (shouldAsk) markOrderAsk(key, "ask");
       else markOrderAsk(key, "neutral");
-      memory.push(key, "assistant", out);
-      return res.json({ ok: true, reply: out });
+      const safeReply = enforceArabicIfNeeded(out, lang);
+      memory.push(key, "assistant", safeReply);
+      return res.json({ ok: true, reply: safeReply });
     }
 
     const wasInSupport = supportModeStore.has(key);
-    if (isSupportIntent(userTextRaw)) supportModeStore.set(key, { at: Date.now() });
+    if (isSupportIntent(userText)) supportModeStore.set(key, { at: Date.now() });
 
     const shoppingSignal = Boolean(
-      resolveCategoryIntent(userTextRaw) ||
-      detectBrand(userTextRaw) ||
-      detectModel(userTextRaw) ||
-      extractTvSize(userTextRaw) ||
-      detectClass(userTextRaw) ||
-      detectCategory(userTextRaw)
+      resolveCategoryIntent(userText) ||
+      detectBrand(userText) ||
+      detectModel(userText) ||
+      extractTvSize(userText) ||
+      detectClass(userText) ||
+      detectCategory(userText)
     );
     if (wasInSupport && shoppingSignal) supportModeStore.delete(key);
 
@@ -5670,44 +6355,106 @@ app.post("/wanotifier", async (req, res) => {
       else if (lang === "fr") reply = "D’accord. Envoyez le modèle de l’appareil et décrivez le problème: ne s’allume pas, pas d’image, pas de son, ou code erreur";
       else reply = "Mzyan. Sift modèle dyal l-appareil w chrah l-mochkil: ma kaych3elch / ma kaynach tswira / ma kaynach s-sout / code d’erreur";
       const out = shortenNoQuestion(reply, 520);
-      memory.push(key, "assistant", out);
+      const safeReply = enforceArabicIfNeeded(out, lang);
+      memory.push(key, "assistant", safeReply);
       resetStrikes(key);
-      return res.json({ ok: true, reply: out });
+      return res.json({ ok: true, reply: safeReply });
     }
 
-    if (isPreferBest(userTextRaw) || isPreferCheapest(userTextRaw)) {
-      const prefer = isPreferCheapest(userTextRaw) ? "cheapest" : "best";
+    const priceFollowup = detectPriceIntent(userText) && !detectPriceNumberAmbiguity(userText)
+      ? replyWithLastOffersPrices(ctxData, lang)
+      : null;
+    if (priceFollowup) {
+      const out = shortenNoQuestion(priceFollowup, 520);
+      const safeReply = enforceArabicIfNeeded(out, lang);
+      memory.push(key, "assistant", safeReply);
+      resetStrikes(key);
+      return res.json({ ok: true, reply: safeReply });
+    }
+
+    const priceNumber = detectPriceNumberAmbiguity(userText);
+    if (Number.isFinite(priceNumber)) {
+      const reply = shortenNoQuestion(ambiguousPriceReply(priceNumber, lang, key, userText, userTextRaw), 520);
+      const safeReply = enforceArabicIfNeeded(reply, lang);
+      memory.push(key, "assistant", safeReply);
+      resetStrikes(key);
+      return res.json({ ok: true, reply: safeReply });
+    }
+
+    if (isPreferBest(userText) || isPreferCheapest(userText)) {
+      const prefer = isPreferCheapest(userText) ? "cheapest" : "best";
       const picked = pickFromLastShown(key, prefer);
 
       if (picked) {
         const line = formatOfferLine(picked.brand, picked.offer);
         const msg = prefer === "cheapest" ? t(lang, "preferCheapest") : t(lang, "preferBest");
         const out = shortenNoQuestion(msg + "\n" + line, 520);
-        memory.push(key, "assistant", out);
+        const safeReply = enforceArabicIfNeeded(out, lang);
+        memory.push(key, "assistant", safeReply);
         resetStrikes(key);
-        return res.json({ ok: true, reply: out });
+        return res.json({ ok: true, reply: safeReply });
       }
 
       const out = shortenNoQuestion(t(lang, "preferNeedContext"), 420);
-      memory.push(key, "assistant", out);
+      const safeReply = enforceArabicIfNeeded(out, lang);
+      memory.push(key, "assistant", safeReply);
       resetStrikes(key);
-      return res.json({ ok: true, reply: out });
+      return res.json({ ok: true, reply: safeReply });
     }
 
-    const directReply = tryDirectOfferAnswer(userTextRaw, history, lang, key);
+    const directReply = tryDirectOfferAnswer(userText, history, lang, key, userTextRaw);
     if (directReply) {
       const reply = shortenNoQuestion(directReply, 520);
-      memory.push(key, "assistant", reply);
+      const safeReply = enforceArabicIfNeeded(reply, lang);
+      memory.push(key, "assistant", safeReply);
       resetStrikes(key);
-      return res.json({ ok: true, reply });
+      return res.json({ ok: true, reply: safeReply });
     }
 
-    const siteReply = await tryWebsiteCatalogAnswer(userTextRaw, lang, key);
+    const siteReply = await tryWebsiteCatalogAnswer(userText, lang, key, userTextRaw);
     if (siteReply) {
       const reply = shortenNoQuestion(siteReply, 520);
-      memory.push(key, "assistant", reply);
+      const safeReply = enforceArabicIfNeeded(reply, lang);
+      memory.push(key, "assistant", safeReply);
       resetStrikes(key);
-      return res.json({ ok: true, reply });
+      return res.json({ ok: true, reply: safeReply });
+    }
+
+    const contactInfo = detectContactInfo(userTextRaw, ctxData);
+    if (contactInfo && contactInfo.isNewInfo) {
+      const prevCustomer = ctxData.customer || { name: null, phone: null, address: null };
+      const nextCustomer = {
+        name: contactInfo.extracted.name || prevCustomer.name || null,
+        phone: contactInfo.extracted.phone || prevCustomer.phone || null,
+        address: contactInfo.extracted.address || prevCustomer.address || null,
+        updatedAt: getNowMs(),
+      };
+      setCtx(key, Object.assign({}, ctxData, { customer: nextCustomer }));
+
+      const reply = shortenNoQuestion(contactInfoAckMessage(lang), 420);
+      const safeReply = enforceArabicIfNeeded(reply, lang);
+      memory.push(key, "assistant", safeReply);
+      resetStrikes(key);
+      return res.json({ ok: true, reply: safeReply });
+    }
+
+    if (isBuyIntent(userText)) {
+      supportModeStore.delete(key);
+      const direct = tryDirectOfferAnswer(userText, history, lang, key, userTextRaw);
+      const allowForm = shouldSendOrderForm(key);
+      let reply = "";
+      if (allowForm) {
+        reply = shortenNoQuestion(t(lang, "orderForm"), 520);
+        markOrderFormSent(key);
+      } else if (direct) {
+        reply = shortenNoQuestion(direct, 520);
+      } else {
+        reply = shortenNoQuestion(orderFormCooldownMessage(lang), 520);
+      }
+      const safeReply = enforceArabicIfNeeded(reply, lang);
+      memory.push(key, "assistant", safeReply);
+      resetStrikes(key);
+      return res.json({ ok: true, reply: safeReply });
     }
 
     let reply = await digibotLLMReply(userTextRaw, history, lang, key);
@@ -5720,7 +6467,8 @@ app.post("/wanotifier", async (req, res) => {
     }
 
     reply = shortenNoQuestion(reply, 520);
-    memory.push(key, "assistant", reply);
+    const safeReply = enforceArabicIfNeeded(reply, lang);
+    memory.push(key, "assistant", safeReply);
 
     const ms = Date.now() - t0;
     console.log(
@@ -5731,11 +6479,11 @@ app.post("/wanotifier", async (req, res) => {
         key: LOG_DEBUG ? key : undefined,
         phone: LOG_DEBUG ? phone : undefined,
         latencyMs: ms,
-        replyChars: reply.length,
+        replyChars: safeReply.length,
       })
     );
 
-    return res.json({ ok: true, reply });
+    return res.json({ ok: true, reply: safeReply });
   } catch (err) {
     const ms = Date.now() - t0;
     console.error(
@@ -5790,11 +6538,14 @@ export {
   normalizeMedia,
   getSizeFromNameSku,
   formatSize,
+  parseUserQueryForTest,
   offerFromWooProduct,
   createServerForTests,
   t,
   INITIAL_GREETING_TTL_MS,
   describeImage,
+  getOffersForTest,
+  getOffersIndexForTest,
 };
 
 function runSelfTests() {
@@ -6003,7 +6754,7 @@ async function processIncomingMedia({ mediaInfo, mediaMeta, msgType, lang, key, 
 
   if (route.imageLikely && normalizedMedia) {
     try {
-      const visionReply = await handleVisionMedia(normalizedMedia, lang, key, { reqId });
+      const visionReply = await handleVisionMedia(normalizedMedia, lang, key, { reqId, stripLinks: true });
       const reply = shortenNoQuestion(visionReply.reply, CFG.maxReplyChars);
       return { ...route, reply };
     } catch (e) {
