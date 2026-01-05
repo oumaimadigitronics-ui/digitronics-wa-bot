@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import { DEFAULTS } from '../../config/constants.js';
 
 function timingSafeEqual(a, b) {
   const abuf = Buffer.from(a);
@@ -36,7 +37,11 @@ export function authWanotifier(cfg) {
 
     const now = Math.floor(Date.now() / 1000);
     const skew = Math.abs(now - ts);
-    if (skew > cfg.WANOTIFIER_MAX_SKEW_SECONDS) {
+    const maxSkewSeconds = Math.max(
+      DEFAULTS.WANOTIFIER_MIN_TS_SKEW_SECONDS,
+      Number(cfg.WANOTIFIER_MAX_SKEW_SECONDS) || 0,
+    );
+    if (skew > maxSkewSeconds) {
       return res.status(401).json({ ok: false, error: 'Unauthorized' });
     }
 

@@ -48,3 +48,22 @@ test('rate limit windowing and reset', async (t) => {
   const r4 = await post();
   assert.strictEqual(r4.status, 200);
 });
+
+test('rate limit caps requests per IP', async (t) => {
+  const { server, url } = await start({ RATE_LIMIT_WINDOW_MS: 1000 });
+  t.after(() => server.close());
+
+  const post = (conversationId) => fetch(`${url}/wanotifier`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ conversationId }),
+  });
+
+  for (let i = 0; i < 10; i += 1) {
+    const res = await post(`ip-${i}`);
+    assert.strictEqual(res.status, 200);
+  }
+
+  const blocked = await post('ip-blocked');
+  assert.strictEqual(blocked.status, 429);
+});
