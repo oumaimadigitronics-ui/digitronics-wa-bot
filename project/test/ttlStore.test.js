@@ -12,3 +12,17 @@ test('TTLStore evicts LRU when exceeding max size', async () => {
   assert.strictEqual(store.get('a'), 1);
   assert.strictEqual(store.get('c'), 3);
 });
+
+test('TTLStore expires entries after TTL while keeping non-expired data', async () => {
+  const ttlMs = 30;
+  const store = new TTLStore({ maxSize: 5, ttlMs });
+
+  store.set('soon-expire', 'old');
+  await new Promise((resolve) => setTimeout(resolve, ttlMs - 10));
+
+  store.set('fresh', 'new');
+  await new Promise((resolve) => setTimeout(resolve, 15));
+
+  assert.strictEqual(store.get('soon-expire'), undefined);
+  assert.strictEqual(store.get('fresh'), 'new');
+});
