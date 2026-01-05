@@ -509,6 +509,10 @@ function t(lang, key, vars) {
       preferCheapest: "L’ar5as men had l-khtiyarat هو",
       preferNeedContext: "Sift size (b7al tv 50) wla model bach nختar l’a7san wla l’ar5as.",
       iptvCall: "IPTV kayn f service. 3afak 3ayet 0605123934.",
+      xiaomiRedirect: (x) => {
+        const brands = String((x || {}).brands || "TCL, Haier, Samsung");
+        return "Smah lia, ma kanso9osh Xiaomi. 3andna options 7sen b " + brands + ". Hna chi offres:";
+      },
     },
     fr: {
       askTextInsteadMedia: "Merci. Pour que je comprenne, envoyez un message écrit (sans audio/image).",
@@ -563,6 +567,10 @@ function t(lang, key, vars) {
       preferCheapest: "Le moins cher parmi ces options est",
       preferNeedContext: "Envoyez la taille (ex tv 50) ou le modèle pour choisir le meilleur ou le moins cher.",
       iptvCall: "Service IPTV disponible. Veuillez appeler 0605123934.",
+      xiaomiRedirect: (x) => {
+        const brands = String((x || {}).brands || "TCL, Haier et Samsung");
+        return "Désolé, nous ne vendons pas Xiaomi. Nous avons de meilleures options comme " + brands + ". Voici des offres dispo:";
+      },
     },
     ar: {
       askTextInsteadMedia: "شكراً. من فضلك ارسل رسالة مكتوبة (بدون صوت/صورة) باش نقدر نفهمك.",
@@ -616,6 +624,10 @@ function t(lang, key, vars) {
       preferCheapest: "الأرخص من هاد الخيارات هو",
       preferNeedContext: "صيفط الحجم (مثلاً tv 50) ولا الموديل باش نختار الأفضل ولا الأرخص.",
       iptvCall: "خدمة IPTV متوفرة. اتصل على 0605123934.",
+      xiaomiRedirect: (x) => {
+        const brands = String((x || {}).brands || "TCL و Haier و Samsung");
+        return "سمح ليا، ما كنبيعوش Xiaomi. عندنا اختيارات أحسن بحال " + brands + ". هاهي بعض العروض:";
+      },
     },
   };
 
@@ -2172,6 +2184,7 @@ const BRAND_ALIASES = Object.freeze([
   { brand: "HAIER", tokens: ["هاير"] },
   { brand: "LG", tokens: ["ال جي", "الجي"] },
   { brand: "HISENSE", tokens: ["هايسنس", "هاي سينس", "هايسينس"] },
+  { brand: "XIAOMI", tokens: ["xiaomi", "mi", "شاومي", "شومي"] },
 ]);
 
 function detectBrandAlias(text) {
@@ -4130,6 +4143,61 @@ function salesIntro(lang, ctx) {
   return s.trim();
 }
 
+function xiaomiAlternativeReply(lang, ctx, key) {
+  if (!OFFERS || !OFFERS.offers || !Object.keys(OFFERS.offers).length) return null;
+
+  const L = lang || "dzl";
+  const c = ctx || {};
+  const sizeVal = Number.isFinite(Number(c.size)) ? Number(c.size) : null;
+  const clsHint = c.cls || null;
+  const categoryHint = c.category || null;
+
+  const preferred = ["TCL", "HAIER", "SAMSUNG"];
+  const brandsAvailable = [];
+  const lines = [];
+  const offersShown = [];
+
+  for (let i = 0; i < preferred.length; i += 1) {
+    const preferredBrand = preferred[i];
+    const brand = findBrandByNorm(preferredBrand) || preferredBrand;
+    if (!OFFERS.offers[brand]) continue;
+
+    brandsAvailable.push(brand);
+    const pack = listOffersForBrand(brand, {
+      cls: clsHint,
+      category: categoryHint,
+      size: sizeVal,
+      limit: 1,
+      withOffers: true,
+    });
+    if (pack.lines.length) {
+      lines.push(
+        offersHeader(L, { brand, cls: clsHint || undefined, category: categoryHint || undefined, size: sizeVal || undefined }) +
+          "\n" +
+          pack.lines.join("\n\n")
+      );
+      offersShown.push(...(pack.offers || []).map((o) => ({ brand, model: o.model || "" })));
+    }
+  }
+
+  const brandsTxt = (brandsAvailable.length ? brandsAvailable : preferred).join(", ");
+  const intro = t(L, "xiaomiRedirect", { brands: brandsTxt });
+  const reply = ensureNoQuestion([intro, lines.join("\n\n")].filter(Boolean).join("\n\n"));
+
+  if (key) {
+    const ctxUpdate = {
+      lastBrand: undefined,
+      lastClass: clsHint || undefined,
+      lastCategory: categoryHint || undefined,
+      lastSize: sizeVal || undefined,
+    };
+    if (offersShown.length) ctxUpdate.lastOffersShown = offersShown;
+    setCtx(key, ctxUpdate);
+  }
+
+  return reply;
+}
+
 function listOffersForBrand(brand, opts) {
   const o = opts || {};
   const cls = o.cls || null;
@@ -5231,7 +5299,33 @@ function tryDirectOfferAnswer(userText, historyMsgs, lang, key) {
     return ensureNoQuestion(reply);
   }
 
+  const tivoliIntent = isTivoliOvenIntent(text);
+  const tivoliBrand = tivoliIntent ? findBrandByNorm("tivoli") || "TIVOLI" : null;
+  const ovenCategory = tivoliIntent ? findCategoryByNorm("cuisiniere") || "Cuisiniere" : null;
+  const ovenClass = tivoliIntent ? findClassByNorm("cuisiniere") || "Cuisiniere" : null;
+
+  const sizeVal = parsed.size;
+  const capacityVal = parsed.capacityLiters || extractCapacityLiters(text);
+
+  let brand = tivoliIntent ? tivoliBrand || parsed.brand || null : parsed.brand || null;
+  let category = tivoliIntent ? ovenCategory || parsed.category || null : parsed.category || null;
+  let cls = tivoliIntent ? ovenClass || parsed.cls || null : parsed.cls || null;
+  const tvHint = hasTvIntentTokens(text) || Number.isFinite(sizeVal);
+  const categoryNorm = normMatch(category || "");
+  const clsNorm = normMatch(cls || "");
+  const isTvCategory = categoryNorm === tvCanonNorm || categoryNorm === "tv";
+  const isTvClass = clsNorm === tvCanonNorm;
+  const isNonTvSignal = Boolean((category && !isTvCategory) || (cls && !isTvClass));
+
   const tvFlow = handleTvSizePriceFlow(parsed, lang, key);
+
+  if (normMatch(brand || "") === "xiaomi") {
+    const clsHint = tvHint ? tvCanon : cls;
+    const categoryHint = tvHint ? null : category;
+    const reply = xiaomiAlternativeReply(lang, { cls: clsHint, category: categoryHint, size: sizeVal }, key);
+    if (reply) return reply;
+  }
+
   const receiverIntent = isTvReceiverIntent(text);
   if (receiverIntent) {
     const receiverMsg = tvReceiverAnswerText(lang);
@@ -5242,24 +5336,6 @@ function tryDirectOfferAnswer(userText, historyMsgs, lang, key) {
   }
 
   if (tvFlow) return tvFlow;
-
-  const tivoliIntent = isTivoliOvenIntent(text);
-  const tivoliBrand = tivoliIntent ? findBrandByNorm("tivoli") || "TIVOLI" : null;
-  const ovenCategory = tivoliIntent ? findCategoryByNorm("cuisiniere") || "Cuisiniere" : null;
-  const ovenClass = tivoliIntent ? findClassByNorm("cuisiniere") || "Cuisiniere" : null;
-
-  let brand = tivoliIntent ? tivoliBrand || parsed.brand || null : parsed.brand || null;
-  let category = tivoliIntent ? ovenCategory || parsed.category || null : parsed.category || null;
-  let cls = tivoliIntent ? ovenClass || parsed.cls || null : parsed.cls || null;
-  const sizeVal = parsed.size;
-  const capacityVal = parsed.capacityLiters || extractCapacityLiters(text);
-
-  const tvHint = hasTvIntentTokens(text) || Number.isFinite(sizeVal);
-  const categoryNorm = normMatch(category || "");
-  const clsNorm = normMatch(cls || "");
-  const isTvCategory = categoryNorm === tvCanonNorm || categoryNorm === "tv";
-  const isTvClass = clsNorm === tvCanonNorm;
-  const isNonTvSignal = Boolean((category && !isTvCategory) || (cls && !isTvClass));
 
   if (category) resetCtxForCategoryChange(key, category, cls);
 
