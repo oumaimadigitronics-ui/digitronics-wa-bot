@@ -8,9 +8,19 @@ import assert from "assert";
 import { fileURLToPath } from "url";
 import { getFetch, getOpenAI, getNowMs, setDepsForTests } from "./src/deps.js";
 import { toFile } from "openai/uploads";
+import { timingSafeEqualStr, validateWanotifierHmac, validateWanotifierToken, allowStatusAccess } from "./lib/auth.js";
+import { fetchMedia, ipv4FromMaybeMapped, isPrivateHost, isPrivateIp, sniffImageMime } from "./lib/media.js";
+import { callOpenAIChat } from "./lib/openai.js";
+import { registerWanotifierRoute } from "./routes/wanotifier.js";
 
 const app = express();
-app.set("trust proxy", true);
+
+const trustProxyRaw = String(process.env.TRUST_PROXY ?? "loopback");
+let trustProxy = trustProxyRaw;
+if (trustProxyRaw === "true") trustProxy = true;
+else if (trustProxyRaw === "false") trustProxy = false;
+else if (/^\d+$/.test(trustProxyRaw)) trustProxy = Number(trustProxyRaw);
+app.set("trust proxy", trustProxy);
 
 const LOG_DEBUG = String(process.env.LOG_DEBUG || "0") === "1";
 const IS_TEST = String(process.env.NODE_ENV || "").toLowerCase() === "test";
@@ -27,6 +37,14 @@ function debugLog(event, payload) {
   } catch {
     console.log("[DEBUG]", event, base);
   }
+}
+
+function redactForLogs(value, maxLen = 500) {
+  let str = String(value || "");
+  str = str.replace(/data:[^;,]+;base64,[a-z0-9+/=]+/gi, (m) => `[data-url redacted len=${m.length}]`);
+  str = str.replace(/\d{9,}/g, (m) => `[digits redacted len=${m.length}]`);
+  if (str.length > maxLen) return `${str.slice(0, maxLen)}...[truncated len=${str.length}]`;
+  return str;
 }
 
 const {
@@ -74,6 +92,8 @@ const {
 
   OPENAI_VISION_MODEL = "",
   OPENAI_TRANSCRIBE_MODEL = "gpt-4o-mini-transcribe",
+
+  STATUS_TOKEN = "",
 } = process.env;
 
 if (REQUIRE_ENV && !OPENAI_API_KEY) {
@@ -104,6 +124,13 @@ const CFG = {
   wanotifierTsHeader: String(WANOTIFIER_TS_HEADER || "x-timestamp").toLowerCase(),
   wanotifierMaxSkewSec: Math.max(30, Number(WANOTIFIER_MAX_SKEW_SECONDS) || 300),
   wanotifierMediaUrl: String(WANOTIFIER_MEDIA_URL || "").trim(),
+  wanotifierMediaHost: (() => {
+    try {
+      return new URL(String(WANOTIFIER_MEDIA_URL || "")).hostname.toLowerCase();
+    } catch (err) {
+      return "";
+    }
+  })(),
 
   mediaMode: String(MEDIA_MODE || "auto").toLowerCase(),
   mediaFetchTimeoutMs: Math.max(1000, Number(MEDIA_FETCH_TIMEOUT_MS) || 8000),
@@ -111,8 +138,12 @@ const CFG = {
   mediaMaxBytesAudio: Number(MEDIA_MAX_BYTES_AUDIO) || MAX_AUDIO_BYTES,
   mediaAllowHttp: String(MEDIA_ALLOW_INSECURE_HTTP || "0") === "1",
 
+  offersRefreshToken: String(OFFERS_REFRESH_TOKEN || ""),
+
   openaiVisionModel: String(OPENAI_VISION_MODEL || "").trim(),
   openaiTranscribeModel: String(OPENAI_TRANSCRIBE_MODEL || "gpt-4o-mini-transcribe").trim(),
+
+  statusToken: String(STATUS_TOKEN || "").trim(),
 
   wcBase: String(WC_BASE_URL || "").replace(/\/$/g, ""),
   wcKey: String(WC_CONSUMER_KEY || ""),
@@ -120,6 +151,11 @@ const CFG = {
   wcPerPage: Math.max(10, Math.min(100, Number(WC_PER_PAGE) || 100)),
   wcStatus: String(WC_STATUS || "publish"),
 };
+
+if (REQUIRE_ENV && !CFG.wanotifierToken && !CFG.wanotifierHmacSecret) {
+  console.error("Missing wanotifier auth: configure WANOTIFIER_TOKEN or WANOTIFIER_HMAC_SECRET");
+  process.exit(1);
+}
 
 const FOCUS = {
   brand: String(FOCUS_BRAND || "").trim().toUpperCase(),
@@ -179,7 +215,7 @@ app.use(
 app.use((req, _res, next) => {
   if (LOG_DEBUG && req.rawBody) {
     const ct = String(req.headers["content-type"] || "");
-    const bodyPreview = String(req.rawBody || "").slice(0, 500);
+    const bodyPreview = redactForLogs(req.rawBody || "");
     console.log("[RAW BODY]", req.method, req.url, "CT=", ct, "BODY=", bodyPreview);
   }
   next();
@@ -313,27 +349,6 @@ function ensureNoQuestion(text) {
 function shortenNoQuestion(text, max) {
   const cleaned = stripUrlQueriesInText(stripQuestions(text));
   return shorten(ensureNoQuestion(cleaned), max || CFG.maxReplyChars);
-}
-
-function sniffImageMime(buf) {
-  if (!Buffer.isBuffer(buf)) return "";
-  if (buf.length >= 3 && buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff) return "image/jpeg";
-  if (
-    buf.length >= 8 &&
-    buf[0] === 0x89 &&
-    buf[1] === 0x50 &&
-    buf[2] === 0x4e &&
-    buf[3] === 0x47 &&
-    buf[4] === 0x0d &&
-    buf[5] === 0x0a &&
-    buf[6] === 0x1a &&
-    buf[7] === 0x0a
-  )
-    return "image/png";
-  if (buf.length >= 12 && buf.slice(0, 4).toString("ascii") === "RIFF" && buf.slice(8, 12).toString("ascii") === "WEBP")
-    return "image/webp";
-  if (buf.length >= 4 && buf.slice(0, 4).toString("ascii") === "GIF8") return "image/gif";
-  return "";
 }
 
 function formatSize(lang, size) {
@@ -2732,122 +2747,6 @@ function normalizeMediaInput(mediaVal) {
   };
 }
 
-function isPrivateHost(hostname) {
-  const h = String(hostname || "").toLowerCase();
-  if (!h) return true;
-  if (h === "localhost") return true;
-  if (h === "::1" || h === "0:0:0:0:0:0:0:1") return true;
-  if (/^127\./.test(h)) return true;
-  if (/^10\./.test(h)) return true;
-  if (/^192\.168\./.test(h)) return true;
-  if (/^172\.(1[6-9]|2[0-9]|3[0-1])\./.test(h)) return true;
-  if (/^(fc00|fd00)/.test(h)) return true;
-  if (/^fe80:/.test(h)) return true;
-  return false;
-}
-
-async function fetchMedia(url, opts = {}) {
-  if (!url) throw new Error("media_url_missing");
-  const allowHttp = opts.allowHttp ?? CFG.mediaAllowHttp;
-  const maxBytes = opts.maxBytes ?? CFG.mediaMaxBytesImage;
-  const timeoutMs = opts.timeoutMs ?? CFG.mediaFetchTimeoutMs;
-  const maxRedirects = Number.isInteger(opts.redirects) ? opts.redirects : 3;
-
-  if (String(url || "").startsWith("data:")) {
-    const m = String(url || "").match(/^data:([^;,]+)?;base64,(.+)$/i);
-    if (!m || !m[2]) throw new Error("media_data_invalid");
-    const buf = Buffer.from(m[2], "base64");
-    if (buf.length > maxBytes) throw new Error("media_too_large");
-    const sniffedMime = sniffImageMime(buf) || m[1] || "application/octet-stream";
-    return { buffer: buf, mimeType: sniffedMime, sizeBytes: buf.length, sniffedMime };
-  }
-
-  let currentUrl = url;
-  let redirects = 0;
-
-  while (redirects <= maxRedirects) {
-    const u = new URL(currentUrl);
-    if (u.protocol !== "http:" && u.protocol !== "https:") throw new Error("media_protocol_blocked");
-    if (u.protocol === "http:" && !allowHttp) throw new Error("media_http_blocked");
-    if (isPrivateHost(u.hostname)) throw new Error("media_ssrf_blocked");
-
-    let ctrl = null;
-    let timeoutId = null;
-    if (typeof AbortController !== "undefined") ctrl = new AbortController();
-    if (ctrl) timeoutId = setTimeout(() => ctrl.abort(), timeoutMs);
-
-    try {
-      const resp = await getFetch()(currentUrl, { method: "GET", redirect: "manual", signal: ctrl ? ctrl.signal : undefined });
-      if (!resp) throw new Error("media_fetch_failed");
-
-      const status = Number(resp.status || 0);
-      const loc = resp.headers && resp.headers.get && resp.headers.get("location");
-      if ([301, 302, 303, 307, 308].includes(status) && loc && redirects < maxRedirects) {
-        currentUrl = new URL(loc, currentUrl).toString();
-        redirects += 1;
-        continue;
-      }
-
-      if (!resp.ok) throw new Error("media_fetch_failed");
-
-      const mimeType = String((resp.headers && resp.headers.get && resp.headers.get("content-type")) || "").trim();
-      const contentLength = Number((resp.headers && resp.headers.get && resp.headers.get("content-length")) || NaN);
-      if (Number.isFinite(contentLength) && contentLength > maxBytes) {
-        console.warn(JSON.stringify({ level: "warn", msg: "media_blocked_size_header", sizeBytes: contentLength, maxBytes, host: u.hostname }));
-        throw new Error("media_too_large");
-      }
-
-      const chunks = [];
-      let sizeBytes = 0;
-      if (resp.body && typeof resp.body.getReader === "function") {
-        const reader = resp.body.getReader();
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          if (value) {
-            sizeBytes += value.length;
-            if (sizeBytes > maxBytes) {
-              console.warn(JSON.stringify({ level: "warn", msg: "media_blocked_size_stream", sizeBytes, maxBytes, host: u.hostname }));
-              throw new Error("media_too_large");
-            }
-            chunks.push(Buffer.from(value));
-          }
-        }
-      } else if (typeof resp.arrayBuffer === "function") {
-        const arrBuf = await resp.arrayBuffer();
-        const buf = Buffer.from(arrBuf);
-        sizeBytes = buf.length;
-        if (sizeBytes > maxBytes) throw new Error("media_too_large");
-        chunks.push(buf);
-      } else {
-        throw new Error("media_fetch_failed");
-      }
-
-      const buffer = Buffer.concat(chunks);
-      const sniffedMime = sniffImageMime(buffer);
-      const finalMime =
-        sniffedMime || mimeType || (path.extname(u.pathname || "").match(/\.jpe?g|\.png|\.webp|\.gif/i) ? "image/jpeg" : "application/octet-stream");
-
-      console.log(
-        JSON.stringify({
-          level: "info",
-          msg: "media_fetched",
-          host: u.hostname,
-          sizeBytes,
-          contentType: mimeType || null,
-          sniffedMime: sniffedMime || null,
-        })
-      );
-
-      return { buffer, mimeType: finalMime, sizeBytes, sniffedMime };
-    } finally {
-      if (timeoutId) clearTimeout(timeoutId);
-    }
-  }
-
-  throw new Error("media_redirect_loop");
-}
-
 async function downloadMediaBuffer(mediaInput) {
   const m = mediaInput || {};
   if (typeof mediaFetcherOverride === "function") return mediaFetcherOverride(m);
@@ -2863,7 +2762,7 @@ async function downloadMediaBuffer(mediaInput) {
     return { buffer: buf, mimeType: sniffedMime, filename: m.filename || null };
   }
 
-  const fetched = await fetchMedia(url, {
+  const fetched = await fetchMedia(url, CFG, {
     maxBytes: CFG.mediaMaxBytesImage,
     timeoutMs: CFG.mediaFetchTimeoutMs,
     allowHttp: CFG.mediaAllowHttp,
@@ -2930,7 +2829,7 @@ function inferMimeFromPath(filepath, fallbackMime) {
 async function downloadToTemp(url, filepath) {
   const target = path.resolve(filepath);
   fs.mkdirSync(path.dirname(target), { recursive: true });
-  const fetched = await fetchMedia(url, {
+  const fetched = await fetchMedia(url, CFG, {
     maxBytes: CFG.mediaMaxBytesAudio,
     timeoutMs: CFG.mediaFetchTimeoutMs,
     allowHttp: CFG.mediaAllowHttp,
@@ -2952,7 +2851,7 @@ async function downloadAudioBuffer(mediaInput, reqId) {
   const tmpFile = path.join(dir, `audio${ext}`);
   let sizeBytes = 0;
   try {
-    const fetched = await fetchMedia(url, {
+    const fetched = await fetchMedia(url, CFG, {
       maxBytes: CFG.mediaMaxBytesAudio,
       timeoutMs: CFG.mediaFetchTimeoutMs,
       allowHttp: CFG.mediaAllowHttp,
@@ -3168,9 +3067,19 @@ function toImageUrlString(image, mime = "image/jpeg") {
 async function describeImage({ image, model }, openaiClient) {
   const client = openaiClient || getOpenAIClient();
   const imageUrl = toImageUrlString(image);
-  console.log("vision image typeof:", typeof image, "isBuffer:", Buffer.isBuffer(image));
-  if (typeof imageUrl === "string" && /^(data:|https?:)/i.test(imageUrl)) {
-    console.log("vision image_url preview:", imageUrl.slice(0, 80));
+  if (LOG_DEBUG) {
+    const urlLabel = typeof imageUrl === "string" && /^(data:|https?:)/i.test(imageUrl)
+      ? `${imageUrl.slice(0, 5)}:${imageUrl.length}`
+      : null;
+    console.log(
+      JSON.stringify({
+        level: "debug",
+        msg: "vision_image_input",
+        kind: typeof image,
+        isBuffer: Buffer.isBuffer(image),
+        urlLabel,
+      })
+    );
   }
   const resp = await client.responses.create({
     model: model || pickVisionModel(),
@@ -3228,9 +3137,19 @@ async function analyzeProductImage(imageBytes, mimeType, opts = {}) {
       ? ""
       : " Respond with JSON only. Do not add explanations, code fences, or non-JSON text.";
     const imageUrl = toImageUrlString(imgBuf, safeMime);
-    console.log("vision image typeof:", typeof imageBytes, "isBuffer:", Buffer.isBuffer(imageBytes));
-    if (typeof imageUrl === "string" && /^(data:|https?:)/i.test(imageUrl)) {
-      console.log("vision image_url preview:", imageUrl.slice(0, 80));
+    if (LOG_DEBUG) {
+      const urlLabel = typeof imageUrl === "string" && /^(data:|https?:)/i.test(imageUrl)
+        ? `${imageUrl.slice(0, 5)}:${imageUrl.length}`
+        : null;
+      console.log(
+        JSON.stringify({
+          level: "debug",
+          msg: "vision_image_input_analyze",
+          kind: typeof imageBytes,
+          isBuffer: Buffer.isBuffer(imageBytes),
+          urlLabel,
+        })
+      );
     }
     const payload = {
       model,
@@ -3622,7 +3541,7 @@ async function deriveMediaText(mediaInput, lang, reqId) {
       let sizeBytes = 0;
 
       if (normalized.url) {
-        const fetched = await fetchMedia(normalized.url, {
+        const fetched = await fetchMedia(normalized.url, CFG, {
           maxBytes: CFG.mediaMaxBytesImage,
           timeoutMs: CFG.mediaFetchTimeoutMs,
           allowHttp: CFG.mediaAllowHttp,
@@ -5963,25 +5882,6 @@ function buildIntentHintsForLLM(userText, historyMsgs, key) {
   return parts.length ? parts.join("\n") : null;
 }
 
-async function callOpenAIChat(messages, maxOut) {
-  const maxTokens = Number(maxOut) || 380;
-  try {
-    return await getOpenAIClient().chat.completions.create({
-      model: OPENAI_MODEL,
-      messages,
-      temperature: 0.3,
-      max_completion_tokens: maxTokens,
-    });
-  } catch (_e) {
-    return await getOpenAIClient().chat.completions.create({
-      model: OPENAI_MODEL,
-      messages,
-      temperature: 0.3,
-      max_tokens: maxTokens,
-    });
-  }
-}
-
 function withTimeout(promise, ms) {
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error("timeout")), Number(ms) || 10000);
@@ -6021,63 +5921,6 @@ async function digibotLLMReply(userText, historyMsgs, lang, key) {
     if (direct) return ensureNoQuestion(direct);
     return ensureNoQuestion(fallbackWithAgent(lang));
   }
-}
-
-function validateWanotifierToken(req) {
-  const token = CFG.wanotifierToken;
-  if (!token) return true;
-
-  const h = req.headers || {};
-  const headerToken = String(h["x-wanotifier-token"] || "");
-  const auth = String(h["authorization"] || "");
-  if (headerToken && headerToken === token) return true;
-
-  if (auth) {
-    const parts = auth.split(" ");
-    if (parts.length === 2 && parts[0].toLowerCase() === "bearer" && parts[1] === token) return true;
-  }
-
-  return false;
-}
-
-function timingSafeEqualStr(a, b) {
-  try {
-    const sa = Buffer.from(String(a || ""), "utf8");
-    const sb = Buffer.from(String(b || ""), "utf8");
-    if (sa.length !== sb.length) return false;
-    return crypto.timingSafeEqual(sa, sb);
-  } catch {
-    return false;
-  }
-}
-
-function validateWanotifierHmac(req) {
-  const secret = CFG.wanotifierHmacSecret;
-  if (!secret) return true;
-
-  const h = req.headers || {};
-  const sig = String(h[CFG.wanotifierHmacHeader] || "").trim();
-  const ts = String(h[CFG.wanotifierTsHeader] || "").trim();
-  if (!sig || !ts) return false;
-
-  const tsNum = Number(ts);
-  if (!Number.isFinite(tsNum)) return false;
-
-  const nowSec = Math.floor(getNowMs() / 1000);
-  const skew = Math.abs(nowSec - tsNum);
-  if (skew > CFG.wanotifierMaxSkewSec) return false;
-
-  const raw = String(req.rawBody || "");
-  const base = ts + "." + raw;
-
-  let expected = "";
-  try {
-    expected = crypto.createHmac("sha256", secret).update(base, "utf8").digest("hex");
-  } catch {
-    return false;
-  }
-
-  return timingSafeEqualStr(sig, expected);
 }
 
 let maintenanceTimer = null;
@@ -6161,7 +6004,8 @@ process.on("SIGINT", () => shutdown("SIGINT"));
 
 app.get("/", (_req, res) => res.status(200).send("OK - DigiBot running"));
 
-app.get("/health", (_req, res) => {
+app.get("/health", (req, res) => {
+  if (!allowStatusAccess(req, res, CFG, REQUIRE_ENV)) return;
   res.status(200).json({
     ok: true,
     at: nowIso(),
@@ -6170,13 +6014,15 @@ app.get("/health", (_req, res) => {
   });
 });
 
-app.get("/ready", (_req, res) => {
+app.get("/ready", (req, res) => {
+  if (!allowStatusAccess(req, res, CFG, REQUIRE_ENV)) return;
   const totalRows = Object.values((OFFERS && OFFERS.offers) || {}).reduce((acc, arr) => acc + ((arr && arr.length) || 0), 0);
   const ok = Boolean(totalRows > 0 && lastOffersSync && lastOffersSync.ok);
   res.status(ok ? 200 : 503).json({ ok, totalRows, lastOffersSync });
 });
 
-app.get("/offers-status", (_req, res) => {
+app.get("/offers-status", (req, res) => {
+  if (!allowStatusAccess(req, res, CFG, REQUIRE_ENV)) return;
   const totalRows = Object.values((OFFERS && OFFERS.offers) || {}).reduce((acc, arr) => acc + ((arr && arr.length) || 0), 0);
   res.json({
     ok: true,
@@ -6192,27 +6038,53 @@ app.get("/offers-status", (_req, res) => {
   });
 });
 
+const refreshThrottle = new Map();
+
 app.post("/refresh-offers", async (req, res) => {
-  if (OFFERS_REFRESH_TOKEN) {
-    const token = String(req.headers["x-refresh-token"] || "");
-    if (token !== OFFERS_REFRESH_TOKEN) return res.status(401).json({ ok: false, error: "Unauthorized" });
+  const tokenExpected = CFG.offersRefreshToken;
+  if (REQUIRE_ENV && !tokenExpected) {
+    return res.status(403).json({ ok: false, error: "Forbidden", message: "OFFERS_REFRESH_TOKEN must be set" });
   }
+
+  if (tokenExpected) {
+    const headerToken = String(req.headers["x-refresh-token"] || "");
+    const auth = String(req.headers["authorization"] || "");
+    const bearer = auth.toLowerCase().startsWith("bearer ") ? auth.slice(7) : "";
+    const provided = headerToken || bearer;
+    if (!provided || !timingSafeEqualStr(provided, tokenExpected)) {
+      return res.status(401).json({ ok: false, error: "Unauthorized" });
+    }
+  }
+
+  const ip = String(req.ip || "");
+  const now = Date.now();
+  const entry = refreshThrottle.get(ip) || { count: 0, ts: now };
+  if (now - entry.ts > 60000) {
+    entry.count = 0;
+    entry.ts = now;
+  }
+  entry.count += 1;
+  refreshThrottle.set(ip, entry);
+  if (entry.count > 2) {
+    return res.status(429).json({ ok: false, error: "Too Many Requests" });
+  }
+
   await refreshOffersSafe();
   return res.json({ ok: true, lastOffersSync });
 });
 
-app.post("/wanotifier", async (req, res) => {
+const wanotifierHandler = async (req, res) => {
   const reqId = stableReqId();
   const t0 = Date.now();
 
   res.setHeader("x-request-id", reqId);
 
   try {
-    if (!validateWanotifierToken(req)) {
+    if (!validateWanotifierToken(req, CFG)) {
       console.warn(`[AUTH FAIL][${reqId}] wanotifier token mismatch`);
       return res.status(401).json({ ok: false, error: "Unauthorized" });
     }
-    if (!validateWanotifierHmac(req)) {
+    if (!validateWanotifierHmac(req, CFG)) {
       console.warn(`[AUTH FAIL][${reqId}] wanotifier hmac invalid`);
       return res.status(401).json({ ok: false, error: "Unauthorized" });
     }
@@ -6656,7 +6528,9 @@ app.post("/wanotifier", async (req, res) => {
     );
     return res.status(500).json({ ok: false, error: "Server error" });
   }
-});
+};
+
+registerWanotifierRoute(app, wanotifierHandler);
 
 export {
   rankOffers,
@@ -6899,7 +6773,7 @@ async function processIncomingMedia({ mediaInfo, mediaMeta, msgType, lang, key, 
       const transcriptText = await transcribeAudioFile((audioDl && audioDl.filePath) || tmpFile, safeMime, lang);
       if (!transcriptText) throw new Error("transcription_empty");
       const userTextRaw = String(transcriptText || "").slice(0, 2000);
-      const preview = userTextRaw.slice(0, 120);
+      const preview = redactForLogs(userTextRaw).slice(0, 120);
       console.log(
         JSON.stringify({ level: "info", msg: "audio_transcribed", reqId, textPreview: preview, sizeBytes, mimeType: safeMime })
       );

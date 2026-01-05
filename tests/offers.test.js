@@ -808,12 +808,13 @@ test("media-only image wanotifier derives text and replies", async () => {
   const openai = {
     responses: { create: async () => ({ output_text: "TV SAMSUNG 55 4K" }) },
   };
+  const mediaUrl = `data:image/jpeg;base64,${fakeJpeg.toString("base64")}`;
   const { close, urlBase } = await createServerForTests({ fetchImpl, openai, env: { MEDIA_ALLOW_INSECURE_HTTP: "1" } });
   const resp = await fetch(urlBase + "/wanotifier", {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({
-      data: { type: "image", media: { media_url: "http://remote/image.jpg" } },
+      data: { type: "image", media: { media_url: mediaUrl } },
       wa_number: "+21260000000",
     }),
   });
@@ -840,12 +841,13 @@ test("media-only audio wanotifier transcribes and replies", async () => {
   const openai = {
     audio: { transcriptions: { create: async () => ({ text: "salam bghit tv 55" }) } },
   };
+  const mediaUrl = `data:audio/mpeg;base64,${fakeMp3.toString("base64")}`;
   const { close, urlBase } = await createServerForTests({ fetchImpl, openai, env: { MEDIA_ALLOW_INSECURE_HTTP: "1" } });
   const resp = await fetch(urlBase + "/wanotifier", {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({
-      data: { type: "audio", media: { media_url: "http://remote/audio.mp3" } },
+      data: { type: "audio", media: { media_url: mediaUrl } },
       wa_number: "+21260000000",
     }),
   });
@@ -866,7 +868,7 @@ test("media failures fall back to askTextInsteadMedia", async () => {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({
-      data: { type: "image", media: { media_url: "http://remote/image.jpg" } },
+      data: { type: "image", media: { media_url: "data:image/png;base64,AAA" } },
       wa_number: "+21260000000",
     }),
   });
