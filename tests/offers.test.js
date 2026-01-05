@@ -200,6 +200,21 @@ test("tv knowledge is included for size-only queries", () => {
   assert.ok(reply.includes("Google TV") || reply.includes("QLED"));
 });
 
+test("xiaomi queries redirect to stocked alternatives", () => {
+  setOffersForTest({
+    TCL: [{ model: "TCL-50G", price: 4000, stock: 2, class: "Tv", category: "Tv", size: 50, link: "http://x/tcl50" }],
+    HAIER: [{ model: "HAIER-50S", price: 3800, stock: 1, class: "Tv", category: "Tv", size: 50, link: "http://x/haier50" }],
+    SAMSUNG: [{ model: "SM-50Q", price: 4500, stock: 1, class: "Tv", category: "Tv", size: 50, link: "http://x/sm50" }],
+  });
+
+  const reply = tryDirectOfferAnswer("xiaomi 50", [], "fr", "xiaomi_alt");
+
+  assert.ok(reply.toLowerCase().includes("xiaomi"));
+  assert.ok(reply.toLowerCase().includes("tcl"));
+  assert.ok(reply.toLowerCase().includes("haier"));
+  assertNoQuestionMarks(reply);
+});
+
 test("stripQuestions removes trailing questions", () => {
   const cleaned = stripQuestions("Wash bghiti?\nChno size?\n\n");
   assert.ok(!cleaned.includes("?"));
