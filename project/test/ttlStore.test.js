@@ -25,6 +25,7 @@ test('TTLStore expires entries after TTL while keeping non-expired data', async 
 
   assert.strictEqual(store.get('soon-expire'), undefined);
   assert.strictEqual(store.get('fresh'), 'new');
+});
 test('TTLStore prunes expired entries on set without reads', async () => {
   const originalNow = Date.now;
   let now = 0;

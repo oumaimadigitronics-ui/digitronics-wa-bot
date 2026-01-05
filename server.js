@@ -29,6 +29,9 @@ function debugLog(event, payload) {
   }
 }
 
+const DEFAULT_ORDER_FORM_URL =
+  "https://docs.google.com/forms/d/e/1FAIpQLScmDNagYSpUPfsIT2s2t35KH7U1OWSNkUCIWmcJJm1R_aITQQ/viewform?usp=header";
+
 const {
   PORT = "3000",
 
@@ -44,7 +47,7 @@ const {
   WC_PER_PAGE = "100",
   WC_STATUS = "publish",
 
-  ORDER_FORM_URL = "https://docs.google.com/forms/d/e/1FAIpQLScmDNagYSpUPfsIT2s2t35KH7U1OWSNkUCIWmcJJm1R_aITQQ/viewform?usp=header",
+  ORDER_FORM_URL = DEFAULT_ORDER_FORM_URL,
 
   RATE_LIMIT_WINDOW_MS = "60000",
   RATE_LIMIT_MAX = "25",
