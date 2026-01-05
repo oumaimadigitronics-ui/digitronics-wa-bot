@@ -9,6 +9,12 @@ export class TTLStore {
     return entry.expires < Date.now();
   }
 
+  _pruneExpired() {
+    for (const [key, entry] of this.map.entries()) {
+      if (this._isExpired(entry)) this.map.delete(key);
+    }
+  }
+
   get(key) {
     const entry = this.map.get(key);
     if (!entry) return undefined;
@@ -22,12 +28,14 @@ export class TTLStore {
   }
 
   set(key, value) {
+    this._pruneExpired();
     if (this.map.has(key)) this.map.delete(key);
     this.map.set(key, { value, expires: Date.now() + this.ttlMs });
     this._pruneSize();
   }
 
   _pruneSize() {
+    this._pruneExpired();
     while (this.map.size > this.maxSize) {
       const oldestKey = this.map.keys().next().value;
       this.map.delete(oldestKey);
