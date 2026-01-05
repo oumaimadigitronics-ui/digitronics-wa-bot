@@ -1,6 +1,8 @@
 export const DEFAULTS = {
-  RATE_LIMIT_MAX_SKEW: 300,
-  RATE_LIMIT_MIN_SKEW: 30,
+  // Default timestamp skew allowance for WANotifier HMAC validation (seconds)
+  WANOTIFIER_MAX_TS_SKEW_SECONDS: 300,
+  // Minimum allowable skew to prevent disabling timestamp validation entirely (seconds)
+  WANOTIFIER_MIN_TS_SKEW_SECONDS: 30,
   RATE_LIMIT_MAX: 5,
   RATE_LIMIT_WINDOW_MS: 60_000,
   WANOTIFIER_HMAC_HEADER: 'x-signature',
