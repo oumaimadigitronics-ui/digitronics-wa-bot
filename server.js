@@ -1036,6 +1036,12 @@ function buildConversationKey(fields, req, body) {
     threadId: threadId || null,
   };
 
+  if (chatId) {
+    const key = "chat:" + chatId.slice(0, 120);
+    debugLog("conversation_key", Object.assign({}, logPayload, { used: "chatId", key }));
+    return key;
+  }
+
   if (phone) {
     const key = "phone:" + stableHash(phone);
     debugLog("conversation_key", Object.assign({}, logPayload, { used: "phone", key }));
@@ -1063,12 +1069,6 @@ function buildConversationKey(fields, req, body) {
   if (sender) {
     const key = "sender:" + stableHash(sender);
     debugLog("conversation_key", Object.assign({}, logPayload, { used: "sender", key }));
-    return key;
-  }
-
-  if (chatId) {
-    const key = "chat:" + chatId.slice(0, 120);
-    debugLog("conversation_key", Object.assign({}, logPayload, { used: "chatId", key }));
     return key;
   }
 
@@ -1176,6 +1176,7 @@ function normalizeIncoming(body, req) {
 
   return {
     key,
+    chatId: chatId ? String(chatId).trim() : null,
     phone: phone || "unknown",
     text: String(textRaw || "").trim(),
     media,
@@ -1344,12 +1345,79 @@ class Memory {
   }
 }
 
+class ChatIntentMemory {
+  constructor(opts) {
+    const o = opts || {};
+    this.ttlMs = Math.max(30 * 60 * 1000, Number(o.ttlMs) || 45 * 60 * 1000);
+    this.store = new Map();
+  }
+
+  defaultState() {
+    return {
+      intent: null,
+      category: null,
+      brand: null,
+      specs: {},
+      budget: null,
+      location: null,
+      priorities: [],
+      lastUpdated: 0,
+    };
+  }
+
+  normalizeKey(chatId) {
+    const s = String(chatId || "").trim();
+    return s ? s.slice(0, 180) : null;
+  }
+
+  get(chatId) {
+    const k = this.normalizeKey(chatId);
+    if (!k) return this.defaultState();
+    const entry = this.store.get(k);
+    if (!entry) return this.defaultState();
+    if (!entry.at || Date.now() - entry.at > this.ttlMs) {
+      this.store.delete(k);
+      return this.defaultState();
+    }
+    return Object.assign({}, this.defaultState(), entry.data || {});
+  }
+
+  mergeSnapshot(chatId, patch) {
+    const current = this.get(chatId);
+    const specs = Object.assign({}, current.specs || {});
+    if (patch && patch.specs) Object.assign(specs, patch.specs);
+    const priorities = Array.from(new Set([...(current.priorities || []), ...((patch && patch.priorities) || [])])).filter(Boolean);
+    const merged = Object.assign({}, current, patch || {}, {
+      specs,
+      priorities,
+      lastUpdated: patch && Object.keys(patch).length ? Date.now() : current.lastUpdated,
+    });
+    return merged;
+  }
+
+  update(chatId, patch) {
+    const k = this.normalizeKey(chatId);
+    if (!k) return this.defaultState();
+    const merged = this.mergeSnapshot(chatId, patch);
+    this.store.set(k, { data: merged, at: Date.now() });
+    return merged;
+  }
+
+  cleanup() {
+    const now = Date.now();
+    for (const [k, v] of this.store.entries()) {
+      if (!v || !v.at || now - v.at > this.ttlMs) this.store.delete(k);
+    }
+  }
+}
+
 const memory = new Memory({
   ttlMs: CFG.memoryTtlMs,
   maxMessages: CFG.memoryMaxMessages,
   persist: CFG.memoryPersist,
   dir: CFG.memoryDir,
 });
+const chatMemory = new ChatIntentMemory({ ttlMs: Math.min(CFG.memoryTtlMs, 60 * 60 * 1000) });
 
 const ctxStore = new Map();
 const CTX_TTL_MS = 24 * 60 * 60 * 1000;
@@ -6152,7 +6220,11 @@ function buildSystemPrompt(offersSubset, lang, opts) {
     "- If client asks for photo/picture/image: ONLY provide product link if present, else write ONE short instruction sentence without question marks.\n" +
     "- ALWAYS recommend exactly 3 options, never more or less.\n" +
     "- Do NOT output any URL in normal replies. Only output a product link in the photo flow handled outside.\n" +
-    "- Do NOT ask questions. Never output question marks.\n\n" +
+    "- Avoid questions unless confidence rules require ONE clarifying question; never ask more than one question.\n\n" +
+    "- Keep each chat strictly isolated by chat_id. Never reuse hints from other chat_ids.\n" +
+    "- Accumulate multi-message details (brand, category/class, size/specs, budget, priorities) within the same chat_id.\n" +
+    "- Use the confidence score provided in the extra system message to decide if a SINGLE clarifying question is needed. Never ask more than one question.\n" +
+    "- If the latest message is unrelated to the ongoing topic, prefer a short disambiguation and keep prior memory intact.\n\n" +
     "TV OS RULES:\n" +
     "- Google TV only when the product name or specs explicitly mention \"Google TV\".\n" +
     "- If the name/specs say \"Android TV\", state clearly it is Android TV (own interface/store), NOT Google TV.\n" +
@@ -6214,6 +6286,109 @@ function buildIntentHintsForLLM(userText, historyMsgs, key) {
   return parts.length ? parts.join("\n") : null;
 }
 
+function buildMemorySummary(state) {
+  const s = state || {};
+  const segments = [];
+  if (s.intent) segments.push("intent: " + s.intent);
+  if (s.category) segments.push("category: " + s.category);
+  if (s.brand) segments.push("brand: " + s.brand);
+  if (s.specs && s.specs.size) segments.push("size: " + s.specs.size + '\"');
+  if (s.specs && s.specs.model) segments.push("model: " + s.specs.model);
+  if (s.specs && s.specs.capacity_l) segments.push("capacity: " + s.specs.capacity_l + " L");
+  if (Number.isFinite(s.budget)) segments.push("budget: " + s.budget + " dh");
+  if (s.location) segments.push("location: " + s.location);
+  if (Array.isArray(s.priorities) && s.priorities.length) segments.push("priorities: " + s.priorities.join(", "));
+  return segments.length ? "Memory Summary => " + segments.join(" | ") : "Memory Summary => none";
+}
+
+function deriveMemoryPatchFromText(text, state) {
+  const parsed = parseUserQuery(text, { ctx: state || {} });
+  const patch = {};
+
+  const intent = parsed.intentCategory || parsed.intentClass || parsed.category || parsed.cls || null;
+  if (intent) patch.intent = intent;
+  if (parsed.category || parsed.cls) patch.category = parsed.category || parsed.cls;
+  if (parsed.brand) patch.brand = parsed.brand;
+
+  const specs = {};
+  if (Number.isFinite(parsed.size)) specs.size = parsed.size;
+  if (parsed.model) specs.model = parsed.model;
+  if (Number.isFinite(parsed.capacityLiters)) specs.capacity_l = parsed.capacityLiters;
+  if (Object.keys(specs).length) patch.specs = specs;
+
+  if (Number.isFinite(parsed.budgetDh)) patch.budget = parsed.budgetDh;
+
+  const contact = detectContactInfo(text, state || {});
+  if (contact && contact.extracted && contact.extracted.address && contact.extracted.address.length >= 3) {
+    patch.location = contact.extracted.address;
+  }
+
+  const priorities = [];
+  if (parsed.priceIntent || parsed.budgetDh) priorities.push("price");
+  if (parsed.wantsPhotoLink) priorities.push("photo_link");
+  if (priorities.length) patch.priorities = priorities;
+
+  return { parsed, patch };
+}
+
+function isUnrelatedFragment(text, parsed, memoryState) {
+  const raw = normMatch(text || "");
+  if (!raw) return false;
+  if (isAcknowledgementMessage(text)) return false;
+  const hasSignals =
+    parsed.brand ||
+    parsed.category ||
+    parsed.cls ||
+    parsed.model ||
+    Number.isFinite(parsed.size) ||
+    Number.isFinite(parsed.budgetDh) ||
+    parsed.intentCategory ||
+    parsed.intentClass;
+  if (hasSignals) return false;
+  const hasMemory = Boolean(memoryState && memoryState.lastUpdated);
+  if (!hasMemory) return false;
+  if (raw.length <= 5) return true;
+  const genericTokens = ["ok", "merci", "thanks", "tnx", "mrc", "hhh", "lol"];
+  for (let i = 0; i < genericTokens.length; i += 1) {
+    if (includesToken(raw, genericTokens[i])) return true;
+  }
+  return false;
+}
+
+function clarifyingQuestionForState(state) {
+  const s = state || {};
+  if (!s.category && !s.brand) return "Should we continue with the current product topic or start a new one?";
+  if (s.category && !s.brand) return `Which brand do you prefer for ${s.category}?`;
+  if (s.brand && (!s.specs || !s.specs.size) && normMatch(s.category || "") === normMatch(OFFERS_INDEX.classCanon.tv || "tv"))
+    return `What screen size do you want for ${s.brand}?`;
+  if (s.brand && !s.category) return `Which category or product type do you want from ${s.brand}?`;
+  return "Do you want to continue with this selection or adjust brand/size?";
+}
+
+function computeConfidenceDecision(state, parsed) {
+  const s = state || {};
+  let score = 0.2;
+  if (s.intent) score += 0.1;
+  if (s.category) score += 0.25;
+  if (s.brand) score += 0.2;
+  if (s.specs && (s.specs.size || s.specs.model)) score += 0.15;
+  if (Number.isFinite(s.budget)) score += 0.1;
+  if (Array.isArray(s.priorities) && s.priorities.includes("price")) score += 0.05;
+  if (parsed && parsed.modelHit && parsed.modelHit.hasStock) score += 0.1;
+  if (!s.category && parsed && parsed.intentCategory) score -= 0.05;
+  if (score > 1) score = 1;
+  if (score < 0) score = 0;
+
+  let policy = "direct";
+  if (score >= 0.75) policy = "direct";
+  else if (score >= 0.5) policy = "clarify";
+  else policy = "reanchor";
+
+  const question = clarifyingQuestionForState(s);
+
+  return { score, policy, question };
+}
+
 async function callOpenAIChat(messages, maxOut) {
   const maxTokens = Number(maxOut) || 380;
   try {
@@ -6248,12 +6423,27 @@ function withTimeout(promise, ms) {
   });
 }
 
-async function digibotLLMReply(userText, historyMsgs, lang, key) {
+async function digibotLLMReply(userText, historyMsgs, lang, key, opts = {}) {
   const hist = Array.isArray(historyMsgs) ? historyMsgs : [];
+  const memorySummary = opts.memorySummary || null;
+  const decision = opts.confidence || null;
+  const allowQuestion = opts.allowQuestion === true || (decision && decision.policy !== "direct");
 
   const messages = [{ role: "system", content: buildSystemPrompt({}, lang, { alreadyLimited: true }) }];
   const intentHints = buildIntentHintsForLLM(userText, hist, key);
   if (intentHints) messages.push({ role: "system", content: intentHints });
+  if (memorySummary) messages.push({ role: "system", content: memorySummary });
+  if (decision) {
+    const lines = [
+      `Confidence score: ${decision.score.toFixed(2)} (0-1).`,
+      `Policy: ${decision.policy}.`,
+      "If policy is clarify or reanchor, ask exactly one concise question using the provided suggestion.",
+      decision.question ? "Suggested question: " + decision.question : null,
+    ]
+      .filter(Boolean)
+      .join(" ");
+    messages.push({ role: "system", content: lines });
+  }
   const maxHist = CFG.memoryMaxMessages;
   const slice = hist.slice(Math.max(0, hist.length - maxHist));
   for (let i = 0; i < slice.length; i += 1) messages.push({ role: slice[i].role, content: slice[i].content });
@@ -6263,14 +6453,14 @@ async function digibotLLMReply(userText, historyMsgs, lang, key) {
     const r = await withTimeout(callOpenAIChat(messages, 380), 10000);
     const choice = r && r.choices && r.choices[0] && r.choices[0].message ? r.choices[0].message.content : "";
     let reply = String(choice || "").trim();
-    reply = ensureNoQuestion(reply);
+    if (!allowQuestion) reply = ensureNoQuestion(reply);
 
-    if (!reply) reply = ensureNoQuestion(fallbackWithAgent(lang));
-    return reply;
+    if (!reply) reply = allowQuestion ? fallbackWithAgent(lang) : ensureNoQuestion(fallbackWithAgent(lang));
+    return allowQuestion ? reply : ensureNoQuestion(reply);
   } catch (_err) {
     const direct = tryDirectOfferAnswer(userText, historyMsgs, lang, key);
-    if (direct) return ensureNoQuestion(direct);
-    return ensureNoQuestion(fallbackWithAgent(lang));
+    if (direct) return allowQuestion ? direct : ensureNoQuestion(direct);
+    return allowQuestion ? fallbackWithAgent(lang) : ensureNoQuestion(fallbackWithAgent(lang));
   }
 }
 
@@ -6337,6 +6527,7 @@ function startMaintenanceTimer() {
     const now = Date.now();
 
     memory.cleanup();
+    chatMemory.cleanup();
 
     for (const [k, v] of rateStore.entries()) {
       if (!v || !v.windowStart || now - v.windowStart > CFG.rateWindowMs * 2) rateStore.delete(k);
@@ -6470,7 +6661,8 @@ app.post("/wanotifier", async (req, res) => {
 
     const mediaMeta = extractMediaMetaFromBody(req.body || {});
     const incoming = normalizeIncoming(req.body || {}, req);
-    const key = incoming.key;
+    const chatScopedId = incoming.chatId ? String(incoming.chatId).trim() : null;
+    const key = incoming.chatId ? "chat:" + chatScopedId : incoming.key;
     const phone = incoming.phone;
     let userTextRaw = String(incoming.text || "").slice(0, 2000);
     const mediaInfo = normalizeMediaInput(mediaMeta || incoming.media);
@@ -6484,7 +6676,10 @@ app.post("/wanotifier", async (req, res) => {
       if (!audioAnswerNoteText) return text;
       return `${audioAnswerNoteText}\n\n${text}`;
     };
-    const finalizeReply = (text, limit) => shortenNoQuestion(applyAudioNote(text), limit);
+    const finalizeReply = (text, limit, opts = {}) => {
+      const allowQuestion = opts.allowQuestion === true;
+      return allowQuestion ? shorten(applyAudioNote(text), limit) : shortenNoQuestion(applyAudioNote(text), limit);
+    };
 
     // Immediate image handling with vision before deriving text
     if (mediaInfo && (mediaInfo.kind === "image" || guessMediaKind(mediaInfo) === "image")) {
@@ -6574,6 +6769,12 @@ app.post("/wanotifier", async (req, res) => {
       resetStrikes(key);
       return res.json({ ok: true, reply });
     }
+
+    const chatMemState = chatMemory.get(chatScopedId || key);
+    const { parsed: parsedForMemory, patch: memoryPatch } = deriveMemoryPatchFromText(userTextRaw, chatMemState);
+    const memoryPreview = chatMemory.mergeSnapshot(chatScopedId || key, memoryPatch);
+    const unrelatedFragment = isUnrelatedFragment(userTextRaw, parsedForMemory, chatMemState);
+    if (!unrelatedFragment) chatMemory.update(chatScopedId || key, memoryPatch);
 
     memory.push(key, "user", userTextRaw);
     const history = memory.get(key);
@@ -6858,6 +7059,19 @@ app.post("/wanotifier", async (req, res) => {
       return res.json({ ok: true, reply });
     }
 
+    if (unrelatedFragment) {
+      const fallbackQuestion =
+        lang === "fr"
+          ? "On change de sujet ou on continue sur le même sujet ?"
+          : lang === "ar"
+          ? "بغيت تبدل الموضوع ولا نكملو ف نفس الموضوع؟"
+          : "Bghiti nbdlo lmawdou3 wla nkemlo 3la nafs lmawdou3?";
+      const reply = finalizeReply(fallbackQuestion, 200, { allowQuestion: true });
+      memory.push(key, "assistant", reply);
+      resetStrikes(key);
+      return res.json({ ok: true, reply });
+    }
+
     if (hasShoppingIntent && !isAcknowledgementMessage(userTextRaw)) {
       const bestGuess = bestGuessOffers(lang, key);
       if (bestGuess) {
@@ -6868,7 +7082,14 @@ app.post("/wanotifier", async (req, res) => {
       }
     }
 
-    let reply = await digibotLLMReply(userTextRaw, history, lang, key);
+    const confidenceDecision = computeConfidenceDecision(memoryPreview, parsedForMemory);
+    const memorySummary = buildMemorySummary(memoryPreview);
+
+    let reply = await digibotLLMReply(userTextRaw, history, lang, key, {
+      memorySummary,
+      confidence: confidenceDecision,
+      allowQuestion: confidenceDecision.policy !== "direct",
+    });
 
     if (looksLikeFallback(reply)) {
       const n = addStrike(key);
@@ -6877,7 +7098,7 @@ app.post("/wanotifier", async (req, res) => {
       resetStrikes(key);
     }
 
-    reply = finalizeReply(reply, 520);
+    reply = finalizeReply(reply, 520, { allowQuestion: confidenceDecision.policy !== "direct" });
     memory.push(key, "assistant", reply);
 
     const ms = Date.now() - t0;
