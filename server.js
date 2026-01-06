@@ -1424,17 +1424,17 @@ const FALLBACK_TTL_MS = 2 * 60 * 60 * 1000;
 const INITIAL_GREETING_TTL_MS = 2 * 60 * 60 * 1000;
 
 const GREETING_TEMPLATE = [
-  "╭──────────────────────────────╮",
+  "╭───────────────╮",
   "│   👋 *Digitronics AI Bot* 🤖   │",
-  "╰──────────────────────────────╯",
+  "╰───────────────╯",
   "",
   "🇫🇷 Bonjour ! Dites-moi ce que vous cherchez 👇",
   "🇲🇦 مرحباً! قل لي ماذا تريد وسأساعدك فوراً 👇",
   "",
-  "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
+  "━━━━━━━━━━━━━━━",
   "💰 Prix  •  ✅ Disponibilité  •  🚚 Livraison  •  🛡️ Garantie",
   "الأسعار • التوفر • التوصيل • الضمان",
-  "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
+  "━━━━━━━━━━━━━━━",
   "",
   "📍 *Casablanca – Oulfa*",
   "🚚 Livraison: *1–7 jours*  |  💳 *Paiement à la livraison*"
