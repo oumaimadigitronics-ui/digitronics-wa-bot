@@ -1423,6 +1423,16 @@ const FALLBACK_TTL_MS = 2 * 60 * 60 * 1000;
 
 const INITIAL_GREETING_TTL_MS = 2 * 60 * 60 * 1000;
 
+const GREETING_TEMPLATE = [
+  "👋 Bonjour ! Je suis le *Digitronics AI Bot* 🤖",
+  "مرحباً! أنا *Digitronics AI Bot* 🤖",
+  "Prix • Disponibilité • Livraison • Garantie الأسعار • التوفر • التوصيل • الضمان",
+  "📍 Casablanca – Oulfa",
+  "🚚 Livraison 1–7 jours | 💳 Paiement à la livraison",
+  "👉 Dites-moi simplement ce que vous cherchez.",
+  "👉 قل لي ماذا تريد وسأساعدك فوراً.",
+].join(" ");
+
 function resetStrikes(key) {
   fallbackStrikeStore.delete(String(key || ""));
 }
@@ -1443,9 +1453,9 @@ function addStrike(key) {
 
 function initialGreetingText(lang) {
   const L = String(lang || "dzl").trim().toLowerCase();
-  if (L === "fr") return "Bonjour ! Comment puis-je vous aider aujourd’hui ?";
-  if (L === "ar") return "مرحبا! كيفاش نعاونك اليوم؟";
-  return "Salam! kifach n3awnk lyoom?";
+  if (L === "fr") return "Bonjour ! Puis-je en savoir plus à ce sujet ?\n" + GREETING_TEMPLATE;
+  if (L === "ar") return "مرحبًا! هل يمكنني الحصول على مزيد من المعلومات حول هذا؟\n" + GREETING_TEMPLATE;
+  return GREETING_TEMPLATE;
 }
 
 function isGreetingLikeOpener(text) {
