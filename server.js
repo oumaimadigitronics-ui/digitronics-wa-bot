@@ -1452,11 +1452,9 @@ function addStrike(key) {
 }
 
 function initialGreetingText(lang) {
-  const L = String(lang || "dzl").trim().toLowerCase();
-  if (L === "fr") return "Bonjour ! Puis-je en savoir plus à ce sujet ?\n" + GREETING_TEMPLATE;
-  if (L === "ar") return "مرحبًا! هل يمكنني الحصول على مزيد من المعلومات حول هذا؟\n" + GREETING_TEMPLATE;
   return GREETING_TEMPLATE;
 }
+
 
 function isGreetingLikeOpener(text) {
   const raw = String(text || "");
