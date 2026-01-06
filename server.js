@@ -6216,11 +6216,13 @@ function buildSystemPrompt(offersSubset, lang, opts) {
     "- Do NOT suggest out-of-stock products (stock <= 0).\n" +
     "- Do NOT mention stock quantity.\n" +
     "- Mention delivery/payment/warranty ONLY if the client asks.\n" +
-    "- If client asks about products/prices/options, DO NOT invent or use OFFERS. Catalog replies are handled separately. Provide only short helpful text if needed.\n" +
+    "- If client asks about products/prices/options, only use catalog/tool results. If none are provided, avoid inventing offers and keep to short helpful text.\n" +
     "- If client asks for photo/picture/image: ONLY provide product link if present, else write ONE short instruction sentence without question marks.\n" +
-    "- ALWAYS recommend exactly 3 options, never more or less.\n" +
+    "- Recommend up to 3 grounded options only when offers are provided; otherwise, avoid fabricating lists.\n" +
     "- Do NOT output any URL in normal replies. Only output a product link in the photo flow handled outside.\n" +
     "- Avoid questions unless confidence rules require ONE clarifying question; never ask more than one question.\n\n" +
+    "- Never claim you checked stock/prices/policies unless a catalog/stock tool result is provided. If unsure, say you do not have the latest info and ask one concise clarifying question.\n" +
+    "- Keep availability/price statements consistent within the same reply.\n\n" +
     "- Keep each chat strictly isolated by chat_id. Never reuse hints from other chat_ids.\n" +
     "- Accumulate multi-message details (brand, category/class, size/specs, budget, priorities) within the same chat_id.\n" +
     "- Use the confidence score provided in the extra system message to decide if a SINGLE clarifying question is needed. Never ask more than one question.\n" +
@@ -6389,6 +6391,142 @@ function computeConfidenceDecision(state, parsed) {
   return { score, policy, question };
 }
 
+function buildAnswerPlan(userText, opts = {}) {
+  const parsed = opts.parsed || parseUserQuery(userText, { ctx: (opts.memoryState && opts.memoryState.ctx) || getCtx(opts.key) || {} });
+  const memoryState = opts.memoryState || {};
+  const decision = opts.decision || null;
+
+  const plan = {
+    user_intent:
+      parsed.intentCategory ||
+      parsed.intentClass ||
+      parsed.category ||
+      parsed.cls ||
+      (parsed.priceIntent ? "price_quote" : "general_support"),
+    required_facts: [],
+    tools_to_call: [],
+    assumptions_allowed: [],
+  };
+
+  const needsCatalog = Boolean(parsed.modelHit || parsed.brand || parsed.category || parsed.cls || parsed.size || memoryState.brand || memoryState.category);
+  if (needsCatalog) plan.tools_to_call.push("offers_lookup");
+  if (parsed.priceIntent || Number.isFinite(parsed.budgetDh)) plan.required_facts.push("current price in MAD");
+  if (needsCatalog) plan.required_facts.push("stock/availability");
+  if (memoryState.brand && !parsed.brand) plan.assumptions_allowed.push("reuse stored brand only if user message aligns");
+  if (decision && decision.policy !== "direct") plan.assumptions_allowed.push("ask at most one clarifying question");
+
+  plan.required_facts = Array.from(new Set(plan.required_facts));
+  plan.tools_to_call = Array.from(new Set(plan.tools_to_call));
+  plan.assumptions_allowed = Array.from(new Set(plan.assumptions_allowed));
+
+  return plan;
+}
+
+function answerPlanMessage(plan) {
+  if (!plan) return null;
+  return (
+    "Answer plan (do not show to user): " +
+    JSON.stringify(
+      {
+        user_intent: plan.user_intent,
+        required_facts: plan.required_facts,
+        tools_to_call: plan.tools_to_call,
+        assumptions_allowed: plan.assumptions_allowed,
+      },
+      null,
+      2
+    )
+  );
+}
+
+function questionCount(text) {
+  const s = String(text || "");
+  return (s.match(/[؟?]/g) || []).length;
+}
+
+function hasAvailabilityContradiction(text) {
+  const s = normMatch(text || "");
+  if (!s) return false;
+  const positive = /(available|disponible|in stock|متوفر|موجود|kayen)/i;
+  const negative = /(out of stock|not available|non disponible|rupture|غير متوفر|ما كاينش|ma kaynch)/i;
+  return positive.test(s) && negative.test(s);
+}
+
+function mentionsPriceOrCurrency(text) {
+  const s = normMatch(text || "");
+  if (!s) return false;
+  return /(\bdh\b|\bmad\b|dirham|price|prix|ثمن|بشحال)/i.test(s) || /\d+\s*(dh|dhs|mad)/i.test(text || "");
+}
+
+function mentionsStockOrAvailability(text) {
+  const s = normMatch(text || "");
+  if (!s) return false;
+  return /(stock|available|disponible|rupture|متوفر|غير متوفر|ما كاينش)/i.test(s);
+}
+
+function mentionsPolicy(text) {
+  const s = normMatch(text || "");
+  if (!s) return false;
+  return /(livraison|delivery|paiement|payment|garantie|warranty|التوصيل|الدفع|الضمان)/i.test(s);
+}
+
+function impliesCheckedWithoutTool(text) {
+  const s = normMatch(text || "");
+  if (!s) return false;
+  const impliesCheck = /(checked|verified|confirm[eé]?|تحقق|تأكدت|تأكد)/i.test(s);
+  return impliesCheck && (mentionsStockOrAvailability(s) || mentionsPriceOrCurrency(s));
+}
+
+function describeRequiredFact(lang, fact) {
+  const L = lang || "dzl";
+  if (fact && normMatch(fact).indexOf("price") >= 0) return L === "fr" ? "le prix exact" : "thaman dyal l-produit";
+  if (fact && normMatch(fact).indexOf("stock") >= 0) return L === "fr" ? "la disponibilité" : "wach kayn f stock";
+  return L === "fr" ? "les détails (marque/modèle/taille)" : "tafa9il b7al marque/model/size";
+}
+
+function conflictSafeFallback(lang, plan, allowQuestion) {
+  const L = lang || "dzl";
+  const fact = describeRequiredFact(L, (plan && plan.required_facts && plan.required_facts[0]) || null);
+
+  if (L === "fr") {
+    if (allowQuestion) return `Désolé, je veux éviter une réponse contradictoire. Peux-tu préciser ${fact} ?`;
+    return `Désolé, je veux rester cohérent. Envoie ${fact} et je continue.`;
+  }
+
+  if (allowQuestion) return `Smah lia, bghit nbqa wadh7. 3tini ${fact} bach nkml?`;
+  return `Smah lia, bghit nbqa wadh7. Sift ${fact} w nkml m3ak.`;
+}
+
+function conflictCheckReply(reply, opts = {}) {
+  const allowQuestion = opts.allowQuestion === true;
+  const toolsUsed = Array.isArray(opts.toolsUsed) ? opts.toolsUsed : [];
+  const lang = opts.lang || "dzl";
+  const plan = opts.answerPlan || null;
+
+  const issues = [];
+
+  if (hasAvailabilityContradiction(reply)) issues.push("availability_conflict");
+
+  const qCount = questionCount(reply);
+  if (allowQuestion) {
+    if (qCount > 1) issues.push("multi_question");
+  } else if (qCount > 0) {
+    issues.push("question_not_allowed");
+  }
+
+  const grounded = toolsUsed.includes("offers_lookup") || toolsUsed.includes("catalog_lookup") || toolsUsed.includes("policy_lookup");
+  const referencesPriceOrStock = mentionsPriceOrCurrency(reply) || mentionsStockOrAvailability(reply);
+  const referencesPolicy = mentionsPolicy(reply);
+
+  if ((referencesPriceOrStock || referencesPolicy) && !grounded) issues.push("missing_grounding");
+  if (impliesCheckedWithoutTool(reply) && !grounded) issues.push("unsupported_claim");
+
+  if (!issues.length) return { ok: true, reply };
+
+  const fallback = conflictSafeFallback(lang, plan, allowQuestion);
+  return { ok: false, reply: fallback, issues };
+}
+
 async function callOpenAIChat(messages, maxOut) {
   const maxTokens = Number(maxOut) || 380;
   try {
@@ -6427,12 +6565,15 @@ async function digibotLLMReply(userText, historyMsgs, lang, key, opts = {}) {
   const hist = Array.isArray(historyMsgs) ? historyMsgs : [];
   const memorySummary = opts.memorySummary || null;
   const decision = opts.confidence || null;
+  const answerPlan = opts.answerPlan || buildAnswerPlan(userText, { parsed: parseUserQuery(userText, { ctx: getCtx(key) }), memoryState: opts.memoryState || {}, decision, key });
   const allowQuestion = opts.allowQuestion === true || (decision && decision.policy !== "direct");
 
   const messages = [{ role: "system", content: buildSystemPrompt({}, lang, { alreadyLimited: true }) }];
   const intentHints = buildIntentHintsForLLM(userText, hist, key);
   if (intentHints) messages.push({ role: "system", content: intentHints });
   if (memorySummary) messages.push({ role: "system", content: memorySummary });
+  const planMsg = answerPlanMessage(answerPlan);
+  if (planMsg) messages.push({ role: "system", content: planMsg });
   if (decision) {
     const lines = [
       `Confidence score: ${decision.score.toFixed(2)} (0-1).`,
@@ -6676,9 +6817,19 @@ app.post("/wanotifier", async (req, res) => {
       if (!audioAnswerNoteText) return text;
       return `${audioAnswerNoteText}\n\n${text}`;
     };
+    const toolsUsed = new Set();
+    let answerPlan = null;
     const finalizeReply = (text, limit, opts = {}) => {
       const allowQuestion = opts.allowQuestion === true;
-      return allowQuestion ? shorten(applyAudioNote(text), limit) : shortenNoQuestion(applyAudioNote(text), limit);
+      const withNote = applyAudioNote(text);
+      const check = conflictCheckReply(withNote, {
+        allowQuestion,
+        toolsUsed: Array.from(toolsUsed),
+        lang,
+        answerPlan: answerPlan || opts.answerPlan || null,
+      });
+      const candidate = check.ok ? withNote : check.reply;
+      return allowQuestion ? shorten(candidate, limit) : shortenNoQuestion(candidate, limit);
     };
 
     // Immediate image handling with vision before deriving text
@@ -6773,6 +6924,7 @@ app.post("/wanotifier", async (req, res) => {
     const chatMemState = chatMemory.get(chatScopedId || key);
     const { parsed: parsedForMemory, patch: memoryPatch } = deriveMemoryPatchFromText(userTextRaw, chatMemState);
     const memoryPreview = chatMemory.mergeSnapshot(chatScopedId || key, memoryPatch);
+    answerPlan = buildAnswerPlan(userTextRaw, { parsed: parsedForMemory, memoryState: memoryPreview, key });
     const unrelatedFragment = isUnrelatedFragment(userTextRaw, parsedForMemory, chatMemState);
     if (!unrelatedFragment) chatMemory.update(chatScopedId || key, memoryPatch);
 
@@ -6834,6 +6986,7 @@ app.post("/wanotifier", async (req, res) => {
         category: linkMatch.offer.category || undefined,
       });
       const line = formatOfferLine(linkMatch.brand, linkMatch.offer);
+      toolsUsed.add("offers_lookup");
       const reply = finalizeReply([header, line].filter(Boolean).join("\n"), 520);
       const sizeVal = Number(linkMatch.offer.size);
       setCtx(key, {
@@ -6862,6 +7015,7 @@ app.post("/wanotifier", async (req, res) => {
       const linkRaw = buildProductLink(resolved.offer || {}, displayName);
       const safeLink = sanitizeUrlNoQuestion(linkRaw);
       const msgKey = resolved.closest ? "photoClosest" : "photoLink";
+      toolsUsed.add("offers_lookup");
       const reply = finalizeReply(t(lang, msgKey, { link: safeLink, name: displayName }), 520);
       memory.push(key, "assistant", reply);
       resetStrikes(key);
@@ -6886,6 +7040,7 @@ app.post("/wanotifier", async (req, res) => {
       const s = normMatch(userTextRaw);
       const parts = [];
       const r = RULES_I18N[lang] || RULES_I18N.dzl;
+      toolsUsed.add("policy_lookup");
 
       if (s.indexOf("delivery") >= 0 || s.indexOf("livraison") >= 0 || s.indexOf("توصيل") >= 0 || s.indexOf("التوصيل") >= 0) parts.push(r.deliveryCallback || r.delivery);
 
@@ -6923,6 +7078,7 @@ app.post("/wanotifier", async (req, res) => {
       supportModeStore.delete(key);
       const direct = tryDirectOfferAnswer(userTextRaw, history, lang, key);
       if (direct) {
+        toolsUsed.add("offers_lookup");
         const withForm = finalizeReply(direct + "\n\n" + t(lang, "orderForm"), 520);
         const reply = withForm || finalizeReply(direct, 520);
         memory.push(key, "assistant", reply);
@@ -7045,6 +7201,7 @@ app.post("/wanotifier", async (req, res) => {
 
     const directReply = tryDirectOfferAnswer(userTextRaw, history, lang, key);
     if (directReply) {
+      toolsUsed.add("offers_lookup");
       const reply = finalizeReply(directReply, 520);
       memory.push(key, "assistant", reply);
       resetStrikes(key);
@@ -7053,6 +7210,7 @@ app.post("/wanotifier", async (req, res) => {
 
     const siteReply = await tryWebsiteCatalogAnswer(userTextRaw, lang, key);
     if (siteReply) {
+      toolsUsed.add("catalog_lookup");
       const reply = finalizeReply(siteReply, 520);
       memory.push(key, "assistant", reply);
       resetStrikes(key);
@@ -7075,6 +7233,7 @@ app.post("/wanotifier", async (req, res) => {
     if (hasShoppingIntent && !isAcknowledgementMessage(userTextRaw)) {
       const bestGuess = bestGuessOffers(lang, key);
       if (bestGuess) {
+        toolsUsed.add("offers_lookup");
         const reply = finalizeReply(bestGuess + "\n\n" + agentWillFinalize(lang), 520);
         memory.push(key, "assistant", reply);
         resetStrikes(key);
@@ -7088,6 +7247,7 @@ app.post("/wanotifier", async (req, res) => {
     let reply = await digibotLLMReply(userTextRaw, history, lang, key, {
       memorySummary,
       confidence: confidenceDecision,
+      answerPlan,
       allowQuestion: confidenceDecision.policy !== "direct",
     });
 
