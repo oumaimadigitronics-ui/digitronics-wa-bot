@@ -20,114 +20,6 @@ const {
   META_GRAPH_VERSION = "v21.0",
 } = process.env;
 
-// --- META webhook verify (GET) ---
-app.get("/meta/webhook", (req, res) => {
-  const mode = req.query["hub.mode"];
-  const token = req.query["hub.verify_token"];
-  const challenge = req.query["hub.challenge"];
-
-  if (mode === "subscribe" && token === META_VERIFY_TOKEN) {
-    return res.status(200).send(challenge);
-  }
-  return res.sendStatus(403);
-});
-
-// --- META webhook receive (POST) ---
-app.post("/meta/webhook", async (req, res) => {
-  res.sendStatus(200); // Meta needs fast response
-
-  try {
-    const body = req.body;
-
-    if (!body || body.object !== "page") return;
-
-    for (const entry of body.entry || []) {
-      for (const event of entry.messaging || []) {
-        const senderId = event?.sender?.id;
-        const text = event?.message?.text;
-        const isEcho = !!event?.message?.is_echo;
-
-        if (!senderId || !text || isEcho) continue;
-
-        console.log("✅ META MESSAGE:", { senderId, text });
-
-        // (Next step: generate reply + send it back)
-      }
-    }
-  } catch (err) {
-    console.error("❌ Meta webhook error:", err?.message || err);
-  }
-});
-
-
-// --- META webhook verify (GET) ---
-app.get("/meta/webhook", (req, res) => {
-  const mode = req.query["hub.mode"];
-  const token = req.query["hub.verify_token"];
-  const challenge = req.query["hub.challenge"];
-
-  if (mode === "subscribe" && token === META_VERIFY_TOKEN) {
-    return res.status(200).send(challenge);
-  }
-  return res.sendStatus(403);
-});
-
-// --- META webhook receive (POST) ---
-app.post("/meta/webhook", async (req, res) => {
-  // Meta expects fast 200 OK
-  res.sendStatus(200);
-
-  try {
-    const body = req.body;
-
-    // Messenger payload always uses object = "page"
-    if (!body || body.object !== "page") return;
-
-    for (const entry of body.entry || []) {
-      for (const event of entry.messaging || []) {
-        const senderId = event?.sender?.id;
-        const text = event?.message?.text;
-        const isEcho = !!event?.message?.is_echo;
-
-        // Ignore echoes, non-text
-        if (!senderId || !text || isEcho) continue;
-
-        console.log("✅ META MESSAGE:", { senderId, text });
-      }
-    }
-  } catch (err) {
-    console.error("❌ Meta webhook error:", err?.message || err);
-  }
-});
-
-// --- META webhook receive (POST) ---
-app.post("/meta/webhook", async (req, res) => {
-  // Meta expects fast 200 OK
-  res.sendStatus(200);
-
-  try {
-    const body = req.body;
-
-    if (!body || body.object !== "page") return;
-
-    for (const entry of body.entry || []) {
-      for (const event of entry.messaging || []) {
-        const senderId = event?.sender?.id;
-        const text = event?.message?.text;
-        const isEcho = !!event?.message?.is_echo;
-
-        if (!senderId || !text || isEcho) continue;
-
-        // (We will add handleMetaTextMessage + sendMessengerText in next steps)
-        console.log("META MSG:", senderId, text);
-      }
-    }
-  } catch (err) {
-    console.error("Meta webhook error:", err?.message || err);
-  }
-});
-
-
 const LOG_DEBUG = String(process.env.LOG_DEBUG || "0") === "1";
 const IS_TEST = String(process.env.NODE_ENV || "").toLowerCase() === "test";
 const ENTRY_FILE = fileURLToPath(import.meta.url);
@@ -299,6 +191,101 @@ app.use(
     },
   })
 );
+
+// ============================
+// META (Facebook Messenger)
+// ============================
+const {
+  META_VERIFY_TOKEN = "",
+  META_PAGE_ACCESS_TOKEN = "",
+  META_APP_SECRET = "",
+  META_GRAPH_VERSION = "v21.0",
+} = process.env;
+
+// --- META webhook verify (GET) ---
+app.get("/meta/webhook", (req, res) => {
+  const mode = req.query["hub.mode"];
+  const token = req.query["hub.verify_token"];
+  const challenge = req.query["hub.challenge"];
+
+  if (mode === "subscribe" && token === META_VERIFY_TOKEN) {
+    return res.status(200).send(challenge);
+  }
+  return res.sendStatus(403);
+});
+
+// --- META webhook receive (POST) ---
+app.post("/meta/webhook", async (req, res) => {
+  res.sendStatus(200);
+
+  try {
+    const body = req.body;
+    if (!body || body.object !== "page") return;
+
+    for (const entry of body.entry || []) {
+      for (const event of entry.messaging || []) {
+        const senderId = event?.sender?.id;
+        const text = event?.message?.text;
+        const isEcho = !!event?.message?.is_echo;
+
+        if (!senderId || !text || isEcho) continue;
+
+        console.log("✅ META MESSAGE:", { senderId, text });
+
+        const reply = await handleMetaTextMessage(text, senderId);
+        if (reply) await sendMessengerText(senderId, reply);
+      }
+    }
+  } catch (err) {
+    console.error("❌ Meta webhook error:", err?.message || err);
+  }
+});
+
+async function sendMessengerText(recipientId, text) {
+  if (!META_PAGE_ACCESS_TOKEN) {
+    console.warn("META_PAGE_ACCESS_TOKEN missing - cannot send messages.");
+    return;
+  }
+
+  const url = `https://graph.facebook.com/${META_GRAPH_VERSION}/me/messages?access_token=${META_PAGE_ACCESS_TOKEN}`;
+
+  const payload = {
+    recipient: { id: recipientId },
+    message: { text },
+  };
+
+  const fetch = getFetch();
+  const r = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+
+  if (!r.ok) {
+    const t = await r.text().catch(() => "");
+    console.error("Meta send failed:", r.status, t);
+  }
+}
+
+async function handleMetaTextMessage(userText, senderId) {
+  const lang = detectLang(userText);
+  const key = `meta:${senderId}`;
+
+  memory.push(key, "user", userText);
+  const history = memory.get(key);
+
+  let reply =
+    tryDirectOfferAnswer(userText, history, lang, key) ||
+    (await tryWebsiteCatalogAnswer(userText, lang, key)) ||
+    (await digibotLLMReply(userText, history, lang, key));
+
+  reply = shortenNoQuestion(reply, 520);
+  memory.push(key, "assistant", reply);
+
+  return reply;
+}
+
+
 
 app.use((req, _res, next) => {
   if (LOG_DEBUG && req.rawBody) {
