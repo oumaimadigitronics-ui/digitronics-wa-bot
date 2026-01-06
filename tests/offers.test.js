@@ -46,6 +46,7 @@ import {
   formatSize,
   createServerForTests,
   buildSystemPrompt,
+  buildAnswerPlan,
   setSystemPromptForTest,
   t,
   isNegotiationIntent,
@@ -442,6 +443,22 @@ test("price-only messages are not treated as contact info", () => {
   assert.strictEqual(contact.hasName, false);
   assert.strictEqual(contact.hasPhone, false);
   assert.strictEqual(contact.isNewInfo, false);
+});
+
+test("buildAnswerPlan reuses memory intent when message is generic", () => {
+  const memoryState = {
+    category: "Tv",
+    brand: "TCL",
+    specs: { size: 55 },
+    budget: null,
+    lastUpdated: Date.now(),
+  };
+
+  const plan = buildAnswerPlan("ok", { parsed: {}, memoryState });
+
+  assert.strictEqual(plan.user_intent, "Tv");
+  assert.ok(plan.tools_to_call.includes("offers_lookup"));
+  assert.ok(plan.required_facts.includes("stock/availability"));
 });
 
 test("bestGuess requires current shopping signal", async () => {

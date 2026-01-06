@@ -6684,13 +6684,22 @@ function buildAnswerPlan(userText, opts = {}) {
   const memoryState = opts.memoryState || {};
   const decision = opts.decision || null;
 
+  const memoryIntent =
+    memoryState.intent ||
+    memoryState.category ||
+    memoryState.cls ||
+    memoryState.brand ||
+    (memoryState.specs && memoryState.specs.model) ||
+    (Number.isFinite(memoryState.budget) ? "price_quote" : null);
+
   const plan = {
     user_intent:
       parsed.intentCategory ||
       parsed.intentClass ||
       parsed.category ||
       parsed.cls ||
-      (parsed.priceIntent ? "price_quote" : "general_support"),
+      memoryIntent ||
+      (parsed.priceIntent || Number.isFinite(memoryState.budget) ? "price_quote" : "general_support"),
     required_facts: [],
     tools_to_call: [],
     assumptions_allowed: [],
@@ -7662,6 +7671,7 @@ export {
   isGreetingLikeOpener,
   findOfferFromLinks,
   buildSystemPrompt,
+  buildAnswerPlan,
   tryWebsiteCatalogAnswer,
   tryDirectOfferAnswer,
   setOffersForTest,
