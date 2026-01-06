@@ -324,8 +324,9 @@ test("stripQuestions removes trailing questions", () => {
 test("maybeSendInitialGreeting greets once", () => {
   const key = "greet-key-1";
   const reply = maybeSendInitialGreeting({ key, lang: "fr" });
-  assert.ok(reply.includes("Comment puis-je vous aider aujourd’hui ?"));
-  assert.strictEqual(countQuestions(reply), 1);
+  assert.ok(reply.includes("Digitronics AI Bot"));
+  assert.ok(reply.includes("Prix • Disponibilité • Livraison • Garantie"));
+  assert.strictEqual(countQuestions(reply), 0);
   const ctx = getCtxForTest(key);
   assert.strictEqual(ctx.didSendInitialGreeting, true);
 });
@@ -375,7 +376,7 @@ test("handleGreetingMessage triggers greeting for opener", () => {
   const opener = "Hello! Can I get more info on this?";
   const reply = handleGreetingMessage({ key, lang: "fr", text: opener });
   assert.ok(reply);
-  assert.ok(reply.includes("Comment puis-je vous aider aujourd’hui ?"));
+  assert.ok(reply.includes("Digitronics AI Bot"));
   const ctx = getCtxForTest(key);
   assert.strictEqual(ctx.hasGreeted, true);
   const again = handleGreetingMessage({ key, lang: "fr", text: opener });
