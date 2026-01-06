@@ -559,6 +559,9 @@ function t(lang, key, vars) {
         const brands = String((x || {}).brands || "TCL, Haier, Samsung");
         return "Smah lia, ma kanso9osh Xiaomi. 3andna options 7sen b " + brands + ". Hna chi offres:";
       },
+      tvOriginGeneral: "Koulchi TV 3ndna fabrication Chine, kaynin ghi chi modèles Samsung jayin mn l’Europe.",
+      tvOriginEuropeHeader: "Modèles li kaynin fihom Europe f smiya:",
+      tvOriginEuropeNone: "Ma kaynch modèle fih Europe f smiya daba. Ghalban l-TV fabrication Chine.",
     },
     fr: {
       askTextInsteadMedia: "Merci. Pour que je comprenne, envoyez un message écrit (sans audio/image).",
@@ -622,6 +625,9 @@ function t(lang, key, vars) {
         const brands = String((x || {}).brands || "TCL, Haier et Samsung");
         return "Désolé, nous ne vendons pas Xiaomi. Nous avons de meilleures options comme " + brands + ". Voici des offres dispo:";
       },
+      tvOriginGeneral: "Toutes nos TV sont fabriquées en Chine, sauf quelques modèles Samsung (origine Europe).",
+      tvOriginEuropeHeader: "Modèles avec \"Europe\" dans le nom :",
+      tvOriginEuropeNone: "Aucun modèle avec \"Europe\" dans le nom pour le moment. Les TV sont majoritairement fabriquées en Chine.",
     },
     ar: {
       askTextInsteadMedia: "شكراً. من فضلك ارسل رسالة مكتوبة (بدون صوت/صورة) باش نقدر نفهمك.",
@@ -684,6 +690,9 @@ function t(lang, key, vars) {
         const brands = String((x || {}).brands || "TCL و Haier و Samsung");
         return "سمح ليا، ما كنبيعوش Xiaomi. عندنا اختيارات أحسن بحال " + brands + ". هاهي بعض العروض:";
       },
+      tvOriginGeneral: "كل التلفازات عندنا صناعة الصين، غير بعض موديلات Samsung جايين من أوروبا.",
+      tvOriginEuropeHeader: "الموديلات اللي مكتوب فيها Europe:",
+      tvOriginEuropeNone: "ما كايناش دابا موديلات فيها Europe فالاسم. أغلب التلفازات صناعة الصين.",
     },
   };
 
@@ -4873,6 +4882,99 @@ function hasTvSizeContext(text) {
   return false;
 }
 
+function findEuropeTvOffers(limit = MAX_OFFERS) {
+  const tvCanon = OFFERS_INDEX.classCanon.tv;
+  const tvNorm = normMatch(tvCanon || "tv");
+  if (!tvCanon) return [];
+
+  const offersObj = (OFFERS && OFFERS.offers) || {};
+  const brands = Object.keys(offersObj);
+  const items = [];
+
+  for (let i = 0; i < brands.length; i += 1) {
+    const b = brands[i];
+    const arr = Array.isArray(offersObj[b]) ? offersObj[b] : [];
+    for (let j = 0; j < arr.length; j += 1) {
+      const offer = arr[j];
+      if (Number((offer && offer.stock) || 0) <= 0) continue;
+      const clsNorm = normMatch((offer && offer.class) || (offer && offer.category) || "");
+      if (clsNorm !== tvNorm) continue;
+      const nameModel = [offer && offer.name, offer && offer.model].filter(Boolean).join(" ").toLowerCase();
+      if (!nameModel || nameModel.indexOf("europe") < 0) continue;
+      items.push({ brand: b, offer, originalIdx: j });
+    }
+  }
+
+  const ranked = rankOffers(items, { limit, className: tvCanon, tvClassCanon: tvCanon });
+  return ranked;
+}
+
+function isTvOriginIntent(text, ctx = {}) {
+  const s = normMatch(text || "");
+  if (!s) return false;
+
+  const originTokens = [
+    "origin",
+    "origine",
+    "made",
+    "fabrication",
+    "fabrique",
+    "country",
+    "pays",
+    "china",
+    "chine",
+    "صنع",
+    "صناعة",
+    "صيني",
+    "اوروبا",
+    "أوروبا",
+    "اوروبي",
+    "europe",
+  ];
+
+  const hasOriginSignal = originTokens.some((tok) => includesToken(s, tok));
+  if (!hasOriginSignal) return false;
+
+  const tvCanonNorm = normMatch(OFFERS_INDEX.classCanon.tv || "tv");
+  const ctxTv =
+    normMatch(ctx.lastClass || "") === tvCanonNorm ||
+    normMatch(ctx.lastCategory || "") === tvCanonNorm ||
+    Number.isFinite(ctx.lastSize);
+
+  if (ctxTv) return true;
+  if (hasTvIntentTokens(text) || hasTvSizeContext(text)) return true;
+
+  const brand = detectBrand(text);
+  if (brand && OFFERS && OFFERS.offers && OFFERS.offers[brand]) {
+    const arr = OFFERS.offers[brand] || [];
+    const hasTvForBrand = arr.some((o) => normMatch((o && o.class) || (o && o.category) || "") === tvCanonNorm);
+    if (hasTvForBrand) return true;
+  }
+
+  return false;
+}
+
+function tvOriginAnswer(lang, key) {
+  const tvCanon = OFFERS_INDEX.classCanon.tv || "Tv";
+  const general = t(lang, "tvOriginGeneral");
+  const picks = findEuropeTvOffers(MAX_OFFERS);
+  const header = t(lang, "tvOriginEuropeHeader");
+  const none = t(lang, "tvOriginEuropeNone");
+  const lines = picks.map((it) => formatOfferLine(it.brand, it.offer, { lang }));
+
+  if (picks.length) {
+    setCtx(key, {
+      lastBrand: undefined,
+      lastClass: tvCanon || undefined,
+      lastCategory: undefined,
+      lastSize: undefined,
+      lastOffersShown: picks.map((it) => ({ brand: it.brand, model: (it.offer && it.offer.model) || "" })),
+    });
+  }
+
+  return [general, header, lines.length ? lines.join("\n\n") : none].filter(Boolean).join("\n");
+}
+
 function parseUserQuery(text, opts = {}) {
   const raw = String(text || "");
   const ctx = opts.ctx || {};
@@ -5545,6 +5647,10 @@ function tryDirectOfferAnswer(userText, historyMsgs, lang, key) {
     });
     const reply = offersHeader(lang, { brand: parsed.modelHit.brand }) + "\n" + formatOfferLine(parsed.modelHit.brand, modelOffer);
     return ensureNoQuestion(reply);
+  }
+
+  if (isTvOriginIntent(text, ctx)) {
+    return ensureNoQuestion(tvOriginAnswer(lang, key));
   }
 
   const tivoliIntent = isTivoliOvenIntent(text);
