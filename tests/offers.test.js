@@ -161,6 +161,44 @@ test("formatOfferLine includes sanitized URL", () => {
   assert.ok(line.includes("example.com"));
 });
 
+test("tryDirectOfferAnswer answers TV origin intent and lists Europe models", () => {
+  const tvCanon = "Tv";
+  setOffersForTest({
+    TCL: [{ model: "TCL-50", name: "TCL 50", category: tvCanon, class: tvCanon, size: 50, type: "LED", price: 2700, stock: 1, link: "http://example.com/tcl50" }],
+    SAMSUNG: [
+      {
+        model: "SM-55E",
+        name: "Samsung 55 Europe Edition",
+        category: tvCanon,
+        class: tvCanon,
+        size: 55,
+        type: "LED",
+        price: 4100,
+        stock: 2,
+        link: "http://example.com/sm55e",
+      },
+    ],
+  });
+
+  const reply = tryDirectOfferAnswer("origine tv europe chine", [], "fr", "origin_fr");
+  assert.ok(reply);
+  assert.ok(reply.includes("Toutes nos TV sont fabriquées en Chine"));
+  assert.ok(reply.toLowerCase().includes("europe edition"));
+  assertNoQuestionMarks(reply);
+});
+
+test("tryDirectOfferAnswer answers TV origin intent with no Europe models", () => {
+  const tvCanon = "Tv";
+  setOffersForTest({
+    TCL: [{ model: "TCL-50", name: "TCL 50", category: tvCanon, class: tvCanon, size: 50, type: "LED", price: 2700, stock: 1, link: "http://example.com/tcl50" }],
+  });
+
+  const reply = tryDirectOfferAnswer("origine tv chine", [], "fr", "origin_none");
+  assert.ok(reply);
+  assert.ok(reply.includes('Aucun modèle avec "Europe"'));
+  assertNoQuestionMarks(reply);
+});
+
 test("findOfferFromLinks matches sanitized permalink", () => {
   setOffersForTest({
     BRANDX: [
