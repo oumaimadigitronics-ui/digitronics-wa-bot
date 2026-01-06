@@ -7161,7 +7161,8 @@ app.post("/wanotifier", async (req, res) => {
     const finalizeReply = (text, limit, opts = {}) => {
       const allowQuestion = opts.allowQuestion === true;
       const withNote = applyAudioNote(text);
-      const check = conflictCheckReply(withNote, {
+      const candidateForCheck = allowQuestion ? withNote : ensureNoQuestion(withNote);
+      const check = conflictCheckReply(candidateForCheck, {
         allowQuestion,
         toolsUsed: Array.from(toolsUsed),
         lang,
