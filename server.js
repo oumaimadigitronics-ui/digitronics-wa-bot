@@ -18,6 +18,8 @@ const ENTRY_FILE = fileURLToPath(import.meta.url);
 const RUN_SELF_TESTS = String(process.env.RUN_SELF_TESTS || process.env.SELF_TEST || "0") === "1";
 const REQUIRE_ENV = process.argv[1] === ENTRY_FILE && !RUN_SELF_TESTS;
 const MAX_AUDIO_BYTES = Number(process.env.MEDIA_MAX_BYTES_AUDIO || 12000000) || 12000000;
+let systemPromptLoaded = false;
+let systemPromptValue = "";
 
 function debugLog(event, payload) {
   if (!LOG_DEBUG) return;
@@ -77,6 +79,9 @@ const {
 
   OPENAI_VISION_MODEL = "",
   OPENAI_TRANSCRIBE_MODEL = "gpt-4o-mini-transcribe",
+
+  SYSTEM_PROMPT = "",
+  SYSTEM_PROMPT_FILE = "",
 } = process.env;
 
 if (REQUIRE_ENV && !OPENAI_API_KEY) {
@@ -206,6 +211,42 @@ function stableReqId() {
   } catch {
     return String(Date.now());
   }
+}
+
+function loadSystemPromptValue() {
+  const promptInline = String(SYSTEM_PROMPT || "").trim();
+  if (promptInline) return promptInline;
+
+  const promptFile = String(SYSTEM_PROMPT_FILE || "").trim();
+  if (!promptFile) return "";
+
+  try {
+    const content = fs.readFileSync(promptFile, "utf8");
+    return String(content || "").trim();
+  } catch (err) {
+    console.warn(
+      JSON.stringify({
+        level: "warn",
+        msg: "system_prompt_file_error",
+        file: promptFile,
+        error: (err && err.message) || String(err),
+      })
+    );
+    return "";
+  }
+}
+
+function getSystemPrompt() {
+  if (!systemPromptLoaded) {
+    systemPromptValue = loadSystemPromptValue();
+    systemPromptLoaded = true;
+  }
+  return systemPromptValue;
+}
+
+function setSystemPromptForTest(value) {
+  systemPromptLoaded = true;
+  systemPromptValue = String(value || "");
 }
 
 function shorten(text, max) {
@@ -6094,9 +6135,11 @@ function buildOffersSubsetForPrompt(userText, historyMsgs, key) {
 function buildSystemPrompt(offersSubset, lang, opts) {
   const L = lang || "dzl";
   const rulesForLang = RULES_I18N[L] || RULES_I18N.dzl;
+  const basePrompt = getSystemPrompt().trim() || "You are DigiBot for Digitronics.ma.";
 
   return (
-    "You are DigiBot for Digitronics.ma.\n\n" +
+    basePrompt +
+    "\n\n" +
     "STRICT STYLE:\n" +
     "- Reply ONLY in this language: " +
     L +
@@ -6883,6 +6926,7 @@ export {
   handleGreetingMessage,
   isGreetingLikeOpener,
   findOfferFromLinks,
+  buildSystemPrompt,
   tryWebsiteCatalogAnswer,
   tryDirectOfferAnswer,
   setOffersForTest,
@@ -6895,6 +6939,7 @@ export {
   setAudioDownloaderForTest,
   setAudioTranscriberForTest,
   handleVisionMediaForTest,
+  setSystemPromptForTest,
   isAudioMime,
   isAudioMeta,
   extFromAudioMime,

@@ -45,6 +45,8 @@ import {
   getSizeFromNameSku,
   formatSize,
   createServerForTests,
+  buildSystemPrompt,
+  setSystemPromptForTest,
   t,
   isNegotiationIntent,
   offerFromWooProduct,
@@ -99,6 +101,7 @@ afterEach(() => {
   setAudioTranscriberForTest(null);
   setWcFetchJsonForTest(null);
   setDepsForTests({});
+  setSystemPromptForTest("");
 });
 
 test("rankOffers prioritizes TV priority brands", () => {
@@ -124,6 +127,21 @@ test("rankOffers is stable across calls", () => {
   const second = rankOffers(items, { limit: 2 });
 
   assert.deepStrictEqual(first.map((r) => r.brand), second.map((r) => r.brand));
+});
+
+test("buildSystemPrompt falls back to default prompt", () => {
+  setSystemPromptForTest("");
+  const prompt = buildSystemPrompt({}, "fr", {});
+  assert.ok(prompt.startsWith("You are DigiBot for Digitronics.ma."));
+  assert.ok(prompt.includes("STRICT STYLE:"));
+});
+
+test("buildSystemPrompt injects custom system prompt", () => {
+  const custom = "SYSTEM (Codex system prompt)\n\nCustom rules";
+  setSystemPromptForTest(custom);
+  const prompt = buildSystemPrompt({}, "dzl", {});
+  assert.ok(prompt.startsWith(custom));
+  assert.ok(prompt.includes("STRICT STYLE:"));
 });
 
 test("limitOffersForPromptPayload preserves no_match hint", () => {
