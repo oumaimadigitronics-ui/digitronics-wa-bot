@@ -12,6 +12,28 @@ import { toFile } from "openai/uploads";
 const app = express();
 app.set("trust proxy", true);
 
+// --- META (Facebook Messenger) ENV ---
+const {
+  META_VERIFY_TOKEN = "",
+  META_PAGE_ACCESS_TOKEN = "",
+  META_APP_SECRET = "",
+  META_GRAPH_VERSION = "v21.0",
+} = process.env;
+
+// --- META webhook verify (GET) ---
+app.get("/meta/webhook", (req, res) => {
+  const mode = req.query["hub.mode"];
+  const token = req.query["hub.verify_token"];
+  const challenge = req.query["hub.challenge"];
+
+  if (mode === "subscribe" && token === META_VERIFY_TOKEN) {
+    return res.status(200).send(challenge);
+  }
+  return res.sendStatus(403);
+});
+
+
+
 const LOG_DEBUG = String(process.env.LOG_DEBUG || "0") === "1";
 const IS_TEST = String(process.env.NODE_ENV || "").toLowerCase() === "test";
 const ENTRY_FILE = fileURLToPath(import.meta.url);
