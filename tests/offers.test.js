@@ -50,6 +50,7 @@ import {
   t,
   isNegotiationIntent,
   offerFromWooProduct,
+  thankYouFollowUpMessage,
 } from "../server.js";
 import { setDepsForTests } from "../src/deps.js";
 
@@ -435,7 +436,8 @@ test("bestGuess requires current shopping signal", async () => {
       body: JSON.stringify({ text: "شكرا", waId: "user-bestguess" }),
     });
     const followReply = await followUp.json();
-    assert.strictEqual(followReply.reply, "Noted.");
+    const expectedThanks = thankYouFollowUpMessage("ar");
+    assert.strictEqual(followReply.reply, expectedThanks);
     assert.ok(!followReply.reply.includes("•"));
   } finally {
     await close();
