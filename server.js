@@ -192,16 +192,6 @@ app.use(
   })
 );
 
-// ============================
-// META (Facebook Messenger)
-// ============================
-const {
-  META_VERIFY_TOKEN = "",
-  META_PAGE_ACCESS_TOKEN = "",
-  META_APP_SECRET = "",
-  META_GRAPH_VERSION = "v21.0",
-} = process.env;
-
 // --- META webhook verify (GET) ---
 app.get("/meta/webhook", (req, res) => {
   const mode = req.query["hub.mode"];
