@@ -6722,9 +6722,41 @@ function answerPlanMessage(plan) {
   );
 }
 
+function normalizeFactName(fact) {
+  const s = normMatch(fact || "");
+  if (!s) return null;
+  if (s.indexOf("price") >= 0 || s.indexOf("mad") >= 0) return "price";
+  if (s.indexOf("stock") >= 0 || s.indexOf("avail") >= 0) return "stock";
+  if (s.indexOf("warranty") >= 0 || s.indexOf("garanti") >= 0) return "policy";
+  if (s.indexOf("delivery") >= 0 || s.indexOf("livrai") >= 0 || s.indexOf("payment") >= 0 || s.indexOf("paiement") >= 0)
+    return "policy";
+  return s;
+}
+
 function questionCount(text) {
   const s = String(text || "");
-  return (s.match(/[؟?]/g) || []).length;
+  const lines = s.split(/\r?\n/);
+  let count = 0;
+
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = String(lines[i] || "").trim();
+    if (!line) continue;
+    const marks = (line.match(/[؟?]/g) || []).length;
+    if (marks > 0) {
+      count += marks;
+      continue;
+    }
+
+    if (
+      /^(who|what|which|when|where|why|how|combien|quel|quelle|quels|quelles|est-ce|wach|wash|chno|chnou|shno|kayen|fin|hna?ya|اش|شنو|فين|واش|كم)\b/i.test(
+        line
+      )
+    ) {
+      count += 1;
+    }
+  }
+
+  return count;
 }
 
 function hasAvailabilityContradiction(text) {
@@ -6783,6 +6815,7 @@ function conflictSafeFallback(lang, plan, allowQuestion) {
 function conflictCheckReply(reply, opts = {}) {
   const allowQuestion = opts.allowQuestion === true;
   const toolsUsed = Array.isArray(opts.toolsUsed) ? opts.toolsUsed : [];
+  const factsResolved = Array.isArray(opts.factsResolved) ? opts.factsResolved : [];
   const lang = opts.lang || "dzl";
   const plan = opts.answerPlan || null;
 
@@ -6800,9 +6833,23 @@ function conflictCheckReply(reply, opts = {}) {
   const grounded = toolsUsed.includes("offers_lookup") || toolsUsed.includes("catalog_lookup") || toolsUsed.includes("policy_lookup");
   const referencesPriceOrStock = mentionsPriceOrCurrency(reply) || mentionsStockOrAvailability(reply);
   const referencesPolicy = mentionsPolicy(reply);
+  const normalizedFacts = new Set(factsResolved.map((f) => normalizeFactName(f)).filter(Boolean));
+  const requiredFacts = new Set((plan && Array.isArray(plan.required_facts) ? plan.required_facts : []).map(normalizeFactName).filter(Boolean));
+  const requiredTools = new Set((plan && Array.isArray(plan.tools_to_call) ? plan.tools_to_call : []).filter(Boolean));
 
   if ((referencesPriceOrStock || referencesPolicy) && !grounded) issues.push("missing_grounding");
   if (impliesCheckedWithoutTool(reply) && !grounded) issues.push("unsupported_claim");
+
+  if (plan) {
+    if (requiredFacts.has("price") && referencesPriceOrStock && !normalizedFacts.has("price")) issues.push("missing_fact_price");
+    if (requiredFacts.has("stock") && referencesPriceOrStock && !normalizedFacts.has("stock")) issues.push("missing_fact_stock");
+    if (requiredFacts.has("policy") && referencesPolicy && !normalizedFacts.has("policy")) issues.push("missing_fact_policy");
+
+    if ((referencesPriceOrStock || referencesPolicy) && requiredTools.size > 0) {
+      const overlap = Array.from(requiredTools).some((t) => toolsUsed.includes(t));
+      if (!overlap) issues.push("required_tool_missing");
+    }
+  }
 
   if (!issues.length) return { ok: true, reply };
 
@@ -7101,6 +7148,15 @@ app.post("/wanotifier", async (req, res) => {
       return `${audioAnswerNoteText}\n\n${text}`;
     };
     const toolsUsed = new Set();
+    const currentFactsResolved = () => {
+      const facts = new Set();
+      if (toolsUsed.has("offers_lookup") || toolsUsed.has("catalog_lookup")) {
+        facts.add("price");
+        facts.add("stock");
+      }
+      if (toolsUsed.has("policy_lookup")) facts.add("policy");
+      return Array.from(facts);
+    };
     let answerPlan = null;
     const finalizeReply = (text, limit, opts = {}) => {
       const allowQuestion = opts.allowQuestion === true;
@@ -7110,6 +7166,7 @@ app.post("/wanotifier", async (req, res) => {
         toolsUsed: Array.from(toolsUsed),
         lang,
         answerPlan: answerPlan || opts.answerPlan || null,
+        factsResolved: currentFactsResolved(),
       });
       const candidate = check.ok ? withNote : check.reply;
       return allowQuestion ? shorten(candidate, limit) : shortenNoQuestion(candidate, limit);
