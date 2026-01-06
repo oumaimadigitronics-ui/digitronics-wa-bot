@@ -6376,6 +6376,32 @@ function isUnrelatedFragment(text, parsed, memoryState) {
   return false;
 }
 
+function describeSubjectFromMemory(lang, state) {
+  const L = String(lang || "dzl");
+  const s = state || {};
+  const parts = [];
+  if (s.category) parts.push(String(s.category));
+  if (s.brand) parts.push(String(s.brand));
+  if (s.specs && s.specs.size) parts.push(formatSize(L, s.specs.size));
+  if (s.specs && s.specs.model) parts.push(String(s.specs.model));
+  return parts.filter(Boolean).join(" ").trim();
+}
+
+function continueSameSubjectMessage(lang, state) {
+  const L = String(lang || "dzl");
+  const subject = describeSubjectFromMemory(L, state);
+  if (L === "fr") {
+    const base = subject ? `On continue sur ${subject}` : "Je continue sur votre demande en cours";
+    return `${base}. Si vous voulez changer de produit, dites-le clairement.`;
+  }
+  if (L === "ar") {
+    const base = subject ? `غادي نكمل معاك ف نفس الموضوع: ${subject}` : "غادي نكمل معاك ف نفس الموضوع";
+    return `${base}. إلا بغيتي تبدل، قولها ليا.`;
+  }
+  const base = subject ? `Ghadi nkemlo f nafs lmawdou3: ${subject}` : "Ghadi nkemlo f nafs lmawdou3";
+  return `${base}. Ila bghiti tbdl lmawdou3, goulha lia.`;
+}
+
 function clarifyingQuestionForState(state) {
   const s = state || {};
   if (!s.category && !s.brand) return "Should we continue with the current product topic or start a new one?";
@@ -7244,13 +7270,8 @@ app.post("/wanotifier", async (req, res) => {
     }
 
     if (unrelatedFragment) {
-      const fallbackQuestion =
-        lang === "fr"
-          ? "On change de sujet ou on continue sur le même sujet ?"
-          : lang === "ar"
-          ? "بغيت تبدل الموضوع ولا نكملو ف نفس الموضوع؟"
-          : "Bghiti nbdlo lmawdou3 wla nkemlo 3la nafs lmawdou3?";
-      const reply = finalizeReply(fallbackQuestion, 200, { allowQuestion: true });
+      const topicReminder = continueSameSubjectMessage(lang, memoryPreview);
+      const reply = finalizeReply(topicReminder, 320);
       memory.push(key, "assistant", reply);
       resetStrikes(key);
       return res.json({ ok: true, reply });

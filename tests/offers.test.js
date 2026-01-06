@@ -445,6 +445,47 @@ test("bestGuess requires current shopping signal", async () => {
   }
 });
 
+test("short unrelated follow-ups keep the same subject without asking to switch", async () => {
+  setOffersForTest({
+    TCL: [{ price: 4200, stock: 2, model: "TCL-50", class: "Tv", category: "Tv", size: 50, link: "http://example.com/tcl-50" }],
+  });
+
+  const openai = {
+    chat: {
+      completions: {
+        create: async () => ({ choices: [{ message: { content: "Noted." } }] }),
+      },
+    },
+  };
+
+  const { urlBase, close } = await createServerForTests({ openai });
+
+  try {
+    const initial = await fetch(`${urlBase}/wanotifier`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ text: 'TV 50"', waId: "user-topic" }),
+    });
+    const firstReply = await initial.json();
+    assert.ok(firstReply.ok);
+    assert.ok(/50/.test(firstReply.reply));
+
+    const followUp = await fetch(`${urlBase}/wanotifier`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ text: "lol", waId: "user-topic" }),
+    });
+    const followReply = await followUp.json();
+    assert.ok(followReply.ok);
+    assert.ok(!/change de sujet/i.test(followReply.reply));
+    assert.ok(!followReply.reply.includes("?"));
+    assert.ok(/tv/i.test(followReply.reply) || /50/.test(followReply.reply));
+  } finally {
+    await close();
+    setOffersForTest(null);
+  }
+});
+
 test("direct offers respond with fridge products", () => {
   setOffersForTest(TEST_OFFERS);
   const reply = tryDirectOfferAnswer("ثلاجة", [], "dzl", "k-fridge");
