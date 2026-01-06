@@ -6816,6 +6816,8 @@ function conflictCheckReply(reply, opts = {}) {
   const lang = opts.lang || "dzl";
   const plan = opts.answerPlan || null;
 
+  if (!plan) return { ok: true, reply };
+
   const issues = [];
 
   if (hasAvailabilityContradiction(reply)) issues.push("availability_conflict");
