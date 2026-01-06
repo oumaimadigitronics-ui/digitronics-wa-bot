@@ -317,9 +317,17 @@ function loadSystemPromptValue() {
   }
 }
 
+function stripDeprecatedConfidenceRules(promptText) {
+  const start =
+    "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nCONFIDENCE SCORING (INTERNAL DECISION ENGINE)\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━";
+  const end = "3) Clarifying question (ONLY if required by confidence rules)";
+  const pattern = new RegExp(`${escapeRegExp(start)}[\\s\\S]*?${escapeRegExp(end)}`, "g");
+  return String(promptText || "").replace(pattern, "").trim();
+}
+
 function getSystemPrompt() {
   if (!systemPromptLoaded) {
-    systemPromptValue = loadSystemPromptValue();
+    systemPromptValue = stripDeprecatedConfidenceRules(loadSystemPromptValue());
     systemPromptLoaded = true;
   }
   return systemPromptValue;
