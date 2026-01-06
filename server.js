@@ -44,7 +44,33 @@ app.get("/meta/webhook", (req, res) => {
   return res.sendStatus(403);
 });
 
-// ✅ PASTE THIS RIGHT HERE 👇👇👇
+// --- META webhook receive (POST) ---
+app.post("/meta/webhook", async (req, res) => {
+  // Meta expects fast 200 OK
+  res.sendStatus(200);
+
+  try {
+    const body = req.body;
+
+    // Messenger payload always uses object = "page"
+    if (!body || body.object !== "page") return;
+
+    for (const entry of body.entry || []) {
+      for (const event of entry.messaging || []) {
+        const senderId = event?.sender?.id;
+        const text = event?.message?.text;
+        const isEcho = !!event?.message?.is_echo;
+
+        // Ignore echoes, non-text
+        if (!senderId || !text || isEcho) continue;
+
+        console.log("✅ META MESSAGE:", { senderId, text });
+      }
+    }
+  } catch (err) {
+    console.error("❌ Meta webhook error:", err?.message || err);
+  }
+});
 
 // --- META webhook receive (POST) ---
 app.post("/meta/webhook", async (req, res) => {
