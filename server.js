@@ -510,6 +510,11 @@ function t(lang, key, vars) {
       bankTransferHow:
         'Ila bghiti tخلص b virement: mlli tdir commande, zid note f formulaire: "paiement par virement bancaire".\nFormulaire: ' +
         ORDER_FORM_URL_SAFE,
+      thanksCta: (x) => {
+        const form = String((x || {}).form || ORDER_FORM_URL_SAFE);
+        const address = String((x || {}).address || COMPANY.address);
+        return "Chokran bzaaf 🙏 Ila bghiti tchri دابا, hadi formulaire: " + form + ". Kansnaw nsewlo 3lik, w t9dr tzourna f magasin: " + address + ".";
+      },
       needDetails: "سمح ليا ما فهمتش الطلب ديالك مزيان 🙏 غادي يدخل معاك وكيل بشري يكمل معاك، ولا تقدر تعيط لينا على 0605123934",
       cannot3: "Ma qdrtch n3tik jawab bd9a daba. T9dr t3yt lina: " + CONTACTS.calls.join(" / ") + ".",
       photoLink: (x) => {
@@ -568,6 +573,11 @@ function t(lang, key, vars) {
       bankTransferHow:
         'Paiement par virement : lors de la commande, ajoutez une note dans le formulaire : "paiement par virement bancaire".\nFormulaire: ' +
         ORDER_FORM_URL_SAFE,
+      thanksCta: (x) => {
+        const form = String((x || {}).form || ORDER_FORM_URL_SAFE);
+        const address = String((x || {}).address || COMPANY.address);
+        return "Merci beaucoup 🙏 Pour acheter, passez commande ici: " + form + ". J’espère avoir de vos nouvelles bientôt ou vous accueillir en magasin: " + address + ".";
+      },
       needDetails: "Désolé, je n’ai pas bien compris 🙏 Un agent humain va prendre le relais, ou appelez-nous au 0605123934",
       cannot3: "Je ne peux pas répondre avec certitude pour le moment. Vous pouvez appeler: " + CONTACTS.calls.join(" / ") + ".",
       photoLink: (x) => {
@@ -625,6 +635,11 @@ function t(lang, key, vars) {
       callSoonNeedOrder: "حسناً. غادي نعيطو ليك قريب. إلا كان عندك رقم الطلب صيفطو من فضلك.",
       bankTransferHow:
         'باش تخلص بالتحويل البنكي: منين دير الطلب زيد ملاحظة فالفورم: "الدفع بتحويل بنكي".\nالفورم: ' + ORDER_FORM_URL_SAFE,
+      thanksCta: (x) => {
+        const form = String((x || {}).form || ORDER_FORM_URL_SAFE);
+        const address = String((x || {}).address || COMPANY.address);
+        return "شكراً بزاف 🙏 باش تكمل الشراء، هاد الرابط ديال الفورم: " + form + ". كنتمنى نسمع منك قريباً ولا تزورنا فالمحل: " + address + ".";
+      },
       needDetails: "سمح ليا ما فهمتش الطلب ديالك مزيان 🙏 غادي يدخل معاك وكيل بشري يكمل معاك، ولا تقدر تعيط لينا على 0605123934",
       cannot3: "ماقدرتش نعطيك جواب مؤكد دابا. تقدر تعيط لينا: " + CONTACTS.calls.join(" / ") + ".",
       photoLink: (x) => {
@@ -4761,6 +4776,10 @@ function contactInfoSavedMessage(lang) {
   return "Shokran 3la l-infos 👍 Goul lia kifach n3awnk.";
 }
 
+function thankYouFollowUpMessage(lang) {
+  return t(lang, "thanksCta", { form: ORDER_FORM_URL_SAFE, address: COMPANY.address });
+}
+
 function hasProductInquirySignal(text) {
   const raw = String(text || "");
   const optionKeywords = [
@@ -7024,6 +7043,13 @@ app.post("/wanotifier", async (req, res) => {
       return res.json({ ok: true, reply: out });
     }
 
+    if (isAcknowledgementMessage(userTextRaw) && !hasShoppingIntent) {
+      const reply = finalizeReply(thankYouFollowUpMessage(lang), 520);
+      memory.push(key, "assistant", reply);
+      resetStrikes(key);
+      return res.json({ ok: true, reply });
+    }
+
     if (isPreferBest(userTextRaw) || isPreferCheapest(userTextRaw)) {
       const prefer = isPreferCheapest(userTextRaw) ? "cheapest" : "best";
       const picked = pickFromLastShown(key, prefer);
@@ -7179,6 +7205,7 @@ export {
   createServerForTests,
   t,
   isNegotiationIntent,
+  thankYouFollowUpMessage,
   INITIAL_GREETING_TTL_MS,
   describeImage,
 };
