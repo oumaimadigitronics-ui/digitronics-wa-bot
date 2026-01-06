@@ -32,6 +32,46 @@ app.get("/meta/webhook", (req, res) => {
   return res.sendStatus(403);
 });
 
+// --- META webhook verify (GET) ---
+app.get("/meta/webhook", (req, res) => {
+  const mode = req.query["hub.mode"];
+  const token = req.query["hub.verify_token"];
+  const challenge = req.query["hub.challenge"];
+
+  if (mode === "subscribe" && token === META_VERIFY_TOKEN) {
+    return res.status(200).send(challenge);
+  }
+  return res.sendStatus(403);
+});
+
+// ✅ PASTE THIS RIGHT HERE 👇👇👇
+
+// --- META webhook receive (POST) ---
+app.post("/meta/webhook", async (req, res) => {
+  // Meta expects fast 200 OK
+  res.sendStatus(200);
+
+  try {
+    const body = req.body;
+
+    if (!body || body.object !== "page") return;
+
+    for (const entry of body.entry || []) {
+      for (const event of entry.messaging || []) {
+        const senderId = event?.sender?.id;
+        const text = event?.message?.text;
+        const isEcho = !!event?.message?.is_echo;
+
+        if (!senderId || !text || isEcho) continue;
+
+        // (We will add handleMetaTextMessage + sendMessengerText in next steps)
+        console.log("META MSG:", senderId, text);
+      }
+    }
+  } catch (err) {
+    console.error("Meta webhook error:", err?.message || err);
+  }
+});
 
 
 const LOG_DEBUG = String(process.env.LOG_DEBUG || "0") === "1";
