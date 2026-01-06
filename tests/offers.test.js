@@ -51,6 +51,7 @@ import {
   isNegotiationIntent,
   offerFromWooProduct,
   thankYouFollowUpMessage,
+  DEFAULT_SYSTEM_PROMPT,
 } from "../server.js";
 import { setDepsForTests } from "../src/deps.js";
 
@@ -133,7 +134,7 @@ test("rankOffers is stable across calls", () => {
 test("buildSystemPrompt falls back to default prompt", () => {
   setSystemPromptForTest("");
   const prompt = buildSystemPrompt({}, "fr", {});
-  assert.ok(prompt.startsWith("You are DigiBot for Digitronics.ma."));
+  assert.ok(prompt.startsWith(DEFAULT_SYSTEM_PROMPT));
   assert.ok(prompt.includes("STRICT STYLE:"));
 });
 
