@@ -1683,8 +1683,34 @@ function maybeSendInitialGreeting({ key, lang }) {
   return reply;
 }
 
-function handleGreetingMessage({ key, lang, text }) {
-  if (!isGreetingLikeOpener(text)) return null;
+function isForcedGreeting(text) {
+  const sanitize = (input) =>
+    normMatch(String(input || ""))
+      .replace(/[.,!?؟]/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+
+  const normalized = sanitize(text);
+  if (!normalized) return false;
+
+  // Any greeting/opening word or phrase should force the greeting template,
+  // even if the message also contains a purchase intent.
+  if (isGreetingLikeOpener(text)) return true;
+
+  const forced = [
+    "اريد الشراء ماذا افعل",
+    "i want to buy what should i do",
+    "i want to purchase what should i do",
+    "je veux acheter que dois je faire",
+    "quiero comprar que debo hacer",
+    "bonjour ! puis-je en savoir plus a ce sujet ?",
+  ].map(sanitize);
+
+  return forced.includes(normalized);
+}
+
+function handleGreetingMessage({ key, lang, text, force = false }) {
+  if (!force && !isGreetingLikeOpener(text)) return null;
 
   const reply = maybeSendInitialGreeting({ key, lang });
   if (!reply) return null;
@@ -7255,7 +7281,11 @@ app.post("/wanotifier", async (req, res) => {
     const history = memory.get(key);
     const ctxData = getCtx(key);
 
-    const greetingReply = isBuyIntent(userTextRaw) ? null : handleGreetingMessage({ key, lang, text: userTextRaw });
+    const forcedGreeting = isForcedGreeting(userTextRaw);
+    const greetingReply =
+      forcedGreeting || !isBuyIntent(userTextRaw)
+        ? handleGreetingMessage({ key, lang, text: userTextRaw, force: forcedGreeting })
+        : null;
     if (greetingReply) {
       const reply = finalizeReply(greetingReply, 520);
       memory.push(key, "assistant", reply);
