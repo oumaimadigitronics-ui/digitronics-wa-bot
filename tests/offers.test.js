@@ -200,6 +200,48 @@ test("tv knowledge is included for size-only queries", () => {
   assert.ok(reply.includes("Google TV") || reply.includes("QLED"));
 });
 
+test("google tv official follow-up clarifies Android TV", () => {
+  const key = "google-tv-android";
+  setOffersForTest({
+    HAIER: [{ model: "H-43", price: 3200, stock: 2, class: "Tv", category: "Tv", size: 43, type: "Android TV", link: "http://x/h43" }],
+  });
+
+  tryDirectOfferAnswer("haier 43", [], "dzl", key);
+  const reply = tryDirectOfferAnswer("gogle tv officiel fiha", [], "dzl", key);
+
+  assert.ok(reply.toLowerCase().includes("android tv"));
+  assert.ok(reply.toLowerCase().includes("machi google tv"));
+  assertNoQuestionMarks(reply);
+});
+
+test("google tv official follow-up uses brand OS defaults", () => {
+  const key = "google-tv-tizen";
+  setOffersForTest({
+    SAMSUNG: [{ model: "SM-50", price: 5200, stock: 1, class: "Tv", category: "Tv", size: 50, link: "http://x/sm50" }],
+  });
+
+  tryDirectOfferAnswer("samsung 50", [], "fr", key);
+  const reply = tryDirectOfferAnswer("google tv officiel ?", [], "fr", key);
+
+  assert.ok(reply.toLowerCase().includes("tizen"));
+  assert.ok(reply.toLowerCase().includes("pas google tv"));
+  assertNoQuestionMarks(reply);
+});
+
+test("google tv official follow-up confirms Google TV", () => {
+  const key = "google-tv-yes";
+  setOffersForTest({
+    TCL: [{ model: "T-50G", price: 4000, stock: 2, class: "Tv", category: "Tv", size: 50, type: "Google TV", link: "http://x/t50" }],
+  });
+
+  tryDirectOfferAnswer("tcl 50", [], "fr", key);
+  const reply = tryDirectOfferAnswer("est-ce que c’est google tv officiel", [], "fr", key);
+
+  assert.ok(reply.toLowerCase().includes("google tv"));
+  assert.ok(reply.toLowerCase().includes("officiel"));
+  assertNoQuestionMarks(reply);
+});
+
 test("xiaomi queries redirect to stocked alternatives", () => {
   setOffersForTest({
     TCL: [{ model: "TCL-50G", price: 4000, stock: 2, class: "Tv", category: "Tv", size: 50, link: "http://x/tcl50" }],

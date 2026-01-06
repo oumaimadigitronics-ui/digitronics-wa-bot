@@ -4303,6 +4303,26 @@ function normalizeTvTypeName(typeStr) {
   return String(typeStr || "").trim();
 }
 
+function defaultTvOsForBrand(brand) {
+  const b = normMatch(brand || "");
+  if (!b) return "";
+  if (b === "samsung") return "Tizen";
+  if (b === "lg") return "webOS";
+  if (b === "hisense") return "VIDAA";
+  return "";
+}
+
+function detectTvOs(offer, brand) {
+  const typeName = normalizeTvTypeName((offer && offer.type) || "");
+  if (typeName) return typeName;
+
+  const nameModel = normMatch([offer && offer.name, offer && offer.model].filter(Boolean).join(" "));
+  if (nameModel.indexOf("google tv") >= 0) return "Google TV";
+  if (nameModel.indexOf("android") >= 0) return "Android TV";
+
+  return defaultTvOsForBrand(brand);
+}
+
 function collectTvKnowledge({ size } = {}) {
   const tvCanon = OFFERS_INDEX.classCanon.tv;
   const tvNorm = normMatch(tvCanon || "");
@@ -4880,6 +4900,106 @@ function isCallMeIntent(text) {
   return false;
 }
 
+function googleTvOsReply(lang, { brand, os }) {
+  const L = lang || "dzl";
+  const osNorm = normMatch(os || "");
+  const brandSafe = String(brand || "").trim();
+  const osKey = osNorm.indexOf("google") >= 0 ? "google" : osNorm.indexOf("android") >= 0 ? "android" : osNorm;
+
+  if (osKey === "google") {
+    if (L === "fr") return "Oui, ce modèle est Google TV officiel.";
+    if (L === "ar") return "نعم، هذا الموديل Google TV رسمي.";
+    return "Iyeh, had l-model fiha Google TV Official.";
+  }
+
+  if (osKey === "android") {
+    if (L === "fr") return "Non, c’est Android TV, pas Google TV. Il a son interface et son store propres.";
+    if (L === "ar") return "لا، هذا Android TV وليس Google TV، ويستعمل المتجر الخاص به.";
+    return "La, had TV fiha Android TV, machi Google TV, w katkhdem b store dyalha.";
+  }
+
+  if (osKey === "tizen") {
+    if (L === "fr") return `Non, ${brandSafe || "ce modèle"} tourne sous Tizen, pas Google TV.`.trim();
+    if (L === "ar") return `لا، ${brandSafe || "هذا الموديل"} يعمل بـ Tizen، ليس Google TV.`.trim();
+    return `La, ${brandSafe || "had TV"} katkhdem b Tizen, machi Google TV.`.trim();
+  }
+
+  if (osKey === "webos") {
+    if (L === "fr") return `Non, ${brandSafe || "ce modèle"} est sous webOS, pas Google TV.`.trim();
+    if (L === "ar") return `لا، ${brandSafe || "هذا الموديل"} يعمل بـ webOS، ليس Google TV.`.trim();
+    return `La, ${brandSafe || "had TV"} katkhdem b webOS, machi Google TV.`.trim();
+  }
+
+  if (osKey === "vidaa") {
+    if (L === "fr") return `Non, ${brandSafe || "ce modèle"} tourne sous VIDAA, pas Google TV.`.trim();
+    if (L === "ar") return `لا، ${brandSafe || "هذا الموديل"} يعمل بـ VIDAA، ليس Google TV.`.trim();
+    return `La, ${brandSafe || "had TV"} katkhdem b VIDAA, machi Google TV.`.trim();
+  }
+
+  if (L === "fr") return "Indiquez-moi le modèle exact pour confirmer si c’est Google TV officiel.";
+  if (L === "ar") return "أرسل لي اسم الموديل بالتحديد لتأكيد هل هو Google TV رسمي.";
+  return "3tini smit l-model b dda9a bach n2aked wach fiha Google TV Official.";
+}
+
+function isGoogleTvOfficialQuestion(text) {
+  const s = normMatch(text || "");
+  if (!s) return false;
+  const noSpaces = s.replace(/\s+/g, "");
+  const hasGoogle = s.indexOf("google tv") >= 0 || noSpaces.indexOf("googletv") >= 0 || noSpaces.indexOf("gogletv") >= 0;
+  if (!hasGoogle) return false;
+  const officialHints = ["official", "officiel", "officielle", "oficiel", "oficielle", "رسمي", "رسمية", "fiha", "فيها"];
+  for (let i = 0; i < officialHints.length; i += 1) {
+    if (s.indexOf(normMatch(officialHints[i])) >= 0) return true;
+  }
+  return false;
+}
+
+function answerGoogleTvOfficialQuestion({ text, lang, parsed, key, modelOffer }) {
+  if (!isGoogleTvOfficialQuestion(text)) return null;
+
+  const ctx = getCtx(key);
+  let brand = parsed.brand || ctx.lastBrand || null;
+  let offer = modelOffer || null;
+
+  if (!offer && parsed.modelHit && parsed.modelHit.model) {
+    const o = findOfferByBrandModel(parsed.modelHit.brand, parsed.modelHit.model);
+    if (o) {
+      offer = o;
+      brand = parsed.modelHit.brand || brand;
+    }
+  }
+
+  if (!offer) {
+    const picked = pickFromLastShown(key);
+    if (picked) {
+      offer = picked.offer;
+      brand = picked.brand || brand;
+    }
+  }
+
+  if (!offer) {
+    const shown = Array.isArray(ctx.lastOffersShown) ? ctx.lastOffersShown : [];
+    for (let i = 0; i < shown.length; i += 1) {
+      const it = shown[i] || {};
+      const found = findOfferByBrandModel(it.brand || brand, it.model);
+      if (found) {
+        offer = found;
+        brand = it.brand || brand;
+        break;
+      }
+    }
+  }
+
+  if (!offer && brand && OFFERS && OFFERS.offers && OFFERS.offers[brand]) {
+    const arr = (OFFERS.offers[brand] || []).filter((o) => Number((o && o.stock) || 0) > 0);
+    if (arr.length) offer = arr[0];
+  }
+
+  const os = detectTvOs(offer, brand);
+  const reply = googleTvOsReply(lang, { brand, os });
+  return ensureNoQuestion(reply);
+}
+
 function isBuyIntent(text) {
   const raw = String(text || "");
   const s = normMatch(raw);
@@ -5318,6 +5438,9 @@ function tryDirectOfferAnswer(userText, historyMsgs, lang, key) {
   const isNonTvSignal = Boolean((category && !isTvCategory) || (cls && !isTvClass));
 
   const tvFlow = handleTvSizePriceFlow(parsed, lang, key);
+
+  const googleTvReply = answerGoogleTvOfficialQuestion({ text, lang, parsed, key, modelOffer });
+  if (googleTvReply) return googleTvReply;
 
   if (normMatch(brand || "") === "xiaomi") {
     const clsHint = tvHint ? tvCanon : cls;
@@ -5987,6 +6110,12 @@ function buildSystemPrompt(offersSubset, lang, opts) {
     "- ALWAYS recommend exactly 3 options, never more or less.\n" +
     "- Do NOT output any URL in normal replies. Only output a product link in the photo flow handled outside.\n" +
     "- Do NOT ask questions. Never output question marks.\n\n" +
+    "TV OS RULES:\n" +
+    "- Google TV only when the product name or specs explicitly mention \"Google TV\".\n" +
+    "- If the name/specs say \"Android TV\", state clearly it is Android TV (own interface/store), NOT Google TV.\n" +
+    "- Samsung TVs run on Tizen (not Google TV / not Android TV).\n" +
+    "- LG TVs run on webOS (not Google TV / not Android TV).\n" +
+    "- Hisense TVs run on VIDAA (not Google TV / not Android TV).\n\n" +
     "ANSWER LOGIC:\n" +
     "- First, understand what the user is asking for: product info, price/budget, delivery/payment/warranty, support, or order status.\n" +
     "- Use the intent hints provided in the extra system message to stay consistent with previous context (brand, class/category, size, budget, last shown offers).\n" +
