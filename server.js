@@ -321,7 +321,7 @@ function stripDeprecatedConfidenceRules(promptText) {
   const start =
     "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nCONFIDENCE SCORING (INTERNAL DECISION ENGINE)\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━";
   const end = "3) Clarifying question (ONLY if required by confidence rules)";
-  const pattern = new RegExp(`${escapeRegExp(start)}[\\s\\S]*?${escapeRegExp(end)}`, "g");
+  const pattern = new RegExp(`${start}[\\s\\S]*?${end}`, "g");
   return String(promptText || "").replace(pattern, "").trim();
 }
 
@@ -1691,23 +1691,8 @@ function maybeSendInitialGreeting({ key, lang }) {
   return reply;
 }
 
-function isForcedGreeting(text) {
-  const normalized = normMatch(String(text || "")).replace(/[.,!?؟]/g, "");
-  if (!normalized) return false;
-
-  const forced = [
-    "اريد الشراء ماذا افعل",
-    "i want to buy what should i do",
-    "i want to purchase what should i do",
-    "je veux acheter que dois je faire",
-    "quiero comprar que debo hacer",
-  ];
-
-  return forced.includes(normalized);
-}
-
-function handleGreetingMessage({ key, lang, text, force = false }) {
-  if (!force && !isGreetingLikeOpener(text)) return null;
+function handleGreetingMessage({ key, lang, text }) {
+  if (!isGreetingLikeOpener(text)) return null;
 
   const reply = maybeSendInitialGreeting({ key, lang });
   if (!reply) return null;
@@ -6684,13 +6669,22 @@ function buildAnswerPlan(userText, opts = {}) {
   const memoryState = opts.memoryState || {};
   const decision = opts.decision || null;
 
+  const memoryIntent =
+    memoryState.intent ||
+    memoryState.category ||
+    memoryState.cls ||
+    memoryState.brand ||
+    (memoryState.specs && memoryState.specs.model) ||
+    (Number.isFinite(memoryState.budget) ? "price_quote" : null);
+
   const plan = {
     user_intent:
       parsed.intentCategory ||
       parsed.intentClass ||
       parsed.category ||
       parsed.cls ||
-      (parsed.priceIntent ? "price_quote" : "general_support"),
+      memoryIntent ||
+      (parsed.priceIntent || Number.isFinite(memoryState.budget) ? "price_quote" : "general_support"),
     required_facts: [],
     tools_to_call: [],
     assumptions_allowed: [],
@@ -7280,11 +7274,7 @@ app.post("/wanotifier", async (req, res) => {
     const history = memory.get(key);
     const ctxData = getCtx(key);
 
-    const forcedGreeting = isForcedGreeting(userTextRaw);
-    const greetingReply =
-      forcedGreeting || !isBuyIntent(userTextRaw)
-        ? handleGreetingMessage({ key, lang, text: userTextRaw, force: forcedGreeting })
-        : null;
+    const greetingReply = isBuyIntent(userTextRaw) ? null : handleGreetingMessage({ key, lang, text: userTextRaw });
     if (greetingReply) {
       const reply = finalizeReply(greetingReply, 520);
       memory.push(key, "assistant", reply);
@@ -7662,6 +7652,7 @@ export {
   isGreetingLikeOpener,
   findOfferFromLinks,
   buildSystemPrompt,
+  buildAnswerPlan,
   tryWebsiteCatalogAnswer,
   tryDirectOfferAnswer,
   setOffersForTest,
