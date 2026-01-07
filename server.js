@@ -5980,6 +5980,36 @@ function getOffersBlock() {
   return OFFERS_CACHE;
 }
 
+const PUBLIC_OFFERS_KEYWORDS = [
+  "offers",
+  "offer",
+  "promos",
+  "promo",
+  "promotion",
+  "promotions",
+  "deals",
+  "deal",
+  "soldes",
+  "solde",
+  "bon plan",
+  "meilleures offres",
+  "عروض",
+  "عرض",
+  "تخفيض",
+  "تخفيضات",
+  "برومو",
+  "promo",
+  "offre",
+];
+
+function isPublicOffersRequest(text) {
+  const raw = String(text || "").trim().toLowerCase();
+  if (!raw) return false;
+  const stripped = raw.replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, "").replace(/\s+/g, " ").trim();
+  if (!stripped) return false;
+  return PUBLIC_OFFERS_KEYWORDS.some((keyword) => stripped === keyword);
+}
+
 function parseOffersPinCommand(text) {
   const raw = String(text || "").trim();
   const firstLine = raw.split("\n")[0].trim();
@@ -7167,6 +7197,12 @@ app.post("/wanotifier", express.raw({ type: "*/*", limit: "2mb" }), parseWanotif
     const msgType = String(incoming.type || "").toLowerCase();
     const lang = detectLang(userTextRaw || incoming.lang || "");
     const ip = String(req.ip || "");
+    if (isPublicOffersRequest(userTextRaw)) {
+      const reply = getOffersBlock();
+      memory.push(key, "assistant", reply);
+      resetStrikes(key);
+      return res.json({ ok: true, reply });
+    }
     const parsed = parseOffersPinCommand(userTextRaw);
     if (parsed.cmd) {
       if (!parsed.pin) {
