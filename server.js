@@ -167,6 +167,10 @@ const ADMIN_PIN = String(process.env.ADMIN_PIN || "1234").trim();
 const ADMIN_NUMBERS = new Set([
   "212660111438", // +212660111438
   "0660111438",
+  "0700144922",
+  "0696744965",
+  "212700144922",
+  "212696744965",
 ]);
 const DEFAULT_OFFERS = [
   "🔥 *NOUVELLES OFFRES* 🔥",
