@@ -188,7 +188,7 @@ const BRAND_PRIORITY = [
   "Tivoli",
 ];
 const MAX_OFFERS = 3;
-const ADMIN_PIN = String(process.env.ADMIN_PIN || "987987").trim();
+const ADMIN_PIN = String(process.env.ADMIN_PIN || "").trim();
 const OFFERS_FILE = path.join(process.cwd(), "offers.json");
 const DEFAULT_OFFERS = [
   "🔥 *NOUVELLES OFFRES* 🔥",
@@ -5974,7 +5974,7 @@ function parseOffersPinCommand(text) {
   const raw = String(text || "").trim();
   const firstLine = raw.split("\n")[0].trim();
 
-  const m = firstLine.match(/^(.+?)(?:\s*:\s*|\s+)(\S+)\s*$/);
+  const m = firstLine.match(/^([a-zA-Z][a-zA-Z_\-\s]*)(?:\s*:\s*|\s+)?(.*)$/);
   if (!m) return { cmd: null, pin: null, payload: null };
 
   let cmd = String(m[1] || "")
@@ -5988,11 +5988,15 @@ function parseOffersPinCommand(text) {
     return { cmd: null, pin: null, payload: null };
   }
 
-  const pin = String(m[2] || "").trim();
+  const remainder = String(m[2] || "").trim();
+  const [pinToken, ...restTokens] = remainder.split(/\s+/).filter(Boolean);
+  const pin = pinToken ? String(pinToken || "").trim() : null;
 
   let payload = null;
   if (cmd === "SET_OFFERS") {
-    payload = raw.split("\n").slice(1).join("\n").trim();
+    const sameLinePayload = restTokens.join(" ").trim();
+    const nextLinesPayload = raw.split("\n").slice(1).join("\n").trim();
+    payload = [sameLinePayload, nextLinesPayload].filter(Boolean).join("\n").trim();
   }
   return { cmd, pin, payload };
 }
@@ -7137,6 +7141,18 @@ app.post("/wanotifier", express.raw({ type: "*/*", limit: "2mb" }), parseWanotif
     const ip = String(req.ip || "");
     const parsed = parseOffersPinCommand(userTextRaw);
     if (parsed.cmd) {
+      if (!parsed.pin) {
+        if (parsed.cmd === "OFFERS") {
+          const reply = ["Usage:", "OFFERS: <PIN>", "SET_OFFERS: <PIN>", "<paste your new offers text here>"].join("\n");
+          memory.push(key, "assistant", reply);
+          resetStrikes(key);
+          return res.json({ ok: true, reply });
+        }
+        const reply = ["Usage:", "SET_OFFERS: <PIN>", "<paste your new offers text here>"].join("\n");
+        memory.push(key, "assistant", reply);
+        resetStrikes(key);
+        return res.json({ ok: true, reply });
+      }
       if (!isValidPin(parsed.pin)) {
         const reply = "❌ PIN incorrect.";
         memory.push(key, "assistant", reply);
@@ -7151,7 +7167,7 @@ app.post("/wanotifier", express.raw({ type: "*/*", limit: "2mb" }), parseWanotif
       }
       if (parsed.cmd === "SET_OFFERS") {
         if (!parsed.payload) {
-          const reply = ["Usage:", "SET_OFFERS: 987987", "<paste your new offers text on next lines>"].join("\n");
+          const reply = ["Usage:", "SET_OFFERS: <PIN>", "<paste your new offers text here>"].join("\n");
           memory.push(key, "assistant", reply);
           resetStrikes(key);
           return res.json({ ok: true, reply });
