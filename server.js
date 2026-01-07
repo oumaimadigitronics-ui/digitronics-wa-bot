@@ -6315,6 +6315,7 @@ function buildSystemPrompt(offersSubset, lang, opts) {
     "- Address: " +
     COMPANY.address +
     "\n" +
+    "- Working hours: Monday to Saturday 10:00 a.m. – 10:00 p.m.; Sunday 2:00 p.m. – 10:00 p.m.\n" +
     "- WhatsApp: " +
     CONTACTS.whatsapp +
     "\n" +
