@@ -5911,12 +5911,14 @@ function contactTemplate() {
   );
 }
 
-function normalizePhone(from) {
-  return arabicIndicToAsciiDigits(String(from || "")).replace(/[^\d]/g, "");
+function normalizeAdminPhone(from) {
+  const normalized = normalizePhone(from);
+  if (!normalized) return "";
+  return normalized.replace(/[^\d]/g, "");
 }
 
 function isAdmin(from) {
-  const normalized = normalizePhone(from);
+  const normalized = normalizeAdminPhone(from);
   if (!normalized) return false;
   if (ADMIN_NUMBERS.has(normalized)) return true;
   const last9 = normalized.slice(-9);
