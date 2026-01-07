@@ -7108,25 +7108,28 @@ app.post("/wanotifier", async (req, res) => {
     const ip = String(req.ip || "");
     const fromNumber = phone;
 
-    console.log("[WANOTIFIER HIT] file=", __filename);
+    const logAdminDebug = (parsed) => {
+      console.log("[ADMIN DEBUG] rawFrom=", fromNumber);
+      console.log("[ADMIN DEBUG] normFrom=", normalizePhone(fromNumber));
+      console.log("[ADMIN DEBUG] isAdmin=", isAdmin(fromNumber));
+      console.log("[ADMIN DEBUG] text=", userTextRaw);
+      console.log("[ADMIN DEBUG] parsed=", parsed);
+      console.log("[ADMIN DEBUG] envPIN=", process.env.ADMIN_PIN);
+    };
 
     if (isAdmin(fromNumber)) {
       const parsed = parseAdminOffersCommand(userTextRaw);
       if (parsed.cmd) {
-        console.log("[ADMIN HIT]", {
-          fromNumber,
-          norm: normalizePhone(fromNumber),
-          parsed,
-          envPIN: process.env.ADMIN_PIN,
-        });
         if (!isValidAdminPin(parsed.pin)) {
           const reply = "❌ PIN incorrect.";
+          logAdminDebug(parsed);
           memory.push(key, "assistant", reply);
           resetStrikes(key);
           return res.json({ ok: true, reply });
         }
         if (parsed.cmd === "OFFERS") {
           const reply = getOffersBlock();
+          logAdminDebug(parsed);
           memory.push(key, "assistant", reply);
           resetStrikes(key);
           return res.json({ ok: true, reply: shorten(reply, 520) });
@@ -7134,6 +7137,7 @@ app.post("/wanotifier", async (req, res) => {
         if (parsed.cmd === "SET_OFFERS") {
           if (!parsed.payload) {
             const reply = ["Usage:", "SET_OFFERS: 987987", "<paste your new offers text on next lines>"].join("\n");
+            logAdminDebug(parsed);
             memory.push(key, "assistant", reply);
             resetStrikes(key);
             return res.json({ ok: true, reply });
@@ -7141,6 +7145,7 @@ app.post("/wanotifier", async (req, res) => {
           saveOffersBlock(parsed.payload);
           OFFERS_CACHE = parsed.payload;
           const reply = "✅ Offers updated successfully.";
+          logAdminDebug(parsed);
           memory.push(key, "assistant", reply);
           resetStrikes(key);
           return res.json({ ok: true, reply });
