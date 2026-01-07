@@ -7107,6 +7107,51 @@ app.post("/wanotifier", async (req, res) => {
     const ip = String(req.ip || "");
     const fromNumber = phone;
 
+    const logAdminDebug = (parsed) => {
+      console.log("[ADMIN DEBUG] rawFrom=", fromNumber);
+      console.log("[ADMIN DEBUG] normFrom=", normalizePhone(fromNumber));
+      console.log("[ADMIN DEBUG] isAdmin=", isAdmin(fromNumber));
+      console.log("[ADMIN DEBUG] text=", userTextRaw);
+      console.log("[ADMIN DEBUG] parsed=", parsed);
+      console.log("[ADMIN DEBUG] envPIN=", process.env.ADMIN_PIN);
+    };
+
+    if (isAdmin(fromNumber)) {
+      const parsed = parseAdminOffersCommand(userTextRaw);
+      if (parsed.cmd) {
+        if (!isValidAdminPin(parsed.pin)) {
+          const reply = "❌ PIN incorrect.";
+          logAdminDebug(parsed);
+          memory.push(key, "assistant", reply);
+          resetStrikes(key);
+          return res.json({ ok: true, reply });
+        }
+        if (parsed.cmd === "OFFERS") {
+          const reply = getOffersBlock();
+          logAdminDebug(parsed);
+          memory.push(key, "assistant", reply);
+          resetStrikes(key);
+          return res.json({ ok: true, reply: shorten(reply, 520) });
+        }
+        if (parsed.cmd === "SET_OFFERS") {
+          if (!parsed.payload) {
+            const reply = ["Usage:", "SET_OFFERS: 987987", "<paste your new offers text on next lines>"].join("\n");
+            logAdminDebug(parsed);
+            memory.push(key, "assistant", reply);
+            resetStrikes(key);
+            return res.json({ ok: true, reply });
+          }
+          saveOffersBlock(parsed.payload);
+          OFFERS_CACHE = parsed.payload;
+          const reply = "✅ Offers updated successfully.";
+          logAdminDebug(parsed);
+          memory.push(key, "assistant", reply);
+          resetStrikes(key);
+          return res.json({ ok: true, reply });
+        }
+      }
+    }
+
     let audioAnswerNoteText = null;
     const applyAudioNote = (text) => {
       if (!audioAnswerNoteText) return text;
@@ -7182,38 +7227,6 @@ app.post("/wanotifier", async (req, res) => {
       memory.push(key, "assistant", reply);
       resetStrikes(key);
       return res.json({ ok: true, reply });
-    }
-
-    if (isAdmin(fromNumber)) {
-      const parsed = parseAdminOffersCommand(userTextRaw);
-      if (parsed.cmd) {
-        if (!isValidAdminPin(parsed.pin)) {
-          const reply = "❌ PIN incorrect.";
-          memory.push(key, "assistant", reply);
-          resetStrikes(key);
-          return res.json({ ok: true, reply });
-        }
-        if (parsed.cmd === "OFFERS") {
-          const reply = getOffersBlock();
-          memory.push(key, "assistant", reply);
-          resetStrikes(key);
-          return res.json({ ok: true, reply: shorten(reply, 520) });
-        }
-        if (parsed.cmd === "SET_OFFERS") {
-          if (!parsed.payload) {
-            const reply = ["Usage:", "SET_OFFERS: 987987", "<paste your new offers text on next lines>"].join("\n");
-            memory.push(key, "assistant", reply);
-            resetStrikes(key);
-            return res.json({ ok: true, reply });
-          }
-          saveOffersBlock(parsed.payload);
-          OFFERS_CACHE = parsed.payload;
-          const reply = "✅ Offers updated successfully.";
-          memory.push(key, "assistant", reply);
-          resetStrikes(key);
-          return res.json({ ok: true, reply });
-        }
-      }
     }
 
     const offersAvailable = Boolean(
