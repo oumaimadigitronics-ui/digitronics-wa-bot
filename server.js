@@ -5974,10 +5974,20 @@ function parseOffersPinCommand(text) {
   const raw = String(text || "").trim();
   const firstLine = raw.split("\n")[0].trim();
 
-  const m = firstLine.match(/^(OFFERS|SET_OFFERS)\s*:\s*(\S+)\s*$/i);
+  const m = firstLine.match(/^(.+?)(?:\s*:\s*|\s+)(\S+)\s*$/);
   if (!m) return { cmd: null, pin: null, payload: null };
 
-  const cmd = m[1].toUpperCase();
+  let cmd = String(m[1] || "")
+    .trim()
+    .toUpperCase()
+    .replace(/-/g, "_")
+    .replace(/\s+/g, "_");
+
+  if (cmd === "SETOFFERS") cmd = "SET_OFFERS";
+  if (cmd !== "OFFERS" && cmd !== "SET_OFFERS") {
+    return { cmd: null, pin: null, payload: null };
+  }
+
   const pin = String(m[2] || "").trim();
 
   let payload = null;
