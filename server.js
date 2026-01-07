@@ -144,7 +144,7 @@ const FOCUS = {
 
 const CONTACTS = {
   whatsapp: "0660111438",
-  calls: ["0605123934", "0522895746"],
+  calls: ["0660111438"],
 };
 
 // RULE #1 no questions
@@ -603,7 +603,10 @@ function t(lang, key, vars) {
       bankTransferHow:
         'Ila bghiti tخلص b virement: mlli tdir commande, zid note f formulaire: "paiement par virement bancaire".\nFormulaire: ' +
         ORDER_FORM_URL_SAFE,
-      needDetails: "سمح ليا ما فهمتش الطلب ديالك مزيان 🙏 غادي يدخل معاك وكيل بشري يكمل معاك، ولا تقدر تعيط لينا على 0605123934",
+      needDetails:
+        "سمح ليا ما فهمتش الطلب ديالك مزيان 🙏 غادي يدخل معاك وكيل بشري يكمل معاك، ولا تقدر تعيط لينا على " +
+        CONTACTS.calls.join(" / ") +
+        ".",
       cannot3: "Ma qdrtch n3tik jawab bd9a daba. T9dr t3yt lina: " + CONTACTS.calls.join(" / ") + ".",
       photoLink: (x) => {
         const link = String((x || {}).link || "");
@@ -616,7 +619,10 @@ function t(lang, key, vars) {
         return `Hadi qrab 7aja l talabt: ${name} - ${link}`;
       },
       photoNoLink: "Ma 3ndnach link dyal tswira daba. 3tini model wla brand+size.",
-      askBrandModelSize: "سمح ليا ما فهمتش الطلب ديالك مزيان 🙏 غادي يدخل معاك وكيل بشري يكمل معاك، ولا تقدر تعيط لينا على 0605123934",
+      askBrandModelSize:
+        "سمح ليا ما فهمتش الطلب ديالك مزيان 🙏 غادي يدخل معاك وكيل بشري يكمل معاك، ولا تقدر تعيط لينا على " +
+        CONTACTS.calls.join(" / ") +
+        ".",
       categoryUnavailable: (x) => {
         const z = x || {};
         const category = String(z.category || "");
@@ -637,12 +643,16 @@ function t(lang, key, vars) {
       },
       askBrandForSize: (x) => {
         void x;
-        return "سمح ليا ما فهمتش الطلب ديالك مزيان 🙏 غادي يدخل معاك وكيل بشري يكمل معاك، ولا تقدر تعيط لينا على 0605123934";
+        return (
+          "سمح ليا ما فهمتش الطلب ديالك مزيان 🙏 غادي يدخل معاك وكيل بشري يكمل معاك، ولا تقدر تعيط لينا على " +
+          CONTACTS.calls.join(" / ") +
+          "."
+        );
       },
       preferBest: "L’a7san men had l-khtiyarat هو",
       preferCheapest: "L’ar5as men had l-khtiyarat هو",
       preferNeedContext: "Sift size (b7al tv 50) wla model bach nختar l’a7san wla l’ar5as.",
-      iptvCall: "IPTV kayn f service. 3afak 3ayet 0605123934.",
+      iptvCall: "IPTV kayn f service. 3afak 3ayet " + CONTACTS.calls.join(" / ") + ".",
       xiaomiRedirect: (x) => {
         const brands = String((x || {}).brands || "TCL, Haier, Samsung");
         return "Smah lia, ma kanso9osh Xiaomi. 3andna options 7sen b " + brands + ". Hna chi offres:";
@@ -661,7 +671,10 @@ function t(lang, key, vars) {
       bankTransferHow:
         'Paiement par virement : lors de la commande, ajoutez une note dans le formulaire : "paiement par virement bancaire".\nFormulaire: ' +
         ORDER_FORM_URL_SAFE,
-      needDetails: "Désolé, je n’ai pas bien compris 🙏 Un agent humain va prendre le relais, ou appelez-nous au 0605123934",
+      needDetails:
+        "Désolé, je n’ai pas bien compris 🙏 Un agent humain va prendre le relais, ou appelez-nous au " +
+        CONTACTS.calls.join(" / ") +
+        ".",
       cannot3: "Je ne peux pas répondre avec certitude pour le moment. Vous pouvez appeler: " + CONTACTS.calls.join(" / ") + ".",
       photoLink: (x) => {
         const link = String((x || {}).link || "");
@@ -674,7 +687,10 @@ function t(lang, key, vars) {
         return `C’est le produit le plus proche de votre demande: ${name} - ${link}`;
       },
       photoNoLink: "Je n’ai pas de lien photo pour ce produit. Précisez le modèle ou marque+taille.",
-      askBrandModelSize: "Désolé, je n’ai pas bien compris 🙏 Un agent humain va prendre le relais, ou appelez-nous au 0605123934",
+      askBrandModelSize:
+        "Désolé, je n’ai pas bien compris 🙏 Un agent humain va prendre le relais, ou appelez-nous au " +
+        CONTACTS.calls.join(" / ") +
+        ".",
       categoryUnavailable: (x) => {
         const z = x || {};
         const category = String(z.category || "");
@@ -695,12 +711,16 @@ function t(lang, key, vars) {
       },
       askBrandForSize: (x) => {
         void x;
-        return "Désolé, je n’ai pas bien compris 🙏 Un agent humain va prendre le relais, ou appelez-nous au 0605123934";
+        return (
+          "Désolé, je n’ai pas bien compris 🙏 Un agent humain va prendre le relais, ou appelez-nous au " +
+          CONTACTS.calls.join(" / ") +
+          "."
+        );
       },
       preferBest: "Le meilleur parmi ces options est",
       preferCheapest: "Le moins cher parmi ces options est",
       preferNeedContext: "Envoyez la taille (ex tv 50) ou le modèle pour choisir le meilleur ou le moins cher.",
-      iptvCall: "Service IPTV disponible. Veuillez appeler 0605123934.",
+      iptvCall: "Service IPTV disponible. Veuillez appeler " + CONTACTS.calls.join(" / ") + ".",
       xiaomiRedirect: (x) => {
         const brands = String((x || {}).brands || "TCL, Haier et Samsung");
         return "Désolé, nous ne vendons pas Xiaomi. Nous avons de meilleures options comme " + brands + ". Voici des offres dispo:";
@@ -718,7 +738,10 @@ function t(lang, key, vars) {
       callSoonNeedOrder: "حسناً. غادي نعيطو ليك قريب. إلا كان عندك رقم الطلب صيفطو من فضلك.",
       bankTransferHow:
         'باش تخلص بالتحويل البنكي: منين دير الطلب زيد ملاحظة فالفورم: "الدفع بتحويل بنكي".\nالفورم: ' + ORDER_FORM_URL_SAFE,
-      needDetails: "سمح ليا ما فهمتش الطلب ديالك مزيان 🙏 غادي يدخل معاك وكيل بشري يكمل معاك، ولا تقدر تعيط لينا على 0605123934",
+      needDetails:
+        "سمح ليا ما فهمتش الطلب ديالك مزيان 🙏 غادي يدخل معاك وكيل بشري يكمل معاك، ولا تقدر تعيط لينا على " +
+        CONTACTS.calls.join(" / ") +
+        ".",
       cannot3: "ماقدرتش نعطيك جواب مؤكد دابا. تقدر تعيط لينا: " + CONTACTS.calls.join(" / ") + ".",
       photoLink: (x) => {
         const link = String((x || {}).link || "");
@@ -731,7 +754,10 @@ function t(lang, key, vars) {
         return `ها أقرب منتوج لطلبك: ${name} - ${link}`;
       },
       photoNoLink: "ما كاينش رابط صورة لهاد المنتج دابا. عطيني الموديل ولا الماركة+الحجم.",
-      askBrandModelSize: "سمح ليا ما فهمتش الطلب ديالك مزيان 🙏 غادي يدخل معاك وكيل بشري يكمل معاك، ولا تقدر تعيط لينا على 0605123934",
+      askBrandModelSize:
+        "سمح ليا ما فهمتش الطلب ديالك مزيان 🙏 غادي يدخل معاك وكيل بشري يكمل معاك، ولا تقدر تعيط لينا على " +
+        CONTACTS.calls.join(" / ") +
+        ".",
       categoryUnavailable: (x) => {
         const z = x || {};
         const category = String(z.category || "");
@@ -752,12 +778,16 @@ function t(lang, key, vars) {
       },
       askBrandForSize: (x) => {
         void x;
-        return "سمح ليا ما فهمتش الطلب ديالك مزيان 🙏 غادي يدخل معاك وكيل بشري يكمل معاك، ولا تقدر تعيط لينا على 0605123934";
+        return (
+          "سمح ليا ما فهمتش الطلب ديالك مزيان 🙏 غادي يدخل معاك وكيل بشري يكمل معاك، ولا تقدر تعيط لينا على " +
+          CONTACTS.calls.join(" / ") +
+          "."
+        );
       },
       preferBest: "الأفضل من هاد الخيارات هو",
       preferCheapest: "الأرخص من هاد الخيارات هو",
       preferNeedContext: "صيفط الحجم (مثلاً tv 50) ولا الموديل باش نختار الأفضل ولا الأرخص.",
-      iptvCall: "خدمة IPTV متوفرة. اتصل على 0605123934.",
+      iptvCall: "خدمة IPTV متوفرة. اتصل على " + CONTACTS.calls.join(" / ") + ".",
       xiaomiRedirect: (x) => {
         const brands = String((x || {}).brands || "TCL و Haier و Samsung");
         return "سمح ليا، ما كنبيعوش Xiaomi. عندنا اختيارات أحسن بحال " + brands + ". هاهي بعض العروض:";
@@ -775,9 +805,17 @@ function t(lang, key, vars) {
 function fallbackWithAgent(lang) {
   const L = String(lang || "dzl");
   if (L === "fr") {
-    return "Désolé, je n’ai pas bien compris 🙏 Un agent humain va prendre le relais, ou appelez-nous au 0605123934";
+    return (
+      "Désolé, je n’ai pas bien compris 🙏 Un agent humain va prendre le relais, ou appelez-nous au " +
+      CONTACTS.calls.join(" / ") +
+      "."
+    );
   }
-  return "سمح ليا ما فهمتش الطلب ديالك مزيان 🙏 غادي يدخل معاك وكيل بشري يكمل معاك، ولا تقدر تعيط لينا على 0605123934";
+  return (
+    "سمح ليا ما فهمتش الطلب ديالك مزيان 🙏 غادي يدخل معاك وكيل بشري يكمل معاك، ولا تقدر تعيط لينا على " +
+    CONTACTS.calls.join(" / ") +
+    "."
+  );
 }
 
 function agentWillFinalize(lang) {
