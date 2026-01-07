@@ -5957,7 +5957,7 @@ function createEmptyOffersState() {
   return { offer_01: null, offer_02: null, offer_03: null };
 }
 
-function normalizeOfferSlotItem(raw) {
+function normalizeOfferItem(raw) {
   if (!raw || typeof raw !== "object") return null;
   const out = {};
   for (const [k, v] of Object.entries(raw)) {
@@ -5985,7 +5985,7 @@ function normalizeOffersState(raw) {
   }
   for (let i = 0; i < OFFER_SLOTS.length; i += 1) {
     const slot = OFFER_SLOTS[i];
-    const normalized = normalizeOfferSlotItem(raw[slot]);
+    const normalized = normalizeOfferItem(raw[slot]);
     base[slot] = normalized;
   }
   return base;
@@ -7342,7 +7342,7 @@ app.post("/wanotifier", express.raw({ type: "*/*", limit: "2mb" }), parseWanotif
           return res.json({ ok: true, reply });
         }
         const parsedFields = parseOfferFields(parsed.payload);
-        const normalized = normalizeOfferSlotItem(parsedFields);
+        const normalized = normalizeOfferItem(parsedFields);
         if (!normalized) {
           const reply = "❌ Aucun champ valide détecté.";
           memory.push(key, "assistant", reply);
