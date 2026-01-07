@@ -181,16 +181,8 @@ const BRAND_PRIORITY = [
   "Tivoli",
 ];
 const MAX_OFFERS = 3;
-const OFFERS_FILE = path.join(process.cwd(), "offers.json");
 const ADMIN_PIN = String(process.env.ADMIN_PIN || "987987").trim();
-const ADMIN_NUMBERS = new Set([
-  "212660111438",
-  "0660111438",
-  "0700144922",
-  "212700144922",
-  "0696744965",
-  "212696744965",
-]);
+const OFFERS_FILE = path.join(process.cwd(), "offers.json");
 const DEFAULT_OFFERS = [
   "🔥 *NOUVELLES OFFRES* 🔥",
   "",
@@ -5923,20 +5915,6 @@ function contactTemplate() {
   );
 }
 
-function isAdmin(from) {
-  const norm = normalizePhone(from);
-  if (!norm) return false;
-  if (ADMIN_NUMBERS.has(norm)) return true;
-
-  const last9 = norm.slice(-9);
-  if (last9.length === 9) {
-    if (ADMIN_NUMBERS.has("0" + last9)) return true;
-    if (ADMIN_NUMBERS.has("212" + last9)) return true;
-    if (ADMIN_NUMBERS.has(last9)) return true;
-  }
-  return false;
-}
-
 function loadOffersBlock() {
   try {
     if (fs.existsSync(OFFERS_FILE)) {
@@ -5961,15 +5939,15 @@ function getOffersBlock() {
   return OFFERS_CACHE;
 }
 
-function parseAdminOffersCommand(text) {
+function parseOffersPinCommand(text) {
   const raw = String(text || "").trim();
   const firstLine = raw.split("\n")[0].trim();
 
-  const match = firstLine.match(/^(OFFERS|SET_OFFERS)\s*:\s*(\S+)\s*$/i);
-  if (!match) return { cmd: null, pin: null, payload: null };
+  const m = firstLine.match(/^(OFFERS|SET_OFFERS)\s*:\s*(\S+)\s*$/i);
+  if (!m) return { cmd: null, pin: null, payload: null };
 
-  const cmd = match[1].toUpperCase();
-  const pin = String(match[2] || "").trim();
+  const cmd = m[1].toUpperCase();
+  const pin = String(m[2] || "").trim();
 
   let payload = null;
   if (cmd === "SET_OFFERS") {
@@ -5978,7 +5956,7 @@ function parseAdminOffersCommand(text) {
   return { cmd, pin, payload };
 }
 
-function isValidAdminPin(pin) {
+function isValidPin(pin) {
   return String(pin || "").trim() === ADMIN_PIN;
 }
 
@@ -7116,83 +7094,33 @@ app.post("/wanotifier", async (req, res) => {
     const msgType = String(incoming.type || "").toLowerCase();
     const lang = detectLang(userTextRaw || incoming.lang || "");
     const ip = String(req.ip || "");
-    const fromNumber = phone;
-
-    const logAdminDebug = (parsed) => {
-      logger.info({
-        msg: "admin_debug_console",
-        fromNumber,
-        fromNorm: normalizePhone(fromNumber),
-        text: userTextRaw,
-        parsed,
-        isAdmin: isAdmin(fromNumber),
-        hasAdminPinEnv: Boolean(process.env.ADMIN_PIN),
-      });
-      console.log("[ADMIN DEBUG] rawFrom=", fromNumber);
-      console.log("[ADMIN DEBUG] normFrom=", normalizePhone(fromNumber));
-      console.log("[ADMIN DEBUG] isAdmin=", isAdmin(fromNumber));
-      console.log("[ADMIN DEBUG] text=", userTextRaw);
-      console.log("[ADMIN DEBUG] parsed=", parsed);
-      console.log("[ADMIN DEBUG] envPIN=", process.env.ADMIN_PIN);
-    };
-
-    logger.info({
-      msg: "admin_debug_incoming",
-      fromNumber,
-      fromNorm: normalizePhone(fromNumber),
-      text: userTextRaw,
-      isAdmin: isAdmin(fromNumber),
-      hasAdminPinEnv: Boolean(process.env.ADMIN_PIN),
-    });
-
-    if (isAdmin(fromNumber)) {
-      const parsed = parseAdminOffersCommand(userTextRaw);
-      logger.info({
-        msg: "admin_debug_parsed",
-        fromNumber,
-        fromNorm: normalizePhone(fromNumber),
-        parsed,
-        adminHandlerRan: true,
-      });
-      if (parsed.cmd) {
-        logger.info({
-          msg: "admin_debug_cmd_detected",
-          cmd: parsed.cmd,
-          pinOk: isValidAdminPin(parsed.pin),
-        });
-        if (!isValidAdminPin(parsed.pin)) {
-          const reply = "❌ PIN incorrect.";
-          logAdminDebug(parsed);
+    const parsed = parseOffersPinCommand(userTextRaw);
+    if (parsed.cmd) {
+      if (!isValidPin(parsed.pin)) {
+        const reply = "❌ PIN incorrect.";
+        memory.push(key, "assistant", reply);
+        resetStrikes(key);
+        return res.json({ ok: true, reply });
+      }
+      if (parsed.cmd === "OFFERS") {
+        const reply = getOffersBlock();
+        memory.push(key, "assistant", reply);
+        resetStrikes(key);
+        return res.json({ ok: true, reply: shorten(reply, 520) });
+      }
+      if (parsed.cmd === "SET_OFFERS") {
+        if (!parsed.payload) {
+          const reply = ["Usage:", "SET_OFFERS: 987987", "<paste your new offers text on next lines>"].join("\n");
           memory.push(key, "assistant", reply);
           resetStrikes(key);
           return res.json({ ok: true, reply });
         }
-        if (parsed.cmd === "OFFERS") {
-          const reply = getOffersBlock();
-          logger.info({ msg: "admin_offers_reply", cmd: parsed.cmd, replyLen: reply.length });
-          logAdminDebug(parsed);
-          memory.push(key, "assistant", reply);
-          resetStrikes(key);
-          return res.json({ ok: true, reply: shorten(reply, 520) });
-        }
-        if (parsed.cmd === "SET_OFFERS") {
-          if (!parsed.payload) {
-            const reply = ["Usage:", "SET_OFFERS: 987987", "<paste your new offers text on next lines>"].join("\n");
-            logger.info({ msg: "admin_offers_reply", cmd: parsed.cmd, replyLen: reply.length });
-            logAdminDebug(parsed);
-            memory.push(key, "assistant", reply);
-            resetStrikes(key);
-            return res.json({ ok: true, reply });
-          }
-          saveOffersBlock(parsed.payload);
-          OFFERS_CACHE = parsed.payload;
-          const reply = "✅ Offers updated successfully.";
-          logger.info({ msg: "admin_offers_reply", cmd: parsed.cmd, replyLen: reply.length });
-          logAdminDebug(parsed);
-          memory.push(key, "assistant", reply);
-          resetStrikes(key);
-          return res.json({ ok: true, reply });
-        }
+        saveOffersBlock(parsed.payload);
+        OFFERS_CACHE = parsed.payload;
+        const reply = "✅ Offers updated successfully.";
+        memory.push(key, "assistant", reply);
+        resetStrikes(key);
+        return res.json({ ok: true, reply });
       }
     }
 
