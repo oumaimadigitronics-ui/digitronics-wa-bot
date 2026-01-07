@@ -48,6 +48,16 @@ function debugLog(event, payload) {
   }
 }
 
+const logger = {
+  info(payload) {
+    try {
+      console.log(JSON.stringify({ level: "info", ...payload }));
+    } catch {
+      console.log("[INFO]", payload);
+    }
+  },
+};
+
 const DEFAULT_ORDER_FORM_URL =
   "https://docs.google.com/forms/d/e/1FAIpQLScmDNagYSpUPfsIT2s2t35KH7U1OWSNkUCIWmcJJm1R_aITQQ/viewform?usp=header";
 
@@ -7109,6 +7119,15 @@ app.post("/wanotifier", async (req, res) => {
     const fromNumber = phone;
 
     const logAdminDebug = (parsed) => {
+      logger.info({
+        msg: "admin_debug_console",
+        fromNumber,
+        fromNorm: normalizePhone(fromNumber),
+        text: userTextRaw,
+        parsed,
+        isAdmin: isAdmin(fromNumber),
+        hasAdminPinEnv: Boolean(process.env.ADMIN_PIN),
+      });
       console.log("[ADMIN DEBUG] rawFrom=", fromNumber);
       console.log("[ADMIN DEBUG] normFrom=", normalizePhone(fromNumber));
       console.log("[ADMIN DEBUG] isAdmin=", isAdmin(fromNumber));
@@ -7117,9 +7136,30 @@ app.post("/wanotifier", async (req, res) => {
       console.log("[ADMIN DEBUG] envPIN=", process.env.ADMIN_PIN);
     };
 
+    logger.info({
+      msg: "admin_debug_incoming",
+      fromNumber,
+      fromNorm: normalizePhone(fromNumber),
+      text: userTextRaw,
+      isAdmin: isAdmin(fromNumber),
+      hasAdminPinEnv: Boolean(process.env.ADMIN_PIN),
+    });
+
     if (isAdmin(fromNumber)) {
       const parsed = parseAdminOffersCommand(userTextRaw);
+      logger.info({
+        msg: "admin_debug_parsed",
+        fromNumber,
+        fromNorm: normalizePhone(fromNumber),
+        parsed,
+        adminHandlerRan: true,
+      });
       if (parsed.cmd) {
+        logger.info({
+          msg: "admin_debug_cmd_detected",
+          cmd: parsed.cmd,
+          pinOk: isValidAdminPin(parsed.pin),
+        });
         if (!isValidAdminPin(parsed.pin)) {
           const reply = "❌ PIN incorrect.";
           logAdminDebug(parsed);
@@ -7129,6 +7169,7 @@ app.post("/wanotifier", async (req, res) => {
         }
         if (parsed.cmd === "OFFERS") {
           const reply = getOffersBlock();
+          logger.info({ msg: "admin_offers_reply", cmd: parsed.cmd, replyLen: reply.length });
           logAdminDebug(parsed);
           memory.push(key, "assistant", reply);
           resetStrikes(key);
@@ -7137,6 +7178,7 @@ app.post("/wanotifier", async (req, res) => {
         if (parsed.cmd === "SET_OFFERS") {
           if (!parsed.payload) {
             const reply = ["Usage:", "SET_OFFERS: 987987", "<paste your new offers text on next lines>"].join("\n");
+            logger.info({ msg: "admin_offers_reply", cmd: parsed.cmd, replyLen: reply.length });
             logAdminDebug(parsed);
             memory.push(key, "assistant", reply);
             resetStrikes(key);
@@ -7145,6 +7187,7 @@ app.post("/wanotifier", async (req, res) => {
           saveOffersBlock(parsed.payload);
           OFFERS_CACHE = parsed.payload;
           const reply = "✅ Offers updated successfully.";
+          logger.info({ msg: "admin_offers_reply", cmd: parsed.cmd, replyLen: reply.length });
           logAdminDebug(parsed);
           memory.push(key, "assistant", reply);
           resetStrikes(key);
