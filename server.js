@@ -162,12 +162,21 @@ const BRAND_PRIORITY = [
   "Tivoli",
 ];
 const MAX_OFFERS = 3;
-const OFFERS_BLOCK = `
-🔥 NOUVELLES OFFRES 🔥
-1) ...
-2) ...
-3) ...
-`;
+const OFFERS_FILE = path.join(process.cwd(), "offers.json");
+const ADMIN_PIN = String(process.env.ADMIN_PIN || "1234").trim();
+const ADMIN_NUMBERS = new Set([
+  "212660111438", // +212660111438
+  "0660111438",
+]);
+const DEFAULT_OFFERS = [
+  "🔥 *NOUVELLES OFFRES* 🔥",
+  "",
+  "1) ...",
+  "2) ...",
+  "",
+  "📌 Envoyez le nom du produit ou la catégorie (TV, machine à laver, frigo...) pour un prix exact.",
+].join("\n");
+let OFFERS_CACHE = null;
 
 const COMPANY = {
   name: "Digitronics",
@@ -5902,8 +5911,65 @@ function contactTemplate() {
   );
 }
 
+function normalizePhone(from) {
+  return arabicIndicToAsciiDigits(String(from || "")).replace(/[^\d]/g, "");
+}
+
+function isAdmin(from) {
+  const normalized = normalizePhone(from);
+  if (!normalized) return false;
+  if (ADMIN_NUMBERS.has(normalized)) return true;
+  const last9 = normalized.slice(-9);
+  if (last9.length !== 9) return false;
+  return ADMIN_NUMBERS.has("0" + last9) || ADMIN_NUMBERS.has("212" + last9);
+}
+
+function loadOffersBlock() {
+  try {
+    if (fs.existsSync(OFFERS_FILE)) {
+      const raw = fs.readFileSync(OFFERS_FILE, "utf8");
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed.offers === "string" && parsed.offers.trim()) return parsed.offers;
+    }
+  } catch (err) {
+    console.error("[offers] failed to load offers.json", err);
+  }
+  return DEFAULT_OFFERS;
+}
+
+function saveOffersBlock(text) {
+  const payload = { offers: text, updatedAt: new Date().toISOString() };
+  fs.writeFileSync(OFFERS_FILE, JSON.stringify(payload, null, 2), "utf8");
+}
+
+function getOffersBlock() {
+  if (OFFERS_CACHE === null) OFFERS_CACHE = loadOffersBlock();
+  return OFFERS_CACHE;
+}
+
+function parseOffersCommand(text) {
+  const raw = String(text || "");
+  const lines = raw.split(/\r?\n/);
+  const firstLine = (lines[0] || "").trim();
+  const match = firstLine.match(/^(offers|set_offers)\s*:\s*(\S+)?/i);
+  if (!match) return { cmd: null, pin: null, payload: null };
+  const cmd = String(match[1] || "").toUpperCase();
+  const pin = match[2] ? String(match[2]).trim() : null;
+  let payload = null;
+  if (cmd === "SET_OFFERS") {
+    const rest = lines.slice(1).join("\n");
+    const trimmed = rest.trim();
+    payload = trimmed ? trimmed : null;
+  }
+  return { cmd, pin, payload };
+}
+
+function isValidAdminPin(pin) {
+  return String(pin || "").trim() === ADMIN_PIN;
+}
+
 function offersTemplate() {
-  return OFFERS_BLOCK;
+  return getOffersBlock();
 }
 
 function fixedPriceTemplate() {
@@ -7036,6 +7102,7 @@ app.post("/wanotifier", async (req, res) => {
     const msgType = String(incoming.type || "").toLowerCase();
     const lang = detectLang(userTextRaw || incoming.lang || "");
     const ip = String(req.ip || "");
+    const fromNumber = phone;
 
     let audioAnswerNoteText = null;
     const applyAudioNote = (text) => {
@@ -7119,17 +7186,55 @@ app.post("/wanotifier", async (req, res) => {
       return res.json({ ok: true, reply });
     }
 
-    if (!offersAvailable) {
-      const reply = finalizeReply(t(lang, "cannot3"), 420);
-      console.error(JSON.stringify({ level: "error", msg: "offers_unavailable", lastOffersSync }));
-      memory.push(key, "assistant", reply);
-      return res.json({ ok: true, reply });
-    }
-
     if (!userTextRaw) {
       const reply = finalizeReply(t(lang, "typeYourMessage"), 420);
       memory.push(key, "assistant", reply);
       resetStrikes(key);
+      return res.json({ ok: true, reply });
+    }
+
+    if (isAdmin(fromNumber)) {
+      const parsed = parseOffersCommand(userTextRaw);
+      if (parsed.cmd) {
+        if (!parsed.pin) {
+          const reply = ["Usage:", "OFFERS: <PIN>", "SET_OFFERS: <PIN>", "<paste your new offers text here>"].join("\n");
+          memory.push(key, "assistant", reply);
+          resetStrikes(key);
+          return res.json({ ok: true, reply });
+        }
+        if (!isValidAdminPin(parsed.pin)) {
+          const reply = "❌ PIN incorrect.";
+          memory.push(key, "assistant", reply);
+          resetStrikes(key);
+          return res.json({ ok: true, reply });
+        }
+        if (parsed.cmd === "OFFERS") {
+          const reply = getOffersBlock();
+          memory.push(key, "assistant", reply);
+          resetStrikes(key);
+          return res.json({ ok: true, reply: shorten(reply, 520) });
+        }
+        if (parsed.cmd === "SET_OFFERS") {
+          if (!parsed.payload) {
+            const reply = ["Usage:", "SET_OFFERS: <PIN>", "<paste your new offers text here>"].join("\n");
+            memory.push(key, "assistant", reply);
+            resetStrikes(key);
+            return res.json({ ok: true, reply });
+          }
+          saveOffersBlock(parsed.payload);
+          OFFERS_CACHE = parsed.payload;
+          const reply = "✅ Offers updated successfully.";
+          memory.push(key, "assistant", reply);
+          resetStrikes(key);
+          return res.json({ ok: true, reply });
+        }
+      }
+    }
+
+    if (!offersAvailable) {
+      const reply = finalizeReply(t(lang, "cannot3"), 420);
+      console.error(JSON.stringify({ level: "error", msg: "offers_unavailable", lastOffersSync }));
+      memory.push(key, "assistant", reply);
       return res.json({ ok: true, reply });
     }
 
