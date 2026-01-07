@@ -5509,6 +5509,59 @@ function isLocationIntent(text) {
   return false;
 }
 
+function isContactInfoIntent(text) {
+  if (isOrderStatusIntent(text)) return false;
+
+  const s = normMatch(text);
+  if (!s) return false;
+
+  if (s.indexOf("phone") >= 0) return true;
+  if (s.indexOf("telephone") >= 0) return true;
+  if (s.indexOf("tele") >= 0) return true;
+  if (s.indexOf("whatsapp") >= 0) return true;
+  if (s.indexOf("numero") >= 0) return true;
+  if (s.indexOf("num") >= 0) return true;
+  if (s.indexOf("email") >= 0) return true;
+  if (s.indexOf("adresse") >= 0) return true;
+  if (s.indexOf("address") >= 0) return true;
+  if (s.indexOf("location") >= 0) return true;
+  if (s.indexOf("localisation") >= 0) return true;
+  if (s.indexOf("horaires") >= 0) return true;
+  if (s.indexOf("horaire") >= 0) return true;
+  if (s.indexOf("working hours") >= 0) return true;
+  if (s.indexOf("hours") >= 0) return true;
+  if (s.indexOf("العنوان") >= 0) return true;
+  if (s.indexOf("عنوان") >= 0) return true;
+  if (s.indexOf("الهاتف") >= 0) return true;
+  if (s.indexOf("تليفون") >= 0) return true;
+  if (s.indexOf("الايميل") >= 0) return true;
+  if (s.indexOf("الإيميل") >= 0) return true;
+  if (s.indexOf("مواعيد") >= 0) return true;
+  if (s.indexOf("ساعات") >= 0) return true;
+
+  return false;
+}
+
+function contactTemplate() {
+  return (
+    "━━━━━━━━━━━━━━━━━━━\n" +
+    "𝗗𝗜𝗚𝗜𝗧𝗥𝗢𝗡𝗜𝗖𝗦\n" +
+    "Spécialiste en électroménager & multimédia\n" +
+    "━━━━━━━━━━━━━━━━━━━\n\n" +
+    "📍 𝗔𝗱𝗿𝗲𝘀𝘀𝗲\n" +
+    "30 Rue 9, ETG RC LTS Smara,\n" +
+    "Haj Fateh, Oulfa\n" +
+    "Casablanca 20230\n\n" +
+    "📞 𝗧𝗲́𝗹𝗲́𝗽𝗵𝗼𝗻𝗲 / WhatsApp\n" +
+    "06 60 11 14 38\n\n" +
+    "✉️ 𝗘𝗺𝗮𝗶𝗹\n" +
+    "contact@digitronics.ma\n\n" +
+    "🕒 𝗛𝗼𝗿𝗮𝗶𝗿𝗲𝘀\n" +
+    "Lundi – Samedi : 10h00 – 22h00\n" +
+    "Dimanche : 14h00 – 22h00"
+  );
+}
+
 function handleTvSizePriceFlow(parsed, lang, key) {
   if (!parsed || !Number.isFinite(parsed.size)) return null;
 
@@ -6730,6 +6783,13 @@ app.post("/wanotifier", async (req, res) => {
     const greetingReply = isBuyIntent(userTextRaw) ? null : handleGreetingMessage({ key, lang, text: userTextRaw });
     if (greetingReply) {
       const reply = finalizeReply(greetingReply, 520);
+      memory.push(key, "assistant", reply);
+      resetStrikes(key);
+      return res.json({ ok: true, reply });
+    }
+
+    if (isContactInfoIntent(userTextRaw)) {
+      const reply = finalizeReply(contactTemplate(), 520);
       memory.push(key, "assistant", reply);
       resetStrikes(key);
       return res.json({ ok: true, reply });
