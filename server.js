@@ -12,6 +12,14 @@ import { toFile } from "openai/uploads";
 const app = express();
 app.set("trust proxy", true);
 
+process.on("unhandledRejection", (reason) => {
+  console.error("Unhandled promise rejection:", reason);
+});
+
+process.on("uncaughtException", (err) => {
+  console.error("Uncaught exception:", err);
+});
+
 // --- META (Facebook Messenger) ENV ---
 const {
   META_VERIFY_TOKEN = "",
@@ -93,17 +101,17 @@ const {
 } = process.env;
 
 if (REQUIRE_ENV && !OPENAI_API_KEY) {
-  console.error("Missing env var: OPENAI_API_KEY");
-  process.exit(1);
+  console.error("Missing env var: OPENAI_API_KEY (OpenAI responses will fail until set).");
 }
 
 if (REQUIRE_ENV && (!WC_BASE_URL || !WC_CONSUMER_KEY || !WC_CONSUMER_SECRET)) {
-  console.error("Missing WooCommerce env vars: WC_BASE_URL, WC_CONSUMER_KEY, WC_CONSUMER_SECRET");
-  process.exit(1);
+  console.error(
+    "Missing WooCommerce env vars: WC_BASE_URL, WC_CONSUMER_KEY, WC_CONSUMER_SECRET (offers sync will fail until set)."
+  );
 }
 
 const CFG = {
-  port: Number(PORT) || 3000,
+  port: Number(process.env.PORT || PORT) || 3000,
   refreshMs: Number(OFFERS_REFRESH_MS) || 300000,
   rateWindowMs: Number(RATE_LIMIT_WINDOW_MS) || 60000,
   rateMax: Number(RATE_LIMIT_MAX) || 25,
