@@ -1183,13 +1183,6 @@ function normalizeIncoming(body, req) {
   };
 }
 
-function looksLikeMediaOrEmpty(body) {
-  const media = extractMediaFromBody(body || {});
-  const txt = String(extractTextFromBody(body || "") || "").trim();
-  if (media && !txt) return true;
-  return false;
-}
-
 const MAX_RATE_STORE_SIZE = 50000;
 const rateStore = new Map();
 const ipRateStore = new Map();
@@ -1366,19 +1359,6 @@ function markOrderAsk(key, type) {
 
 function clearOrderAsk(key) {
   setCtx(key, { lastAskOrderAt: 0, lastAskOrderType: "" });
-}
-
-function neutralOrderReply(lang) {
-  if (lang === "fr") return "D’accord.";
-  if (lang === "ar") return "حسناً.";
-  return "OK.";
-}
-
-function alternativeSupportReply(lang) {
-  const calls = CONTACTS.calls.join(" / ");
-  if (lang === "fr") return "Envoyez votre nom + téléphone, on vous rappelle, ou appelez: " + calls + ".";
-  if (lang === "ar") return "صيفط لينا سميتك + رقمك وغا نتاصلوا بيك، أو عيط لينا على: " + calls + ".";
-  return "Sift smiytk + numéro, ghadi ntasslo bik, ola 3ayet lina: " + calls + ".";
 }
 
 function setCtx(key, patch) {
@@ -6020,132 +6000,6 @@ function limitOffersForPromptPayload(data) {
   debugLog("limit_offers_prompt", { meta, totalIn: items.length, totalOut });
 
   return { offers: outOffers, meta };
-}
-
-function buildOffersSubsetForPrompt(userText, historyMsgs, key) {
-  const hist = Array.isArray(historyMsgs) ? historyMsgs : [];
-  const parts = [String(userText || "")];
-  for (let i = 0; i < hist.length; i += 1) parts.push(String(hist[i].content || ""));
-  const combined = parts.join(" ");
-
-  const forcedIntent = resolveCategoryIntent(userText);
-  const forcedCategory = (forcedIntent && forcedIntent.category) || null;
-  const forcedClass = (forcedIntent && forcedIntent.cls) || null;
-
-  if (forcedCategory || forcedClass) resetCtxForCategoryChange(key, forcedCategory, forcedClass);
-
-  const ctx = getCtx(key);
-
-  const modelHit = detectModel(combined);
-  if (modelHit) {
-    const offers = {};
-    offers[modelHit.brand] = trimOffersForPrompt([modelHit.offer], {}, modelHit.brand);
-    return limitOffersForPromptPayload({ offers, meta: { model: (modelHit.offer && modelHit.offer.model) || "" } });
-  }
-
-  let brand = detectBrand(combined) || ctx.lastBrand || null;
-  let category = forcedCategory || detectCategory(combined) || ctx.lastCategory || null;
-  let cls = forcedClass || (!category ? detectClass(combined) : null) || ctx.lastClass || null;
-
-  if (!brand && hasFocusBrand() && FOCUS.mode === "preferred") brand = FOCUS.brand;
-  if (brand && !(OFFERS && OFFERS.offers && OFFERS.offers[brand])) brand = null;
-
-  const tvCanon = OFFERS_INDEX.classCanon.tv;
-  const tvCanonNorm = normMatch(tvCanon || "tv");
-  const categoryNorm = normMatch(category || "");
-  const clsNorm = normMatch(cls || "");
-  const ctxTvHint =
-    Boolean(ctx.lastBrand || ctx.lastSize) ||
-    normMatch(ctx.lastClass || "") === tvCanonNorm ||
-    normMatch(ctx.lastCategory || "") === tvCanonNorm;
-  const hasTvHint = (() => {
-    const s0 = arabicIndicToAsciiDigits(String(combined || ""));
-    const s = s0.toLowerCase();
-    return (
-      s.includes('"') ||
-      s.includes("inch") ||
-      s.includes("inches") ||
-      s.includes("tv") ||
-      s.includes("tele") ||
-      s.includes("télé") ||
-      s.includes("بوصة")
-    );
-  })();
-  const isTvCategory = categoryNorm === tvCanonNorm || categoryNorm === "tv";
-  const isTvClass = clsNorm === tvCanonNorm;
-  const isNonTvSignal = Boolean((category && !isTvCategory) || (cls && !isTvClass));
-  const sizeVal = extractTvSize(combined, {
-    requireTvHint: isNonTvSignal,
-    allowNoHint: hasTvHint || ctxTvHint,
-    externalTvContext: hasTvHint || ctxTvHint,
-  });
-  const capacityVal = extractCapacityLiters(combined);
-  if (Number.isFinite(sizeVal) && (isTvClass || isTvCategory || hasTvHint) && !forcedCategory && !category) {
-    cls = tvCanon;
-  }
-
-  if (brand && cls) {
-    const arr = ((OFFERS && OFFERS.offers && OFFERS.offers[brand]) || [])
-      .filter((o) => Number((o && o.stock) || 0) > 0)
-      .filter((o) => normMatch((o && o.class) || "") === normMatch(cls));
-    const offers = {};
-    offers[brand] = trimOffersForPrompt(arr, { size: sizeVal, className: cls }, brand);
-    return limitOffersForPromptPayload({ offers, meta: { brand, class: cls, size: sizeVal || null } });
-  }
-
-  if (brand && category) {
-    const arr = ((OFFERS && OFFERS.offers && OFFERS.offers[brand]) || [])
-      .filter((o) => Number((o && o.stock) || 0) > 0)
-      .filter((o) => normMatch((o && o.category) || "") === normMatch(category));
-    const offers = {};
-    offers[brand] = trimOffersForPrompt(arr, { size: sizeVal }, brand);
-    return limitOffersForPromptPayload({ offers, meta: { brand, category } });
-  }
-
-  if (brand) {
-    const arr = ((OFFERS && OFFERS.offers && OFFERS.offers[brand]) || []).filter((o) => Number((o && o.stock) || 0) > 0);
-    const offers = {};
-    offers[brand] = trimOffersForPrompt(arr, { size: sizeVal }, brand);
-    return limitOffersForPromptPayload({ offers, meta: { brand, size: sizeVal || null } });
-  }
-
-  if (category) {
-    const k = normMatch(category);
-    const items0 = OFFERS_INDEX.categoryToOffers.get(k) || [];
-    const items = items0
-      .map((it, idx) => Object.assign({}, it, { originalIdx: typeof it.originalIdx === "number" ? it.originalIdx : idx }))
-      .filter((it) => Number(((it.offer || {}).stock) || 0) > 0);
-    const ranked = rankOffers(items, { limit: MAX_OFFERS, capacityLiters: capacityVal || null });
-    const offers = {};
-    for (let i = 0; i < ranked.length; i += 1) {
-      const r = ranked[i];
-      if (!offers[r.brand]) offers[r.brand] = [];
-      offers[r.brand].push(r.offer);
-    }
-    return limitOffersForPromptPayload({ offers, meta: { category, capacity_l: capacityVal || null } });
-  }
-
-  if (cls) {
-    const k = normMatch(cls);
-    const items0 = OFFERS_INDEX.classToOffers.get(k) || [];
-    const items = items0
-      .map((it, idx) => Object.assign({}, it, { originalIdx: typeof it.originalIdx === "number" ? it.originalIdx : idx }))
-      .filter((it) => Number(((it.offer || {}).stock) || 0) > 0);
-    const ranked = rankOffers(items, { limit: MAX_OFFERS, className: cls, tvClassCanon: tvCanon, capacityLiters: capacityVal || null });
-    const offers = {};
-    for (let i = 0; i < ranked.length; i += 1) {
-      const r = ranked[i];
-      if (!offers[r.brand]) offers[r.brand] = [];
-      offers[r.brand].push(r.offer);
-    }
-    return limitOffersForPromptPayload({ offers, meta: { class: cls, capacity_l: capacityVal || null } });
-  }
-
-  if (forcedCategory || forcedClass) {
-    return { offers: {}, meta: { hint: "category_unavailable", category: forcedCategory || forcedClass || "" } };
-  }
-
-  return limitOffersForPromptPayload({ offers: {}, meta: { hint: "no_match" } });
 }
 
 function buildSystemPrompt(offersSubset, lang, opts) {
