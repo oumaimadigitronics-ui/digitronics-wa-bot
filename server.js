@@ -5509,35 +5509,168 @@ function isLocationIntent(text) {
   return false;
 }
 
-function isContactInfoIntent(text) {
+function isContactTemplateIntent(text) {
   if (isOrderStatusIntent(text)) return false;
 
-  const s = normMatch(text);
-  if (!s) return false;
+  const raw = String(text || "");
+  const s = normMatch(arabicIndicToAsciiDigits(raw));
+  if (!raw && !s) return false;
 
-  if (s.indexOf("phone") >= 0) return true;
-  if (s.indexOf("telephone") >= 0) return true;
-  if (s.indexOf("tele") >= 0) return true;
-  if (s.indexOf("whatsapp") >= 0) return true;
-  if (s.indexOf("numero") >= 0) return true;
-  if (s.indexOf("num") >= 0) return true;
-  if (s.indexOf("email") >= 0) return true;
-  if (s.indexOf("adresse") >= 0) return true;
-  if (s.indexOf("address") >= 0) return true;
-  if (s.indexOf("location") >= 0) return true;
-  if (s.indexOf("localisation") >= 0) return true;
-  if (s.indexOf("horaires") >= 0) return true;
-  if (s.indexOf("horaire") >= 0) return true;
-  if (s.indexOf("working hours") >= 0) return true;
-  if (s.indexOf("hours") >= 0) return true;
-  if (s.indexOf("العنوان") >= 0) return true;
-  if (s.indexOf("عنوان") >= 0) return true;
-  if (s.indexOf("الهاتف") >= 0) return true;
-  if (s.indexOf("تليفون") >= 0) return true;
-  if (s.indexOf("الايميل") >= 0) return true;
-  if (s.indexOf("الإيميل") >= 0) return true;
-  if (s.indexOf("مواعيد") >= 0) return true;
-  if (s.indexOf("ساعات") >= 0) return true;
+  const emojiTriggers = ["📍", "🗺️", "📞", "☎️", "📱", "✉️", "📧", "🕒", "⏰"];
+  for (let i = 0; i < emojiTriggers.length; i += 1) {
+    if (raw.includes(emojiTriggers[i])) return true;
+  }
+
+  if (raw.includes("@")) return true;
+
+  const hasAnyToken = (tokens) => tokens.some((token) => token && includesToken(s, token));
+
+  const locationTokens = [
+    "location",
+    "address",
+    "where",
+    "map",
+    "google map",
+    "maps",
+    "direction",
+    "directions",
+    "pin",
+    "gps",
+    "near",
+    "store",
+    "shop",
+    "adresse",
+    "localisation",
+    "où",
+    "ou",
+    "plan",
+    "google maps",
+    "itinéraire",
+    "itineraire",
+    "magasin",
+    "boutique",
+    "fin",
+    "finn",
+    "win",
+    "blasa",
+    "lblas",
+    "l’adresse",
+    "adresse dyalkom",
+    "kifach njik",
+    "itineraire",
+    "plan",
+    "فين",
+    "فبن",
+    "فيـن",
+    "العنوان",
+    "عنوان",
+    "الموقع",
+    "لوكيشن",
+    "ماب",
+    "خرائط",
+    "الخريطة",
+    "غوغل ماب",
+    "جوجل ماب",
+    "كيفاش نجي",
+    "الاتجاهات",
+    "دلني",
+    "فين كاينين",
+  ];
+
+  const phoneTokens = [
+    "phone",
+    "tel",
+    "telephone",
+    "call",
+    "call me",
+    "whatsapp",
+    "watsap",
+    "whtsapp",
+    "number",
+    "contact number",
+    "téléphone",
+    "numéro",
+    "numero",
+    "appelez",
+    "appel",
+    "contact",
+    "3ayet",
+    "3ayt",
+    "t3ayet",
+    "tsl",
+    "n3ayet",
+    "warid",
+    "num",
+    "اتصل",
+    "عيط",
+    "هاتف",
+    "تلفون",
+    "رقم",
+    "نمرة",
+    "واتساب",
+    "واتس",
+    "اتصال",
+  ];
+
+  const emailTokens = [
+    "email",
+    "e-mail",
+    "mail",
+    "gmail",
+    "adresse mail",
+    "imail",
+    "e mail",
+    "إيميل",
+    "ايميل",
+    "بريد",
+    "البريد",
+    "البريد الإلكتروني",
+    "البريد الالكتروني",
+  ];
+
+  const hoursTokens = [
+    "hours",
+    "working hours",
+    "opening hours",
+    "open",
+    "close",
+    "schedule",
+    "time",
+    "when open",
+    "horaires",
+    "heures",
+    "heure",
+    "ouvert",
+    "ferm",
+    "ouverture",
+    "fermeture",
+    "wa9tach كتـحلو",
+    "wa9tach kat7lou",
+    "wa9tach katsdo",
+    "وقاتاش",
+    "وقتاش",
+    "kat7el",
+    "katsed",
+    "service",
+    "horaire",
+    "wach m7lolin",
+    "m7lolin",
+    "أوقات العمل",
+    "اوقات العمل",
+    "ساعات العمل",
+    "الدوام",
+    "مفتوح",
+    "مسدود",
+    "كيحل",
+    "كيسد",
+    "واش محلولين",
+    "متى تفتحون",
+  ];
+
+  if (hasAnyToken(locationTokens)) return true;
+  if (hasAnyToken(phoneTokens)) return true;
+  if (hasAnyToken(emailTokens)) return true;
+  if (hasAnyToken(hoursTokens)) return true;
 
   return false;
 }
@@ -6788,7 +6921,7 @@ app.post("/wanotifier", async (req, res) => {
       return res.json({ ok: true, reply });
     }
 
-    if (isContactInfoIntent(userTextRaw)) {
+    if (isContactTemplateIntent(userTextRaw)) {
       const reply = finalizeReply(contactTemplate(), 520);
       memory.push(key, "assistant", reply);
       resetStrikes(key);
@@ -7135,6 +7268,7 @@ export {
   isGreetingLikeOpener,
   findOfferFromLinks,
   buildSystemPrompt,
+  isContactTemplateIntent,
   tryWebsiteCatalogAnswer,
   tryDirectOfferAnswer,
   setOffersForTest,
