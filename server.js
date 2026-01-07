@@ -189,6 +189,12 @@ const BRAND_PRIORITY = [
 ];
 const MAX_OFFERS = 3;
 const ADMIN_PIN = String(process.env.ADMIN_PIN || "").trim();
+logger.info({
+  msg: "admin_pin_loaded",
+  hasPin: Boolean(process.env.ADMIN_PIN),
+  pinLen: ADMIN_PIN.length,
+  pinPreview: `${ADMIN_PIN.slice(0, 2)}***`,
+});
 const OFFERS_FILE = path.join(process.cwd(), "offers.json");
 const DEFAULT_OFFERS = [
   "🔥 *NOUVELLES OFFRES* 🔥",
@@ -6001,8 +6007,25 @@ function parseOffersPinCommand(text) {
   return { cmd, pin, payload };
 }
 
+function normalizePin(p) {
+  return String(p || "")
+    .replace(/[^\d]/g, "")
+    .trim();
+}
+
 function isValidPin(pin) {
-  return String(pin || "").trim() === ADMIN_PIN;
+  const normalizedPin = normalizePin(pin);
+  const normalizedAdminPin = normalizePin(ADMIN_PIN);
+  if (normalizedPin !== normalizedAdminPin) {
+    logger.warn({
+      msg: "admin_pin_mismatch",
+      gotLen: normalizedPin.length,
+      gotPreview: `${normalizedPin.slice(0, 2)}***`,
+      expectedLen: normalizedAdminPin.length,
+    });
+    return false;
+  }
+  return true;
 }
 
 function offersTemplate() {
