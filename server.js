@@ -309,6 +309,13 @@ async function handleMetaTextMessage(userText, senderId) {
   const lang = detectLang(userText);
   const key = `meta:${senderId}`;
 
+  if (isPublicOffersRequest(userText)) {
+    const offersText = getOffersBlock();
+    memory.push(key, "user", userText);
+    memory.push(key, "assistant", offersText);
+    return offersText;
+  }
+
   memory.push(key, "user", userText);
   const history = memory.get(key);
 
@@ -7198,10 +7205,10 @@ app.post("/wanotifier", express.raw({ type: "*/*", limit: "2mb" }), parseWanotif
     const lang = detectLang(userTextRaw || incoming.lang || "");
     const ip = String(req.ip || "");
     if (isPublicOffersRequest(userTextRaw)) {
-      const reply = getOffersBlock();
-      memory.push(key, "assistant", reply);
+      const offersText = getOffersBlock();
+      memory.push(key, "assistant", offersText);
       resetStrikes(key);
-      return res.json({ ok: true, reply });
+      return res.json({ ok: true, reply: offersText });
     }
     const parsed = parseOffersPinCommand(userTextRaw);
     if (parsed.cmd) {
