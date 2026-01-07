@@ -197,20 +197,20 @@ const COMPANY = {
 const OFFERS_FALLBACK_MESSAGE = `🔥 *NOUVELLES OFFRES* 🔥
 (Stock limité – jusqu’à épuisement)
 
-1) *TCL GoogleTV QLED 32" Full HD (32S5K)*
+1) *Samsung Smart TV HD 32" One UI Tizen (32H5000F)*
+✅ HD • Tizen • 32 pouces
+💰 Prix : *1499 DH*
+🔗 https://digitronics.ma/produit/samsung-smart-tv-hd-32-one-ui-tizen-32h5000f/
+
+2) *Daiko Google TV 32" Smart Silver Frameless FHD (GLED32AI93DK)*
+✅ Google TV • FHD • Frameless
+💰 Prix : *1199 DH*
+🔗 https://digitronics.ma/produit/daiko-google-tv-32-smart-silver-frameless-fhd-gled32ai93dk/
+
+3) *TCL GoogleTV QLED 32" Full HD (32S5K)*
 ✅ QLED • Google TV • Full HD (1920×1080)
 💰 Prix : *1499 DH*
 🔗 https://digitronics.ma/produit/tcl-tv-qled-32-full-hd-32s5k/
-
-2) *Visio LED TV 32" HD (32VB23E)*
-✅ LED • HD • Récepteur intégré
-💰 Prix : *899 DH*
-🔗 https://digitronics.ma/produit/visio-led-tv-32-hd/
-
-3) *Morsat TV LED 24" Normal (MOR24F1)*
-✅ LED • HD • Format compact
-💰 Prix : *899 DH*
-🔗 https://digitronics.ma/produit/morsat-tv-led-24normal-mor24f1/
 
 📌 Pour un prix exact, envoyez le nom du produit (ex: "TCL 32S5K")`;
 
@@ -4771,85 +4771,6 @@ function isPreferCheapest(text) {
 
 const PRICE_KEYWORDS = ["prix", "price", "combien", "tarif", "coute", "coûte", "bch7al", "بشحال", "ثمن"];
 const CHEAP_KEYWORDS = ["pas cher", "cheap", "moins cher", "affordable"];
-
-function hasSpecificProductSignal(text) {
-  const raw = String(text || "");
-  const ascii = arabicIndicToAsciiDigits(raw);
-  const normalized = normMatch(ascii);
-  if (!normalized) return false;
-
-  if (/https?:\/\/\S+/i.test(raw) || /digitronics\.ma\/produit/i.test(raw)) return true;
-
-  const brandTokens = [
-    "samsung",
-    "lg",
-    "tcl",
-    "sony",
-    "daiko",
-    "haier",
-    "hisense",
-    "xiaomi",
-    "iphone",
-    "apple",
-    "hp",
-    "lenovo",
-    "asus",
-    "acer",
-    "dell",
-    "canon",
-    "epson",
-    "whirlpool",
-    "bosch",
-    "beko",
-    "philips",
-    "panasonic",
-    "sharp",
-  ];
-
-  if (brandTokens.some((token) => includesToken(normalized, token))) return true;
-
-  const categoryTokens = [
-    "tv",
-    "television",
-    "tele",
-    "télé",
-    "télévision",
-    "televis",
-    "تلفاز",
-    "تلفزة",
-    "écran",
-    "ecran",
-    "machine a laver",
-    "machine à laver",
-    "lave linge",
-    "lave-linge",
-    "frigo",
-    "réfrigérateur",
-    "refrigerateur",
-    "congelateur",
-    "congélateur",
-    "clim",
-    "climatiseur",
-    "air fryer",
-    "fryer",
-    "micro ondes",
-    "micro-ondes",
-    "ordinateur",
-    "laptop",
-    "pc",
-    "imprimante",
-  ];
-
-  if (categoryTokens.some((token) => includesToken(normalized, token))) return true;
-
-  const sizeRe = /(?:^|[^0-9])(32|40|43|50|55|65|75)(?=$|[^0-9]|["”′]|(?:\s*(?:inch|inches|pouce|pouces)))/i;
-  if (sizeRe.test(ascii)) return true;
-
-  const tokens = ascii.split(/[\s,;:()]+/).filter(Boolean);
-  if (tokens.some((token) => /[a-z]/i.test(token) && /\d/.test(token))) return true;
-
-  return false;
-}
 
 function detectPriceIntent(text) {
   const s = normMatch(text || "");
