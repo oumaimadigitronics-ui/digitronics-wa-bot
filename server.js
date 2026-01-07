@@ -5957,18 +5957,22 @@ function loadOffersBlock() {
     if (fs.existsSync(OFFERS_FILE)) {
       const raw = fs.readFileSync(OFFERS_FILE, "utf8");
       const json = JSON.parse(raw);
-      if (json && typeof json.offers === "string" && json.offers.trim()) return json.offers;
+      if (json && typeof json.offers === "string" && json.offers.trim()) {
+        return String(json.offers || "").replace(/\r\n/g, "\n");
+      }
     }
   } catch {}
   return DEFAULT_OFFERS;
 }
 
 function saveOffersBlock(text) {
+  const normalized = String(text || "").replace(/\r\n/g, "\n").trim();
   const payload = {
-    offers: String(text || "").trim(),
+    offers: normalized,
     updatedAt: new Date().toISOString(),
   };
   fs.writeFileSync(OFFERS_FILE, JSON.stringify(payload, null, 2), "utf8");
+  return normalized;
 }
 
 function getOffersBlock() {
@@ -5995,12 +5999,13 @@ function parseOffersPinCommand(text) {
   }
 
   const remainder = String(m[2] || "").trim();
-  const [pinToken, ...restTokens] = remainder.split(/\s+/).filter(Boolean);
+  const pinMatch = remainder.match(/^(\S+)/);
+  const pinToken = pinMatch ? pinMatch[1] : null;
   const pin = pinToken ? String(pinToken || "").trim() : null;
 
   let payload = null;
   if (cmd === "SET_OFFERS") {
-    const sameLinePayload = restTokens.join(" ").trim();
+    const sameLinePayload = pinToken ? remainder.slice(remainder.indexOf(pinToken) + pinToken.length) : "";
     const nextLinesPayload = raw.split("\n").slice(1).join("\n").trim();
     payload = [sameLinePayload, nextLinesPayload].filter(Boolean).join("\n").trim();
   }
@@ -7183,10 +7188,16 @@ app.post("/wanotifier", express.raw({ type: "*/*", limit: "2mb" }), parseWanotif
         return res.json({ ok: true, reply });
       }
       if (parsed.cmd === "OFFERS") {
-        const reply = getOffersBlock();
+        const offersText = getOffersBlock();
+        logger.info({
+          msg: "offers_reply_preview",
+          len: offersText.length,
+          lines: offersText.split("\n").length,
+        });
+        const reply = offersText;
         memory.push(key, "assistant", reply);
         resetStrikes(key);
-        return res.json({ ok: true, reply: shorten(reply, 520) });
+        return res.json({ ok: true, reply });
       }
       if (parsed.cmd === "SET_OFFERS") {
         if (!parsed.payload) {
@@ -7195,8 +7206,8 @@ app.post("/wanotifier", express.raw({ type: "*/*", limit: "2mb" }), parseWanotif
           resetStrikes(key);
           return res.json({ ok: true, reply });
         }
-        saveOffersBlock(parsed.payload);
-        OFFERS_CACHE = parsed.payload;
+        const normalizedPayload = saveOffersBlock(parsed.payload);
+        OFFERS_CACHE = normalizedPayload;
         const reply = "✅ Offers updated successfully.";
         memory.push(key, "assistant", reply);
         resetStrikes(key);
