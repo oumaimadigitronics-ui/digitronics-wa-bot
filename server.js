@@ -162,6 +162,12 @@ const BRAND_PRIORITY = [
   "Tivoli",
 ];
 const MAX_OFFERS = 3;
+const OFFERS_BLOCK = `
+🔥 NOUVELLES OFFRES 🔥
+1) ...
+2) ...
+3) ...
+`;
 
 const COMPANY = {
   name: "Digitronics",
@@ -4713,6 +4719,115 @@ function isPreferCheapest(text) {
 const PRICE_KEYWORDS = ["prix", "price", "combien", "tarif", "coute", "coûte", "bch7al", "بشحال", "ثمن"];
 const CHEAP_KEYWORDS = ["pas cher", "cheap", "moins cher", "affordable"];
 
+function isGenericPriceQuestion(text) {
+  const normalized = normMatch(arabicIndicToAsciiDigits(text || ""));
+  if (!normalized) return false;
+  if (isNegotiationIntent(text)) return false;
+
+  const priceTokens = [
+    "prix",
+    "combien",
+    "cest combien",
+    "tarif",
+    "cout",
+    "coût",
+    "price",
+    "how much",
+    "cost",
+    "ثمن",
+    "الثمن",
+    "بشحال",
+    "شحال",
+    "كم الثمن",
+    "taman",
+    "ch7al",
+    "bch7al",
+    "thaman",
+    "chhal",
+  ];
+
+  return priceTokens.some((token) => includesToken(normalized, token));
+}
+
+function hasSpecificProductSignal(text) {
+  const raw = String(text || "");
+  const ascii = arabicIndicToAsciiDigits(raw);
+  const normalized = normMatch(ascii);
+  if (!normalized) return false;
+
+  if (/https?:\/\/\S+/i.test(raw) || /digitronics\.ma\/produit/i.test(raw)) return true;
+
+  const brandTokens = [
+    "samsung",
+    "lg",
+    "tcl",
+    "sony",
+    "daiko",
+    "haier",
+    "hisense",
+    "xiaomi",
+    "iphone",
+    "apple",
+    "hp",
+    "lenovo",
+    "asus",
+    "acer",
+    "dell",
+    "canon",
+    "epson",
+    "whirlpool",
+    "bosch",
+    "beko",
+    "philips",
+    "panasonic",
+    "sharp",
+  ];
+
+  if (brandTokens.some((token) => includesToken(normalized, token))) return true;
+
+  const categoryTokens = [
+    "tv",
+    "television",
+    "tele",
+    "télé",
+    "télévision",
+    "televis",
+    "تلفاز",
+    "تلفزة",
+    "écran",
+    "ecran",
+    "machine a laver",
+    "machine à laver",
+    "lave linge",
+    "lave-linge",
+    "frigo",
+    "réfrigérateur",
+    "refrigerateur",
+    "congelateur",
+    "congélateur",
+    "clim",
+    "climatiseur",
+    "air fryer",
+    "fryer",
+    "micro ondes",
+    "micro-ondes",
+    "ordinateur",
+    "laptop",
+    "pc",
+    "imprimante",
+  ];
+
+  if (categoryTokens.some((token) => includesToken(normalized, token))) return true;
+
+  const sizeRe = /(?:^|[^0-9])(32|40|43|50|55|65|75)(?=$|[^0-9]|["”′]|(?:\s*(?:inch|inches|pouce|pouces)))/i;
+  if (sizeRe.test(ascii)) return true;
+
+  const tokens = ascii.split(/[\s,;:()]+/).filter(Boolean);
+  if (tokens.some((token) => /[a-z]/i.test(token) && /\d/.test(token))) return true;
+
+  return false;
+}
+
 function detectPriceIntent(text) {
   const s = normMatch(text || "");
   for (let i = 0; i < PRICE_KEYWORDS.length; i += 1) {
@@ -5785,6 +5900,10 @@ function contactTemplate() {
     "Lundi – Samedi : 10h00 – 22h00\n" +
     "Dimanche : 14h00 – 22h00"
   );
+}
+
+function offersTemplate() {
+  return OFFERS_BLOCK;
 }
 
 function fixedPriceTemplate() {
@@ -7023,6 +7142,16 @@ app.post("/wanotifier", async (req, res) => {
       memory.push(key, "assistant", reply);
       resetStrikes(key);
       return res.json({ ok: true, reply });
+    }
+
+    // Generic price questions with no product signal => send OFFERS_BLOCK.
+    // Should return OFFERS_BLOCK: "prix?", "taman?", "ch7al?"
+    // Should NOT return OFFERS_BLOCK: "prix samsung 65", "ch7al iphone 13", "tv 55 prix"
+    if (isGenericPriceQuestion(userTextRaw) && !hasSpecificProductSignal(userTextRaw)) {
+      const reply = offersTemplate();
+      memory.push(key, "assistant", reply);
+      resetStrikes(key);
+      return res.json({ ok: true, reply: shorten(reply, 520) });
     }
 
     const greetingReply = isBuyIntent(userTextRaw) ? null : handleGreetingMessage({ key, lang, text: userTextRaw });
