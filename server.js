@@ -171,11 +171,14 @@ const BRAND_PRIORITY = [
 ];
 const MAX_OFFERS = 3;
 const OFFERS_FILE = path.join(process.cwd(), "offers.json");
-const ADMIN_PIN = String(process.env.ADMIN_PIN || "1234").trim();
+const ADMIN_PIN = String(process.env.ADMIN_PIN || "987987").trim();
 const ADMIN_NUMBERS = new Set([
-  "+212660111438",
-  "+212700144922",
-  "+212696744965",
+  "212660111438",
+  "0660111438",
+  "0700144922",
+  "212700144922",
+  "0696744965",
+  "212696744965",
 ]);
 const DEFAULT_OFFERS = [
   "🔥 *NOUVELLES OFFRES* 🔥",
@@ -1019,22 +1022,8 @@ function extractMessageType(body) {
 }
 
 function normalizePhone(raw) {
-  if (raw === null || raw === undefined) return null;
-  let s = arabicIndicToAsciiDigits(String(raw)).trim();
-  const atIdx = s.indexOf("@");
-  if (atIdx >= 0) s = s.slice(0, atIdx);
-
-  const hasPlus = s.trim().indexOf("+") === 0;
-  let digits = s.replace(/[^\d]/g, "");
-  if (digits.length < 9 || digits.length > 15) return null;
-
-  if (digits.indexOf("00") === 0) digits = digits.slice(2);
-
-  if (digits.length === 9) return "+212" + digits;
-  if (digits.length === 10 && digits.indexOf("0") === 0) return "+212" + digits.slice(1);
-  if (digits.indexOf("212") === 0) return "+212" + digits.slice(3);
-  if (hasPlus) return "+" + digits;
-  return "+" + digits;
+  const s = arabicIndicToAsciiDigits(String(raw || "")).trim();
+  return s.replace(/[^\d]/g, "").replace(/^00/, "");
 }
 
 function extractConversationId(body) {
@@ -5924,16 +5913,16 @@ function contactTemplate() {
 }
 
 function isAdmin(from) {
-  const normalized = normalizePhone(from);
-  if (!normalized) return false;
-  if (ADMIN_NUMBERS.has(normalized)) return true;
-  const digitsOnly = normalized.replace(/^\+/, "");
-  const last9 = digitsOnly.slice(-9);
-  if (last9.length !== 9) return false;
-  const localNormalized = normalizePhone("0" + last9);
-  if (localNormalized && ADMIN_NUMBERS.has(localNormalized)) return true;
-  const intlNormalized = normalizePhone("212" + last9);
-  if (intlNormalized && ADMIN_NUMBERS.has(intlNormalized)) return true;
+  const norm = normalizePhone(from);
+  if (!norm) return false;
+  if (ADMIN_NUMBERS.has(norm)) return true;
+
+  const last9 = norm.slice(-9);
+  if (last9.length === 9) {
+    if (ADMIN_NUMBERS.has("0" + last9)) return true;
+    if (ADMIN_NUMBERS.has("212" + last9)) return true;
+    if (ADMIN_NUMBERS.has(last9)) return true;
+  }
   return false;
 }
 
@@ -5941,17 +5930,18 @@ function loadOffersBlock() {
   try {
     if (fs.existsSync(OFFERS_FILE)) {
       const raw = fs.readFileSync(OFFERS_FILE, "utf8");
-      const parsed = JSON.parse(raw);
-      if (parsed && typeof parsed.offers === "string" && parsed.offers.trim()) return parsed.offers;
+      const json = JSON.parse(raw);
+      if (json && typeof json.offers === "string" && json.offers.trim()) return json.offers;
     }
-  } catch (err) {
-    console.error("[offers] failed to load offers.json", err);
-  }
+  } catch {}
   return DEFAULT_OFFERS;
 }
 
 function saveOffersBlock(text) {
-  const payload = { offers: text, updatedAt: new Date().toISOString() };
+  const payload = {
+    offers: String(text || "").trim(),
+    updatedAt: new Date().toISOString(),
+  };
   fs.writeFileSync(OFFERS_FILE, JSON.stringify(payload, null, 2), "utf8");
 }
 
@@ -5960,19 +5950,19 @@ function getOffersBlock() {
   return OFFERS_CACHE;
 }
 
-function parseOffersCommand(text) {
-  const raw = String(text || "");
-  const lines = raw.split(/\r?\n/);
-  const firstLine = (lines[0] || "").trim();
-  const match = firstLine.match(/^(offers|set_offers)\s*:\s*(\S+)?/i);
+function parseAdminOffersCommand(text) {
+  const raw = String(text || "").trim();
+  const firstLine = raw.split("\n")[0].trim();
+
+  const match = firstLine.match(/^(OFFERS|SET_OFFERS)\s*:\s*(\S+)\s*$/i);
   if (!match) return { cmd: null, pin: null, payload: null };
-  const cmd = String(match[1] || "").toUpperCase();
-  const pin = match[2] ? String(match[2]).trim() : null;
+
+  const cmd = match[1].toUpperCase();
+  const pin = String(match[2] || "").trim();
+
   let payload = null;
   if (cmd === "SET_OFFERS") {
-    const rest = lines.slice(1).join("\n");
-    const trimmed = rest.trim();
-    payload = trimmed ? trimmed : null;
+    payload = raw.split("\n").slice(1).join("\n").trim();
   }
   return { cmd, pin, payload };
 }
@@ -7177,18 +7167,6 @@ app.post("/wanotifier", async (req, res) => {
     };
     console.log(JSON.stringify(logLine));
 
-    const offersAvailable = Boolean(
-      lastOffersSync &&
-        lastOffersSync.ok &&
-        OFFERS &&
-        OFFERS.offers &&
-        Object.keys(OFFERS.offers).length > 0
-    );
-
-    if (!rateLimitOk(key, ip)) {
-      return res.status(429).json({ ok: false, error: "Rate limit exceeded" });
-    }
-
     if (
       (mediaResult && mediaResult.ok === false && !userTextRaw && !mediaDerivedText) ||
       (normalizedMedia && CFG.mediaMode === "disabled" && !userTextRaw)
@@ -7207,14 +7185,8 @@ app.post("/wanotifier", async (req, res) => {
     }
 
     if (isAdmin(fromNumber)) {
-      const parsed = parseOffersCommand(userTextRaw);
+      const parsed = parseAdminOffersCommand(userTextRaw);
       if (parsed.cmd) {
-        if (!parsed.pin) {
-          const reply = ["Usage:", "OFFERS: <PIN>", "SET_OFFERS: <PIN>", "<paste your new offers text here>"].join("\n");
-          memory.push(key, "assistant", reply);
-          resetStrikes(key);
-          return res.json({ ok: true, reply });
-        }
         if (!isValidAdminPin(parsed.pin)) {
           const reply = "❌ PIN incorrect.";
           memory.push(key, "assistant", reply);
@@ -7229,7 +7201,7 @@ app.post("/wanotifier", async (req, res) => {
         }
         if (parsed.cmd === "SET_OFFERS") {
           if (!parsed.payload) {
-            const reply = ["Usage:", "SET_OFFERS: <PIN>", "<paste your new offers text here>"].join("\n");
+            const reply = ["Usage:", "SET_OFFERS: 987987", "<paste your new offers text on next lines>"].join("\n");
             memory.push(key, "assistant", reply);
             resetStrikes(key);
             return res.json({ ok: true, reply });
@@ -7242,6 +7214,18 @@ app.post("/wanotifier", async (req, res) => {
           return res.json({ ok: true, reply });
         }
       }
+    }
+
+    const offersAvailable = Boolean(
+      lastOffersSync &&
+        lastOffersSync.ok &&
+        OFFERS &&
+        OFFERS.offers &&
+        Object.keys(OFFERS.offers).length > 0
+    );
+
+    if (!rateLimitOk(key, ip)) {
+      return res.status(429).json({ ok: false, error: "Rate limit exceeded" });
     }
 
     if (!offersAvailable) {
