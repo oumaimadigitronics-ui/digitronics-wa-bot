@@ -5251,36 +5251,128 @@ function isBankTransferIntent(text) {
   return false;
 }
 
+// Should trigger:
+// - "ch7al akhi katb9a akhir taman"
+// - "dernier prix?"
+// - "wach t9der tn9es?"
+// - "prix négociable?"
+// - "any discount?"
+// - "تقدر تنقص؟"
+// Should NOT trigger:
+// - "prix?"
+// - "taman?"
+// - "شحال الثمن؟"
+// - "how much?"
 function isNegotiationIntent(text) {
-  const s = normMatch(text);
+  const raw = String(text || "");
+  const s = normMatch(arabicIndicToAsciiDigits(raw));
   if (!s) return false;
 
+  const normalized = s.replace(/[^a-z0-9\u0600-\u06ff\s]/gi, " ").replace(/\s+/g, " ").trim();
+  const priceOnlyPatterns = [
+    /^(price|prix|taman|thaman|ch7al|sh7al|شحال|ثمن|الثمن|سوم|سومة)$/i,
+    /^(price|prix)\s*(svp|stp)?$/i,
+    /^(taman|thaman)\s*(svp|stp)?$/i,
+    /^how much$/i,
+    /^combien$/i,
+    /^شحال\s*(الثمن|ثمن)?$/i,
+  ];
+  if (priceOnlyPatterns.some((re) => re.test(normalized))) return false;
+
   const tokens = [
-    "negocier",
-    "negotier",
-    "negotiation",
-    "remise",
     "discount",
-    "baisse prix",
-    "prix bas",
+    "reduce",
+    "reduction",
+    "cheaper",
+    "best price",
+    "final price",
+    "last price",
+    "can you do",
+    "can you make",
+    "lower",
+    "drop the price",
+    "any offer",
+    "deal",
+    "promo",
+    "give me",
+    "for me",
+    "special price",
+    "price negotiable",
+    "negotiate",
+    "reduction",
+    "réduction",
+    "remise",
+    "rabais",
+    "moins cher",
+    "baisser",
+    "baisse",
+    "dernier prix",
+    "meilleur prix",
+    "prix final",
+    "prix fixe?",
+    "prix fixe",
+    "prix négociable",
+    "prix negociable",
+    "vous pouvez faire",
+    "vous pouvez baisser",
+    "un geste",
+    "petit geste",
+    "petit prix",
+    "solde",
+    "offre",
+    "arrangement",
+    "تخفيض",
+    "خصم",
+    "نقص",
+    "تنقص",
+    "تقدر تنقص",
+    "أرخص",
+    "رخيص",
+    "السعر النهائي",
+    "آخر ثمن",
+    "ثمن آخر",
+    "ثمن نهائي",
+    "واش كاين تخفيض",
+    "واش كاين خصم",
+    "واش يمكن تنقص",
+    "ثمن خاص",
+    "سوم",
+    "سومة",
+    "akhir taman",
+    "akhir thaman",
+    "akhir prix",
+    "akher taman",
+    "akher thaman",
+    "dernier prix",
+    "last price",
+    "final price",
+    "ch7al akher",
+    "ch7al akhir",
+    "ch7al akher taman",
+    "tn9es",
+    "t9es",
+    "n9es",
+    "n9s",
+    "n9es lina",
+    "tn9es lina",
+    "t9der tn9es",
+    "t9der t9es",
+    "tqder tn9es",
+    "fih discount",
+    "fih remise",
+    "fih reduction",
+    "dir lina taman",
+    "dir lia taman",
+    "prix mzyan",
     "prix khfif",
-    "takhfid",
-    "takhfidat",
-    "khasm",
-    "khfif",
-    "n9ass",
-    "bgha tkhasm",
-    "bghit nkhfi",
-    "bgha nqes",
+    "wach t9der tdir",
+    "wach tn9es",
   ];
 
   for (let i = 0; i < tokens.length; i += 1) {
     if (includesToken(s, tokens[i])) return true;
   }
 
-  if (/(bghit|bgha).{0,12}(nqes|n9s|n9ass|khfi)/i.test(s)) return true;
-  if (/prix\s*(moins|baisser|moins cher)/i.test(s)) return true;
-  if (/خفض|خصم|تنقيص/.test(text || "")) return true;
   return false;
 }
 
@@ -5692,6 +5784,19 @@ function contactTemplate() {
     "🕒 𝗛𝗼𝗿𝗮𝗶𝗿𝗲𝘀\n" +
     "Lundi – Samedi : 10h00 – 22h00\n" +
     "Dimanche : 14h00 – 22h00"
+  );
+}
+
+function fixedPriceTemplate() {
+  return (
+    "━━━━━━━━━━━━━━━━ \n" +
+    "Merci beaucoup pour votre intérêt 😊✨\n" +
+    "━━━━━━━━━━━━━━━━ \n\n" +
+    "Nos tarifs sont pensés pour garantir  \n" +
+    "qualité ⭐, fiabilité 🔒 et un service haut de gamme 🏆.\n\n" +
+    "Le prix indiqué est donc fixe, afin de maintenir ce niveau de qualité.\n\n" +
+    "Nous restons bien entendu à votre écoute pour toute question  \n" +
+    "ou information supplémentaire 💬🙂"
   );
 }
 
@@ -6913,6 +7018,13 @@ app.post("/wanotifier", async (req, res) => {
     const history = memory.get(key);
     const ctxData = getCtx(key);
 
+    if (isNegotiationIntent(userTextRaw)) {
+      const reply = fixedPriceTemplate();
+      memory.push(key, "assistant", reply);
+      resetStrikes(key);
+      return res.json({ ok: true, reply });
+    }
+
     const greetingReply = isBuyIntent(userTextRaw) ? null : handleGreetingMessage({ key, lang, text: userTextRaw });
     if (greetingReply) {
       const reply = finalizeReply(greetingReply, 520);
@@ -7010,13 +7122,6 @@ app.post("/wanotifier", async (req, res) => {
 
     if (isBankTransferIntent(userTextRaw)) {
       const reply = finalizeReply(t(lang, "bankTransferHow"), 520);
-      memory.push(key, "assistant", reply);
-      resetStrikes(key);
-      return res.json({ ok: true, reply });
-    }
-
-    if (isNegotiationIntent(userTextRaw)) {
-      const reply = finalizeReply(t(lang, "noNegotiation"), 320);
       memory.push(key, "assistant", reply);
       resetStrikes(key);
       return res.json({ ok: true, reply });
