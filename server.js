@@ -196,14 +196,8 @@ logger.info({
   pinPreview: `${ADMIN_PIN.slice(0, 2)}***`,
 });
 const OFFERS_FILE = path.join(process.cwd(), "offers.json");
-const DEFAULT_OFFERS = [
-  "🔥 *NOUVELLES OFFRES* 🔥",
-  "",
-  "1) ...",
-  "2) ...",
-  "",
-  "📌 Envoyez le nom du produit ou la catégorie (TV, machine à laver, frigo...) pour un prix exact.",
-].join("\n");
+const OFFER_SLOTS = ["offer_01", "offer_02", "offer_03"];
+const OFFER_FIELDS = new Set(["title", "features", "price", "link", "note", "size", "brand", "system", "model"]);
 let OFFERS_CACHE = null;
 
 const COMPANY = {
@@ -5959,37 +5953,97 @@ function contactTemplate() {
   );
 }
 
-function loadOffersBlock() {
+function createEmptyOffersState() {
+  return { offer_01: null, offer_02: null, offer_03: null };
+}
+
+function normalizeOfferSlotItem(raw) {
+  if (!raw || typeof raw !== "object") return null;
+  const out = {};
+  for (const [k, v] of Object.entries(raw)) {
+    const key = String(k || "").trim().toLowerCase();
+    if (!OFFER_FIELDS.has(key)) continue;
+    const value = String(v === undefined || v === null ? "" : v).trim();
+    if (!value) continue;
+    if (key === "link") {
+      const sanitized = sanitizeUrlNoQuestion(value);
+      if (!sanitized) continue;
+      out[key] = sanitized;
+      continue;
+    }
+    out[key] = value;
+  }
+  return Object.keys(out).length ? out : null;
+}
+
+function normalizeOffersState(raw) {
+  const base = createEmptyOffersState();
+  if (!raw || typeof raw !== "object") return base;
+  const hasSlots = OFFER_SLOTS.some((slot) => raw && Object.prototype.hasOwnProperty.call(raw, slot));
+  if (!hasSlots && typeof raw.offers === "string") {
+    return base;
+  }
+  for (let i = 0; i < OFFER_SLOTS.length; i += 1) {
+    const slot = OFFER_SLOTS[i];
+    const normalized = normalizeOfferSlotItem(raw[slot]);
+    base[slot] = normalized;
+  }
+  return base;
+}
+
+function loadOffersState() {
   try {
     if (fs.existsSync(OFFERS_FILE)) {
       const raw = fs.readFileSync(OFFERS_FILE, "utf8");
       const json = JSON.parse(raw);
-      if (json && typeof json.offers === "string" && json.offers.trim()) {
-        return String(json.offers || "").replace(/\r\n/g, "\n");
-      }
+      return normalizeOffersState(json);
     }
   } catch {}
-  return DEFAULT_OFFERS;
+  return createEmptyOffersState();
 }
 
-function saveOffersBlock(text) {
-  const normalized = String(text || "").replace(/\r\n/g, "\n").trim();
-  const payload = {
-    offers: normalized,
-    updatedAt: new Date().toISOString(),
-  };
+function saveOffersState(state) {
+  const normalized = normalizeOffersState(state);
+  const payload = Object.assign({}, normalized, { updatedAt: new Date().toISOString() });
   fs.writeFileSync(OFFERS_FILE, JSON.stringify(payload, null, 2), "utf8");
   return normalized;
 }
 
-function getOffersBlock() {
-  if (OFFERS_CACHE === null) OFFERS_CACHE = loadOffersBlock();
+function formatOffersMessage(state) {
+  const offers = normalizeOffersState(state);
+  const blocks = [];
+  let idx = 1;
+  for (let i = 0; i < OFFER_SLOTS.length; i += 1) {
+    const slot = OFFER_SLOTS[i];
+    const offer = offers[slot];
+    if (!offer) continue;
+    const title = offer.title || "Offre";
+    const lines = [`${idx}) ${title}`];
+    if (offer.features) lines.push(`✅ ${offer.features}`);
+    if (offer.price) lines.push(`💰 Prix : ${offer.price} DH`);
+    if (offer.link) lines.push(`🔗 ${offer.link}`);
+    blocks.push(lines.join("\n"));
+    idx += 1;
+  }
+  const lines = ["🔥 NOUVELLES OFFRES 🔥", "(Stock limité – jusqu’à épuisement)", ""];
+  if (blocks.length) lines.push(blocks.join("\n\n"));
+  lines.push("", '📌 Pour un prix exact, envoyez le nom du produit (ex: "TCL 32S5K").');
+  return lines.join("\n");
+}
+
+function getOffersState() {
+  if (OFFERS_CACHE === null) OFFERS_CACHE = loadOffersState();
   return OFFERS_CACHE;
+}
+
+function getOffersBlock() {
+  return formatOffersMessage(getOffersState());
 }
 
 const PUBLIC_OFFERS_KEYWORDS = [
   "offers",
   "offer",
+  "offres",
   "promos",
   "promo",
   "promotion",
@@ -6014,15 +6068,45 @@ function isPublicOffersRequest(text) {
   if (!raw) return false;
   const stripped = raw.replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, "").replace(/\s+/g, " ").trim();
   if (!stripped) return false;
-  return PUBLIC_OFFERS_KEYWORDS.some((keyword) => stripped === keyword);
+  const padded = ` ${stripped} `;
+  return PUBLIC_OFFERS_KEYWORDS.some((keyword) => {
+    const key = String(keyword || "").trim().toLowerCase();
+    if (!key) return false;
+    if (stripped === key) return true;
+    if (padded.includes(` ${key} `)) return true;
+    return stripped.includes(key);
+  });
+}
+
+function parseOfferFields(raw) {
+  const out = {};
+  const lines = String(raw || "").split("\n");
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = String(lines[i] || "").trim();
+    if (!line) continue;
+    const m = line.match(/^([^:]+):\s*(.*)$/);
+    if (!m) continue;
+    const key = String(m[1] || "").trim().toLowerCase();
+    if (!OFFER_FIELDS.has(key)) continue;
+    const value = String(m[2] || "").trim();
+    if (!value) continue;
+    if (key === "link") {
+      const sanitized = sanitizeUrlNoQuestion(value);
+      if (!sanitized) continue;
+      out[key] = sanitized;
+      continue;
+    }
+    out[key] = value;
+  }
+  return out;
 }
 
 function parseOffersPinCommand(text) {
   const raw = String(text || "").trim();
   const firstLine = raw.split("\n")[0].trim();
 
-  const m = firstLine.match(/^([a-zA-Z][a-zA-Z_\-\s]*)(?:\s*:\s*|\s+)?(.*)$/);
-  if (!m) return { cmd: null, pin: null, payload: null };
+  const m = firstLine.match(/^([a-zA-Z][a-zA-Z0-9_\-\s]*)(?:\s*:\s*|\s+)?(.*)$/);
+  if (!m) return { cmd: null, pin: null, slot: null, payload: null };
 
   let cmd = String(m[1] || "")
     .trim()
@@ -6030,9 +6114,11 @@ function parseOffersPinCommand(text) {
     .replace(/-/g, "_")
     .replace(/\s+/g, "_");
 
-  if (cmd === "SETOFFERS") cmd = "SET_OFFERS";
-  if (cmd !== "OFFERS" && cmd !== "SET_OFFERS") {
-    return { cmd: null, pin: null, payload: null };
+  const isSet = cmd.startsWith("SET_OFFER_");
+  const isClear = cmd.startsWith("CLEAR_OFFER_");
+  const isOffers = cmd === "OFFERS";
+  if (!isSet && !isClear && !isOffers) {
+    return { cmd: null, pin: null, slot: null, payload: null };
   }
 
   const remainder = String(m[2] || "").trim();
@@ -6041,12 +6127,17 @@ function parseOffersPinCommand(text) {
   const pin = pinToken ? String(pinToken || "").trim() : null;
 
   let payload = null;
-  if (cmd === "SET_OFFERS") {
+  if (isSet) {
     const sameLinePayload = pinToken ? remainder.slice(remainder.indexOf(pinToken) + pinToken.length) : "";
     const nextLinesPayload = raw.split("\n").slice(1).join("\n").trim();
     payload = [sameLinePayload, nextLinesPayload].filter(Boolean).join("\n").trim();
   }
-  return { cmd, pin, payload };
+
+  const slot = (isSet || isClear) && OFFER_SLOTS.includes(cmd.replace(/^SET_/, "").replace(/^CLEAR_/, "").toLowerCase())
+    ? cmd.replace(/^SET_/, "").replace(/^CLEAR_/, "").toLowerCase()
+    : null;
+
+  return { cmd, pin, slot, payload };
 }
 
 function normalizePin(p) {
@@ -7214,12 +7305,12 @@ app.post("/wanotifier", express.raw({ type: "*/*", limit: "2mb" }), parseWanotif
     if (parsed.cmd) {
       if (!parsed.pin) {
         if (parsed.cmd === "OFFERS") {
-          const reply = ["Usage:", "OFFERS: <PIN>", "SET_OFFERS: <PIN>", "<paste your new offers text here>"].join("\n");
+          const reply = ["Usage:", "OFFERS: <PIN>", "SET_OFFER_01: <PIN>", "SET_OFFER_02: <PIN>", "SET_OFFER_03: <PIN>"].join("\n");
           memory.push(key, "assistant", reply);
           resetStrikes(key);
           return res.json({ ok: true, reply });
         }
-        const reply = ["Usage:", "SET_OFFERS: <PIN>", "<paste your new offers text here>"].join("\n");
+        const reply = ["Usage:", "SET_OFFER_01: <PIN>", "title: <value>", "features: <value>", "price: <value>", "link: <value>"].join("\n");
         memory.push(key, "assistant", reply);
         resetStrikes(key);
         return res.json({ ok: true, reply });
@@ -7242,16 +7333,50 @@ app.post("/wanotifier", express.raw({ type: "*/*", limit: "2mb" }), parseWanotif
         resetStrikes(key);
         return res.json({ ok: true, reply });
       }
-      if (parsed.cmd === "SET_OFFERS") {
-        if (!parsed.payload) {
-          const reply = ["Usage:", "SET_OFFERS: <PIN>", "<paste your new offers text here>"].join("\n");
+      if (parsed.cmd.startsWith("SET_OFFER_")) {
+        if (!parsed.slot) {
+          const reply = "❌ Slot invalide.";
           memory.push(key, "assistant", reply);
           resetStrikes(key);
           return res.json({ ok: true, reply });
         }
-        const normalizedPayload = saveOffersBlock(parsed.payload);
-        OFFERS_CACHE = normalizedPayload;
-        const reply = "✅ Offers updated successfully.";
+        if (!parsed.payload) {
+          const reply = ["Usage:", "SET_OFFER_01: <PIN>", "title: <value>", "features: <value>", "price: <value>", "link: <value>"].join(
+            "\n"
+          );
+          memory.push(key, "assistant", reply);
+          resetStrikes(key);
+          return res.json({ ok: true, reply });
+        }
+        const parsedFields = parseOfferFields(parsed.payload);
+        const normalized = normalizeOfferSlotItem(parsedFields);
+        if (!normalized) {
+          const reply = "❌ Aucun champ valide détecté.";
+          memory.push(key, "assistant", reply);
+          resetStrikes(key);
+          return res.json({ ok: true, reply });
+        }
+        const current = getOffersState();
+        const next = Object.assign({}, current, { [parsed.slot]: normalized });
+        const saved = saveOffersState(next);
+        OFFERS_CACHE = saved;
+        const reply = "✅ Offre mise à jour.";
+        memory.push(key, "assistant", reply);
+        resetStrikes(key);
+        return res.json({ ok: true, reply });
+      }
+      if (parsed.cmd.startsWith("CLEAR_OFFER_")) {
+        if (!parsed.slot) {
+          const reply = "❌ Slot invalide.";
+          memory.push(key, "assistant", reply);
+          resetStrikes(key);
+          return res.json({ ok: true, reply });
+        }
+        const current = getOffersState();
+        const next = Object.assign({}, current, { [parsed.slot]: null });
+        const saved = saveOffersState(next);
+        OFFERS_CACHE = saved;
+        const reply = "✅ Offre supprimée.";
         memory.push(key, "assistant", reply);
         resetStrikes(key);
         return res.json({ ok: true, reply });
