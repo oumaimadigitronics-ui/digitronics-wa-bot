@@ -56,6 +56,13 @@ const logger = {
       console.log("[INFO]", payload);
     }
   },
+  warn(payload) {
+    try {
+      console.warn(JSON.stringify({ level: "warn", ...payload }));
+    } catch {
+      console.warn("[WARN]", payload);
+    }
+  },
 };
 
 const DEFAULT_ORDER_FORM_URL =
@@ -212,6 +219,11 @@ function getOpenAIClient() {
 app.use(
   express.json({
     limit: "2mb",
+    type: (req) => {
+      if (req.originalUrl && req.originalUrl.startsWith("/wanotifier")) return false;
+      const contentType = String(req.headers["content-type"] || "");
+      return /(^|\s|;)application\/json\b|\/json\b|\+json\b/i.test(contentType);
+    },
     verify: (req, _res, buf) => {
       try {
         req.rawBody = buf.toString("utf8");
@@ -326,6 +338,25 @@ app.use((err, _req, res, next) => {
 
 function nowIso() {
   return new Date().toISOString();
+}
+
+function parseWanotifierJson(req, res, next) {
+  const raw = Buffer.isBuffer(req.body) ? req.body.toString("utf8") : "";
+  req.rawBody = raw;
+  try {
+    req.body = JSON.parse(raw);
+    return next();
+  } catch (err) {
+    const sanitized = raw.replace(/[\u0000-\u001F\u007F]/g, "");
+    try {
+      req.body = JSON.parse(sanitized);
+      logger.warn({ msg: "wanotifier_json_sanitized" });
+      return next();
+    } catch (err2) {
+      console.warn(JSON.stringify({ level: "warn", msg: "invalid_json", error: err2?.message || String(err2) }));
+      return res.status(400).json({ ok: false, error: "invalid_json" });
+    }
+  }
 }
 
 function stableReqId() {
@@ -7068,7 +7099,7 @@ app.post("/refresh-offers", async (req, res) => {
   return res.json({ ok: true, lastOffersSync });
 });
 
-app.post("/wanotifier", async (req, res) => {
+app.post("/wanotifier", express.raw({ type: "*/*", limit: "2mb" }), parseWanotifierJson, async (req, res) => {
   const reqId = stableReqId();
   const t0 = Date.now();
 
