@@ -5957,7 +5957,7 @@ function createEmptyOffersState() {
   return { offer_01: null, offer_02: null, offer_03: null };
 }
 
-function normalizeOfferSlotItem(raw) {
+function normalizeOfferItem(raw) {
   if (!raw || typeof raw !== "object") return null;
   const out = {};
   for (const [k, v] of Object.entries(raw)) {
@@ -5985,7 +5985,7 @@ function normalizeOffersState(raw) {
   }
   for (let i = 0; i < OFFER_SLOTS.length; i += 1) {
     const slot = OFFER_SLOTS[i];
-    const normalized = normalizeOfferSlotItem(raw[slot]);
+    const normalized = normalizeOfferItem(raw[slot]);
     base[slot] = normalized;
   }
   return base;
@@ -6076,6 +6076,29 @@ function isPublicOffersRequest(text) {
     if (padded.includes(` ${key} `)) return true;
     return stripped.includes(key);
   });
+}
+
+function parseOfferFields(raw) {
+  const out = {};
+  const lines = String(raw || "").split("\n");
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = String(lines[i] || "").trim();
+    if (!line) continue;
+    const m = line.match(/^([^:]+):\s*(.*)$/);
+    if (!m) continue;
+    const key = String(m[1] || "").trim().toLowerCase();
+    if (!OFFER_FIELDS.has(key)) continue;
+    const value = String(m[2] || "").trim();
+    if (!value) continue;
+    if (key === "link") {
+      const sanitized = sanitizeUrlNoQuestion(value);
+      if (!sanitized) continue;
+      out[key] = sanitized;
+      continue;
+    }
+    out[key] = value;
+  }
+  return out;
 }
 
 function parseOfferFields(raw) {
@@ -7349,7 +7372,7 @@ app.post("/wanotifier", express.raw({ type: "*/*", limit: "2mb" }), parseWanotif
           return res.json({ ok: true, reply });
         }
         const parsedFields = parseOfferFields(parsed.payload);
-        const normalized = normalizeOfferSlotItem(parsedFields);
+        const normalized = normalizeOfferItem(parsedFields);
         if (!normalized) {
           const reply = "❌ Aucun champ valide détecté.";
           memory.push(key, "assistant", reply);
