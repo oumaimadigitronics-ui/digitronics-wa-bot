@@ -31,6 +31,7 @@ const {
 const LOG_DEBUG = String(process.env.LOG_DEBUG || "0") === "1";
 const IS_TEST = String(process.env.NODE_ENV || "").toLowerCase() === "test";
 const ENTRY_FILE = fileURLToPath(import.meta.url);
+const __filename = ENTRY_FILE;
 const RUN_SELF_TESTS = String(process.env.RUN_SELF_TESTS || process.env.SELF_TEST || "0") === "1";
 const REQUIRE_ENV = process.argv[1] === ENTRY_FILE && !RUN_SELF_TESTS;
 const MAX_AUDIO_BYTES = Number(process.env.MEDIA_MAX_BYTES_AUDIO || 12000000) || 12000000;
