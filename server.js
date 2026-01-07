@@ -173,12 +173,9 @@ const MAX_OFFERS = 3;
 const OFFERS_FILE = path.join(process.cwd(), "offers.json");
 const ADMIN_PIN = String(process.env.ADMIN_PIN || "1234").trim();
 const ADMIN_NUMBERS = new Set([
-  "212660111438", // +212660111438
-  "0660111438",
-  "0700144922",
-  "0696744965",
-  "212700144922",
-  "212696744965",
+  "+212660111438",
+  "+212700144922",
+  "+212696744965",
 ]);
 const DEFAULT_OFFERS = [
   "🔥 *NOUVELLES OFFRES* 🔥",
@@ -1028,11 +1025,14 @@ function normalizePhone(raw) {
   if (atIdx >= 0) s = s.slice(0, atIdx);
 
   const hasPlus = s.trim().indexOf("+") === 0;
-  const digits = s.replace(/[^\d]/g, "");
+  let digits = s.replace(/[^\d]/g, "");
   if (digits.length < 9 || digits.length > 15) return null;
 
+  if (digits.indexOf("00") === 0) digits = digits.slice(2);
+
+  if (digits.length === 9) return "+212" + digits;
   if (digits.length === 10 && digits.indexOf("0") === 0) return "+212" + digits.slice(1);
-  if (digits.indexOf("212") === 0) return "+" + digits;
+  if (digits.indexOf("212") === 0) return "+212" + digits.slice(3);
   if (hasPlus) return "+" + digits;
   return "+" + digits;
 }
@@ -5923,17 +5923,18 @@ function contactTemplate() {
   );
 }
 
-function normalizePhone(from) {
-  return arabicIndicToAsciiDigits(String(from || "")).replace(/[^\d]/g, "");
-}
-
 function isAdmin(from) {
   const normalized = normalizePhone(from);
   if (!normalized) return false;
   if (ADMIN_NUMBERS.has(normalized)) return true;
-  const last9 = normalized.slice(-9);
+  const digitsOnly = normalized.replace(/^\+/, "");
+  const last9 = digitsOnly.slice(-9);
   if (last9.length !== 9) return false;
-  return ADMIN_NUMBERS.has("0" + last9) || ADMIN_NUMBERS.has("212" + last9);
+  const localNormalized = normalizePhone("0" + last9);
+  if (localNormalized && ADMIN_NUMBERS.has(localNormalized)) return true;
+  const intlNormalized = normalizePhone("212" + last9);
+  if (intlNormalized && ADMIN_NUMBERS.has(intlNormalized)) return true;
+  return false;
 }
 
 function loadOffersBlock() {
