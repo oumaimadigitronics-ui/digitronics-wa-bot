@@ -36,6 +36,7 @@ import {
   handleGreetingMessage,
   isGreetingLikeOpener,
   findOfferFromLinks,
+  isContactTemplateIntent,
   extractMediaMetaFromBody,
   getCtxForTest,
   setCtxForTest,
@@ -162,6 +163,24 @@ test("formatOfferLine handles missing values", () => {
 test("formatOfferLine includes sanitized URL", () => {
   const line = formatOfferLine("BrandX", { model: "ModelY", price: 10, url: "http://example.com/p" });
   assert.ok(line.includes("example.com"));
+});
+
+test("isContactTemplateIntent detects contact intents", () => {
+  const samples = [
+    "فين كاينين؟",
+    "adresse?",
+    "رسل ليا لوكيشن",
+    "email",
+    "ايميل",
+    "horaires",
+    "wach m7lolin",
+    "call me",
+    "عيط ليا",
+  ];
+
+  for (const sample of samples) {
+    assert.strictEqual(isContactTemplateIntent(sample), true, sample);
+  }
 });
 
 test("tryDirectOfferAnswer answers TV origin intent and lists Europe models", () => {
