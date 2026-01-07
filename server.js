@@ -194,6 +194,26 @@ const COMPANY = {
   address: "Ville de Casablanca – Quartier Oulfa (Haj Fateh) – Rue 9 – Rond-point Chahdiya – à côté de la boulangerie Pan Com",
 };
 
+const OFFERS_FALLBACK_MESSAGE = `🔥 *NOUVELLES OFFRES* 🔥
+(Stock limité – jusqu’à épuisement)
+
+1) *TCL GoogleTV QLED 32" Full HD (32S5K)*
+✅ QLED • Google TV • Full HD (1920×1080)
+💰 Prix : *1499 DH*
+🔗 https://digitronics.ma/produit/tcl-tv-qled-32-full-hd-32s5k/
+
+2) *Visio LED TV 32" HD (32VB23E)*
+✅ LED • HD • Récepteur intégré
+💰 Prix : *899 DH*
+🔗 https://digitronics.ma/produit/visio-led-tv-32-hd/
+
+3) *Morsat TV LED 24" Normal (MOR24F1)*
+✅ LED • HD • Format compact
+💰 Prix : *899 DH*
+🔗 https://digitronics.ma/produit/morsat-tv-led-24normal-mor24f1/
+
+📌 Pour un prix exact, envoyez le nom du produit (ex: "TCL 32S5K")`;
+
 // RULE #1 no questions
 function brandRank(name, priority = BRAND_PRIORITY) {
   const m = new Map(priority.map((b, idx) => [normMatch(b), idx]));
@@ -5369,6 +5389,45 @@ function isBankTransferIntent(text) {
   return false;
 }
 
+function isGenericPriceQuestion(text) {
+  const raw = String(text || "");
+  const s = normMatch(raw);
+  if (!s) return false;
+  const normalized = s.replace(/[’']/g, " ").replace(/\s+/g, " ").trim();
+
+  if (/^\d+\s*dh$/i.test(normalized)) return true;
+
+  const phraseMatches = ["c est combien", "how much"];
+  for (let i = 0; i < phraseMatches.length; i += 1) {
+    if (normalized.indexOf(phraseMatches[i]) >= 0) return true;
+  }
+
+  const tokens = ["prix", "combien", "tarif", "price", "cost", "cout", "coute", "ch7al", "chhal", "chحال", "بشحال", "الثمن", "ثمن", "السعر", "taman"];
+  for (let i = 0; i < tokens.length; i += 1) {
+    if (includesToken(raw, tokens[i])) return true;
+  }
+  return false;
+}
+
+function hasSpecificProductSignal(text) {
+  const raw = String(text || "");
+  if (!raw) return false;
+
+  if (detectBrand(raw) || detectModel(raw)) return true;
+
+  for (let i = 0; i < BRAND_PRIORITY.length; i += 1) {
+    if (includesToken(raw, BRAND_PRIORITY[i])) return true;
+  }
+
+  const size = extractTvSize(raw, { allowNoHint: false, requireTvHint: false, externalTvContext: false });
+  if (size) return true;
+
+  const modelLike =
+    /\b[a-z]{1,4}\d{2,4}[a-z0-9-]*\b/i.test(raw) ||
+    /\b\d{2,4}[a-z]{1,4}[a-z0-9-]*\b/i.test(raw);
+  return modelLike;
+}
+
 // Should trigger:
 // - "ch7al akhi katb9a akhir taman"
 // - "dernier prix?"
@@ -7218,6 +7277,23 @@ app.post("/wanotifier", express.raw({ type: "*/*", limit: "2mb" }), parseWanotif
       return res.json({ ok: true, reply });
     }
 
+    const detectedBrand = detectBrand(userTextRaw);
+    const detectedModel = detectModel(userTextRaw);
+    const resolvedCategoryIntent = resolveCategoryIntent(userTextRaw);
+    const detectedClass = detectClass(userTextRaw);
+    const detectedCategory = detectCategory(userTextRaw);
+    const hasCategoryMatch = Boolean(resolvedCategoryIntent || detectedCategory || detectedClass);
+    const hasProductMatch = Boolean(detectedBrand || detectedModel);
+
+    if (
+      isGenericPriceQuestion(userTextRaw) &&
+      !hasSpecificProductSignal(userTextRaw) &&
+      !hasProductMatch &&
+      !hasCategoryMatch
+    ) {
+      return res.json({ ok: true, reply: OFFERS_FALLBACK_MESSAGE });
+    }
+
     if (isPhotoRequestIntent(userTextRaw) && !supportModeStore.has(key)) {
       const resolved = resolveOfferForPhoto(userTextRaw, history, key);
 
@@ -7366,12 +7442,12 @@ app.post("/wanotifier", express.raw({ type: "*/*", limit: "2mb" }), parseWanotif
     if (isSupportIntent(userTextRaw)) supportModeStore.set(key, { at: Date.now() });
 
     const shoppingSignal = Boolean(
-      resolveCategoryIntent(userTextRaw) ||
-      detectBrand(userTextRaw) ||
-      detectModel(userTextRaw) ||
+      resolvedCategoryIntent ||
+      detectedBrand ||
+      detectedModel ||
       extractTvSize(userTextRaw) ||
-      detectClass(userTextRaw) ||
-      detectCategory(userTextRaw)
+      detectedClass ||
+      detectedCategory
     );
     const hasShoppingIntent = shoppingSignal || hasProductInquirySignal(userTextRaw);
     if (wasInSupport && shoppingSignal) supportModeStore.delete(key);
