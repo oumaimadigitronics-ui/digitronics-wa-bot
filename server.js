@@ -6068,7 +6068,37 @@ function isPublicOffersRequest(text) {
   if (!raw) return false;
   const stripped = raw.replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, "").replace(/\s+/g, " ").trim();
   if (!stripped) return false;
-  return PUBLIC_OFFERS_KEYWORDS.some((keyword) => stripped === keyword);
+  const padded = ` ${stripped} `;
+  return PUBLIC_OFFERS_KEYWORDS.some((keyword) => {
+    const key = String(keyword || "").trim().toLowerCase();
+    if (!key) return false;
+    if (stripped === key) return true;
+    if (padded.includes(` ${key} `)) return true;
+    return stripped.includes(key);
+  });
+}
+
+function parseOfferFields(raw) {
+  const out = {};
+  const lines = String(raw || "").split("\n");
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = String(lines[i] || "").trim();
+    if (!line) continue;
+    const m = line.match(/^([^:]+):\s*(.*)$/);
+    if (!m) continue;
+    const key = String(m[1] || "").trim().toLowerCase();
+    if (!OFFER_FIELDS.has(key)) continue;
+    const value = String(m[2] || "").trim();
+    if (!value) continue;
+    if (key === "link") {
+      const sanitized = sanitizeUrlNoQuestion(value);
+      if (!sanitized) continue;
+      out[key] = sanitized;
+      continue;
+    }
+    out[key] = value;
+  }
+  return out;
 }
 
 function parseOfferFields(raw) {
