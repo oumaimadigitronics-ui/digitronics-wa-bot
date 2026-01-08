@@ -5872,7 +5872,7 @@ function outOfStockTemplate(model, brand, size, alternativesText) {
   const modelSafe = String(model || "").trim() || "ce modèle";
   const sizeTxt = Number.isFinite(size) ? ` ${size}"` : "";
   const brandTxt = String(brand || "").trim();
-  const header = "━━━━━━━━━━━━━━━━━━━\n" + "𝗗𝗜𝗚𝗜𝗧𝗥𝗢𝗡𝗜𝗖𝗦\n" + "━━━━━━━━━━━━━━━━━━━";
+  const header = "━━━━━━━━━\n" + "𝗗𝗜𝗚𝗜𝗧𝗥𝗢𝗡𝗜𝗖𝗦\n" + "━━━━━━━━━";
   const lines = [];
   lines.push(header);
   lines.push("");
