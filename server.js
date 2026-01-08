@@ -1740,19 +1740,19 @@ const ESCALATION_TEMPLATE = [
 ].join("\n");
 
 const SUPPORT_TEMPLATE = [
-  "╭──────────────────────────────╮",
+  "╭──────────────╮",
   "│   🛠️ *Support Premium*   │",
-  "╰──────────────────────────────╯",
+  "╰──────────────╯",
   "",
   "🇫🇷 Nous sommes là pour résoudre votre problème rapidement.",
   "🇲🇦 حنا هنا باش نحلّو المشكل ديالك بسرعة.",
   "",
-  "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
+  "━━━━━━━━━━━━━━",
   "✅ Diagnostic immédiat",
   "✅ Assistance étape par étape",
   "✅ Retour/échange si لازم",
   "✅ Suivi jusqu’à résolution",
-  "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
+  "━━━━━━━━━━━━━━",
   "",
   "✨ Support fiable, الحل مضمون."
 ].join("\n");
