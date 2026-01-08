@@ -8240,15 +8240,7 @@ app.post("/wanotifier", express.raw({ type: "*/*", limit: "2mb" }), parseWanotif
 
     if (isBuyIntent(userTextRaw)) {
       supportModeStore.delete(key);
-      const direct = tryDirectOfferAnswer(userTextRaw, history, lang, key);
-      if (direct) {
-        const withForm = finalizeReply(direct + "\n\n" + t(lang, "orderForm"), 520);
-        const reply = withForm || finalizeReply(direct, 520);
-        memory.push(key, "assistant", reply);
-        resetStrikes(key);
-        return res.json({ ok: true, reply });
-      }
-      const reply = finalizeReply(t(lang, "orderForm"), 520);
+      const reply = finalizeReply(BUY_INTENT_TEMPLATE.replace("{ORDER_LINK}", ORDER_FORM_URL), 520);
       memory.push(key, "assistant", reply);
       resetStrikes(key);
       return res.json({ ok: true, reply });
