@@ -1704,6 +1704,20 @@ const GREETING_TEMPLATE = [
   "🚚 Livraison: *1–7 jours*  |  💳 *Paiement à la livraison*"
 ].join("\n");
 
+const BUY_INTENT_TEMPLATE = [
+  "╭───────────────╮",
+  "│   🛒 *Achat Premium*   │",
+  "╰───────────────╯",
+  "",
+  "🇫🇷 Achat rapide et sécurisé en 1 clic.",
+  "🇲🇦 شري سريع وآمن فـ ضغطة وحدة.",
+  "",
+  "━━━━━━━━━━━━━━",
+  "🔗 {ORDER_LINK}",
+  "🔒 Transaction premium: protection et suivi assurés.",
+  "━━━━━━━━━━━━━━"
+].join("\n");
+
 const CLARITY_TEMPLATE = [
   "╭──────────────╮",
   "│   ✨ *Clarté Premium*   │",
@@ -2617,6 +2631,7 @@ function routeTemplate(text) {
   if (isSupportIntent(text)) return SUPPORT_TEMPLATE;
 
   const templates = [];
+  if (isBuyIntent(text) || hasQuantitySignal(text)) templates.push(BUY_INTENT_TEMPLATE);
   if (isContactIntent(text)) templates.push(CONTACT_TEMPLATE);
   if (isDeliveryIntent(text)) templates.push(DELIVERY_TEMPLATE);
   if (isPaymentIntent(text)) templates.push(PAYMENT_TEMPLATE);
@@ -6242,25 +6257,93 @@ function answerGoogleTvOfficialQuestion({ text, lang, parsed, key, modelOffer })
   return ensureNoQuestion(reply);
 }
 
-function isBuyIntent(text) {
-  const raw = String(text || "");
-  const s = normMatch(raw);
+function isBuyIntent(raw) {
+  const s = normMatch(arabicIndicToAsciiDigits(String(raw || ""))).toLowerCase();
+  if (!s) return false;
+  if (isOrderStatusIntent(raw)) return false;
 
-  if (isOrderStatusIntent(text)) return false;
+  const normalized = s
+    .replace(/[’']/g, " ")
+    .replace(/[^a-z0-9\u0600-\u06FF\s]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
 
-  const arabicPhrases = ["بغيت نطلب", "نكمل الطلب", "بغيت نشري", "أكّد", "اكد", "أكد"];
-  for (let i = 0; i < arabicPhrases.length; i += 1) {
-    const p = arabicPhrases[i];
-    if (!p) continue;
-    const norm = normMatch(p);
-    if (raw.indexOf(p) >= 0 || (norm && s.indexOf(norm) >= 0)) return true;
+  const ignoreOnly = new Set(["delivery", "livraison", "توصيل", "warranty", "garantie", "ضمان", "price", "prix", "ثمن"]);
+  if (ignoreOnly.has(normalized)) return false;
+
+  const phrases = [
+    "commander",
+    "commande",
+    "acheter",
+    "je le prends",
+    "je prends",
+    "passer commande",
+    "confirmer la commande",
+    "buy",
+    "order",
+    "purchase",
+    "checkout",
+    "cart",
+    "place an order",
+    "order now",
+    "بغيت",
+    "ندي",
+    "ناخد",
+    "نطلب",
+    "نكوموندي",
+    "كيفاش نطلب",
+    "نأكد الطلب",
+    "تأكيد الطلب",
+    "أريد الشراء",
+    "طلب",
+  ];
+
+  for (let i = 0; i < phrases.length; i += 1) {
+    const phrase = phrases[i];
+    if (!phrase) continue;
+    const norm = normMatch(phrase);
+    if (!norm) continue;
+    if (phrase.indexOf(" ") >= 0) {
+      if (normalized.indexOf(norm) >= 0) return true;
+    } else if (includesToken(s, phrase)) {
+      return true;
+    }
   }
 
-  const keywords = ["commander", "acheter", "buy", "order", "confirm"];
-  for (let i = 0; i < keywords.length; i += 1) {
-    if (includesToken(raw, keywords[i])) return true;
+  const paymentSignals = [
+    "cod",
+    "cash on delivery",
+    "paiement à la livraison",
+    "paiement a la livraison",
+    "virement",
+    "rib",
+    "bank transfer",
+  ];
+
+  for (let i = 0; i < paymentSignals.length; i += 1) {
+    const signal = paymentSignals[i];
+    if (!signal) continue;
+    const norm = normMatch(signal);
+    if (!norm) continue;
+    if (signal.indexOf(" ") >= 0) {
+      if (normalized.indexOf(norm) >= 0) return true;
+    } else if (includesToken(s, signal)) {
+      return true;
+    }
   }
 
+  return false;
+}
+
+function hasQuantitySignal(raw) {
+  const s = normMatch(arabicIndicToAsciiDigits(String(raw || ""))).toLowerCase();
+  if (!s) return false;
+  if (/\b(?:[1-9]|10)\b/.test(s)) return true;
+  if (/\b\d+\s*(?:pcs|piece|unit|units)\b/.test(s)) return true;
+  const tokens = ["quantité", "quantite", "qte", "pièce", "عدد", "واحد", "جوج", "ثلاثة"];
+  for (let i = 0; i < tokens.length; i += 1) {
+    if (includesToken(s, tokens[i])) return true;
+  }
   return false;
 }
 
@@ -8348,6 +8431,8 @@ export {
   isAngryIntent,
   isConfusedIntent,
   isSupportIntent,
+  isBuyIntent,
+  hasQuantitySignal,
   routeTemplate,
   CONTACT_TEMPLATE,
   DELIVERY_TEMPLATE,
@@ -8356,6 +8441,8 @@ export {
   ESCALATION_TEMPLATE,
   CLARITY_TEMPLATE,
   SUPPORT_TEMPLATE,
+  BUY_INTENT_TEMPLATE,
+  ORDER_FORM_URL,
   isAudioMime,
   isAudioMeta,
   extFromAudioMime,
