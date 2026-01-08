@@ -1727,7 +1727,7 @@ const INITIAL_GREETING_TTL_MS = 2 * 60 * 60 * 1000;
 
 const GREETING_TEMPLATE = [
   "╭───────────────╮",
-  "│   👋 *Digitronics AI Bot* 🤖   │",
+  "│   👋 *Digitronics.ma* 🤖   │",
   "╰───────────────╯",
   "",
   "🇫🇷 Bonjour ! Dites-moi ce que vous cherchez 👇",
@@ -9736,9 +9736,9 @@ function audioReminderText(lang) {
 function audioAnswerNote(lang) {
   const L = String(lang || "dzl");
   if (L === "fr") {
-    return "Je suis un bot IA. Voici ce que j’ai compris de votre audio et ma réponse. Si c’est correct, parfait ! Sinon, il se peut que je n’aie pas bien entendu—désolé. Merci d’écrire votre message pour que je puisse mieux répondre.";
+    return "Je suis un DigiTronics Assistant. Voici ce que j’ai compris de votre audio et ma réponse. Si c’est correct, parfait ! Sinon, il se peut que je n’aie pas bien entendu—désolé. Merci d’écrire votre message pour que je puisse mieux répondre.";
   }
-  return "أنا بوت بالذكاء الاصطناعي. هاد الشي اللي فهمت من الصوت ديالك وهدي هي الجواب ديالي. إلا كان هذا هو القصد ديالك مزيان! إلا ما كانش، يمكن ما فهمتش مزيان الصوت ديالك كنعتذر، وكتب ليا الرسالة باش نجاوبك أحسن.";
+  return "أنا خدمة العملاء. هاد الشي اللي فهمت من الصوت ديالك وهدي هي الجواب ديالي. إلا كان هذا هو القصد ديالك مزيان! إلا ما كانش، يمكن ما فهمتش مزيان الصوت ديالك كنعتذر، وكتب ليا الرسالة باش نجاوبك أحسن.";
 }
 
 function voiceNotUnderstoodTemplate() {
