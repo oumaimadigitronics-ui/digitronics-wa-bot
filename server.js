@@ -5387,21 +5387,26 @@ async function deriveMediaText(mediaInput, lang, reqId) {
         sizeBytes = buf.length;
         if (sizeBytes > CFG.mediaMaxBytesAudio) throw new Error("audio_too_large");
         fs.writeFileSync(tmpFile, buf);
+        if (!mimeType) mimeType = inferMimeFromPath(tmpFile, "") || "";
       } else if (normalized.url) {
         const dl = await downloadToTemp(normalized.url, tmpFile);
         sizeBytes = dl.sizeBytes || 0;
         const downloadMime = String(dl.mimeType || "").trim();
-        mimeType = mimeType || downloadMime;
-        let resolvedMime = downloadMime || inferMimeFromPath(tmpFile, mimeType || "");
-        if (!resolvedMime || !isAudioMime(resolvedMime)) {
+        const inferredMime = inferMimeFromPath(tmpFile, mimeType || "");
+        let actualMime = downloadMime || inferredMime || mimeType || "";
+        if (!actualMime || !isAudioMime(actualMime)) {
           const inferred = inferMimeFromPath(tmpFile, "");
-          resolvedMime = inferred && isAudioMime(inferred) ? inferred : "audio/ogg";
+          actualMime = inferred && isAudioMime(inferred) ? inferred : "audio/ogg";
         }
-        const renameResult = ensureAudioFileExtMatchesMime(tmpFile, resolvedMime);
-        tmpFile = renameResult.filePath;
-        const resolvedExt = renameResult.ext || path.extname(tmpFile) || extFromAudioMime(resolvedMime);
-        if (renameResult.renamed) filename = `voice${resolvedExt || ""}`;
-        mimeType = resolvedMime;
+        const actualExt = extFromAudioMime(actualMime) || path.extname(tmpFile);
+        const currentExt = path.extname(tmpFile);
+        if (actualExt && currentExt.toLowerCase() !== actualExt.toLowerCase()) {
+          const renamed = path.join(dir, `audio${actualExt}`);
+          fs.renameSync(tmpFile, renamed);
+          tmpFile = renamed;
+        }
+        mimeType = actualMime;
+        filename = path.basename(tmpFile) || filename;
         console.log(
           JSON.stringify({
             level: "info",
@@ -5410,7 +5415,7 @@ async function deriveMediaText(mediaInput, lang, reqId) {
             sizeBytes,
             mimeType: downloadMime || null,
             tmpFile,
-            ext: resolvedExt || null,
+            ext: actualExt || null,
           })
         );
       } else {
@@ -5423,12 +5428,14 @@ async function deriveMediaText(mediaInput, lang, reqId) {
         chosenMime = inferred && isAudioMime(inferred) ? inferred : "audio/ogg";
       }
       mimeType = chosenMime;
+      filename = path.basename(tmpFile) || filename;
       const chosenModel = CFG.openaiTranscribeModel || "gpt-4o-mini-transcribe";
       console.log(
         JSON.stringify({
           level: "info",
           msg: "audio_transcribe_request",
           reqId,
+          tmpFile,
           mimeType: chosenMime,
           filename,
           model: chosenModel,
