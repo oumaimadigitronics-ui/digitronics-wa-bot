@@ -1852,6 +1852,106 @@ const SUPPORT_TEMPLATE = [
   "✨ Support fiable, الحل مضمون."
 ].join("\n");
 
+const PRODUCT_REVIEW_TEMPLATE = (productName, highlights = {}) => {
+  const nameFr = productName ? `*${productName}*` : "ce produit";
+  const nameAr = productName ? `*${productName}*` : "هاد المنتوج";
+  const safe = highlights && typeof highlights === "object" ? highlights : {};
+  const pros = Array.isArray(safe.pros) && safe.pros.length ? safe.pros : ["Image propre et stable", "Interface fluide", "Qualité globale équilibrée"];
+  const cons = Array.isArray(safe.cons) && safe.cons.length ? safe.cons : ["Son standard", "Luminosité moyenne en pleine lumière"];
+  const useCase = Array.isArray(safe.useCase) && safe.useCase.length ? safe.useCase : ["Netflix/YouTube", "Usage familial"];
+
+  return [
+    "╭──────────────────────────────╮",
+    "│   ⭐ *Avis Produit Premium*   │",
+    "╰──────────────────────────────╯",
+    "",
+    `🇫🇷 Avis rapide sur ${nameFr}.`,
+    `🇲🇦 رأي سريع على ${nameAr}.`,
+    "",
+    "━━━━━━━━━━━━━━",
+    "✅ Points forts:",
+    ...pros.map((p) => `• ${p}`),
+    "⚠️ Points à noter:",
+    ...cons.map((c) => `• ${c}`),
+    "🎯 Idéal pour:",
+    ...useCase.map((u) => `• ${u}`),
+    "━━━━━━━━━━━━━━",
+  ].join("\n");
+};
+
+const PRODUCT_COMPARE_TEMPLATE = (a, b) => {
+  const left = a || "Option A";
+  const right = b || "Option B";
+  return [
+    "╭──────────────────────────────╮",
+    "│   ⚖️ *Comparatif Premium*   │",
+    "╰──────────────────────────────╯",
+    "",
+    `🇫🇷 Comparatif clair: *${left}* vs *${right}*.`,
+    `🇲🇦 مقارنة واضحة: *${left}* ضد *${right}*.`,
+    "",
+    "━━━━━━━━━━━━━━",
+    `✅ Choisir *${left}* si:`,
+    "• Image et couleurs plus riches",
+    "• Usage cinéma/streaming régulier",
+    `✅ Choisir *${right}* si:`,
+    "• Budget optimisé",
+    "• Usage quotidien simple",
+    "━━━━━━━━━━━━━━",
+  ].join("\n");
+};
+
+const TECH_EXPLAIN_TEMPLATE = (topic) => {
+  if (topic === "google_vs_android") {
+    return [
+      "╭──────────────────────────────╮",
+      "│   🧠 *Tech Premium*   │",
+      "╰──────────────────────────────╯",
+      "",
+      "🇫🇷 Google TV vs Android TV.",
+      "• Google TV: interface moderne, recommandations meilleures, plus simple.",
+      "• Android TV: interface classique, très large compatibilité d’apps.",
+      "• Les deux: Netflix/YouTube/Play Store OK.",
+      "",
+      "🇲🇦 Google TV ولا Android TV.",
+      "• Google TV: واجهة جديدة وسهلة وتوصيات أحسن.",
+      "• Android TV: واجهة كلاسيكية وتوافق واسع مع التطبيقات.",
+      "• بجوجهم: Netflix/YouTube/Play Store شغالين.",
+      "━━━━━━━━━━━━━━",
+    ].join("\n");
+  }
+  if (topic === "qled_vs_led") {
+    return [
+      "╭──────────────────────────────╮",
+      "│   🧠 *Tech Premium*   │",
+      "╰──────────────────────────────╯",
+      "",
+      "🇫🇷 QLED vs LED.",
+      "• QLED: couleurs plus vives, meilleure luminosité.",
+      "• LED: bonne image standard, budget plus doux.",
+      "",
+      "🇲🇦 QLED ولا LED.",
+      "• QLED: ألوان أقوى وسطوع أحسن.",
+      "• LED: صورة مزيانة وبثمن مناسب.",
+      "━━━━━━━━━━━━━━",
+    ].join("\n");
+  }
+  return [
+    "╭──────────────────────────────╮",
+    "│   🧠 *Tech Premium*   │",
+    "╰──────────────────────────────╯",
+    "",
+    "🇫🇷 4K vs FHD.",
+    "• 4K: netteté supérieure, ممتازة للشاشات الكبيرة.",
+    "• FHD: جودة مزيانة للشاشات المتوسطة وبudget أقل.",
+    "",
+    "🇲🇦 4K ولا FHD.",
+    "• 4K: وضوح أعلى خصوصاً فالأحجام الكبيرة.",
+    "• FHD: كافي للاستعمال اليومي بثمن مناسب.",
+    "━━━━━━━━━━━━━━",
+  ].join("\n");
+};
+
 function getInfoTemplate(type, lang, vars) {
   const templates = {
     contact: CONTACT_TEMPLATE,
@@ -1923,6 +2023,49 @@ function hasAnyPhrase(text, phrases) {
     if (phrase && s.indexOf(phrase) >= 0) return true;
   }
   return false;
+}
+
+function isProductAdviceIntent(text) {
+  const s = normMatch(arabicIndicToAsciiDigits(text)).toLowerCase();
+  if (!s) return false;
+
+  const priceTokens = ["price", "prix", "thمن", "ثمن", "سعر", "combien"];
+  const adviceTokens = [
+    "good",
+    "best",
+    "better",
+    "worth",
+    "quality",
+    "recommend",
+    "compare",
+    "vs",
+    "which better",
+    "bon",
+    "meilleur",
+    "mieux",
+    "qualite",
+    "qualité",
+    "ca vaut",
+    "ça vaut",
+    "comparaison",
+    "zwine",
+    "mzyan",
+    "زين",
+    "زوين",
+    "مزيان",
+    "أحسن",
+    "احسن",
+    "الفرق",
+    "ولا",
+    "شنو احسن",
+    "شنو أحسن",
+    "واش زوين",
+  ];
+
+  const hasAdvice = adviceTokens.some((token) => includesToken(s, token));
+  const hasPrice = priceTokens.some((token) => includesToken(s, token));
+  if (hasPrice && !hasAdvice) return false;
+  return hasAdvice;
 }
 
 function isContactIntent(text) {
@@ -2096,6 +2239,70 @@ function isOpeningHoursIntent(text) {
   ];
 
   return hasAnyToken(s, tokens);
+}
+
+function extractCompareParts(text) {
+  const raw = String(text || "");
+  const cleaned = raw.replace(/[\n\r]+/g, " ");
+  const split = cleaned
+    .split(/(?:\bvs\b|versus|contra|مقابل|ضد|ولا| ou | or )/i)
+    .map((s) => s.trim())
+    .filter(Boolean);
+  if (split.length >= 2) return [split[0].slice(0, 40).trim(), split[1].slice(0, 40).trim()];
+  return [null, null];
+}
+
+function resolveAdvice(text, ctxData) {
+  const raw = String(text || "");
+  const s = normMatch(arabicIndicToAsciiDigits(raw)).toLowerCase();
+  const ctx = ctxData && typeof ctxData === "object" ? ctxData : {};
+
+  const hasGoogle = s.includes("google");
+  const hasAndroid = s.includes("android");
+  if (hasGoogle && hasAndroid) return TECH_EXPLAIN_TEMPLATE("google_vs_android");
+  if (s.includes("qled") && s.includes("led")) return TECH_EXPLAIN_TEMPLATE("qled_vs_led");
+  if (s.includes("4k") && (s.includes("fhd") || s.includes("full hd") || s.includes("1080"))) return TECH_EXPLAIN_TEMPLATE("4k_vs_fhd");
+
+  const isGoodSignal =
+    includesToken(s, "good") ||
+    includesToken(s, "bon") ||
+    includesToken(s, "mieux") ||
+    includesToken(s, "meilleur") ||
+    includesToken(s, "qualite") ||
+    includesToken(s, "qualité") ||
+    includesToken(s, "worth") ||
+    includesToken(s, "recommend") ||
+    includesToken(s, "zwine") ||
+    includesToken(s, "mzyan") ||
+    includesToken(s, "زوين") ||
+    includesToken(s, "مزيان") ||
+    includesToken(s, "واش زوين") ||
+    includesToken(s, "أحسن") ||
+    includesToken(s, "احسن");
+
+  const modelHit = detectModel(raw);
+  const usage = [];
+  if (s.includes("netflix")) usage.push("Netflix");
+  if (s.includes("youtube")) usage.push("YouTube");
+  if (s.includes("gaming") || s.includes("game") || s.includes("ps5") || s.includes("ps4") || s.includes("xbox")) {
+    usage.push("Gaming/Console");
+  }
+
+  if (isGoodSignal && !modelHit && ctx.lastProductName) {
+    return PRODUCT_REVIEW_TEMPLATE(ctx.lastProductName, {
+      useCase: usage.length ? usage : undefined,
+    });
+  }
+
+  if (s.includes("vs") || s.includes("ولا") || s.includes("ou") || s.includes(" or ")) {
+    const [left, right] = extractCompareParts(raw);
+    return PRODUCT_COMPARE_TEMPLATE(left, right);
+  }
+
+  const fallbackName = ctx.lastProductName || ctx.lastModel || ctx.lastBrand || "ce produit";
+  return PRODUCT_REVIEW_TEMPLATE(fallbackName, {
+    useCase: usage.length ? usage : undefined,
+  });
 }
 
 function isDeliveryIntent(text) {
@@ -8086,6 +8293,13 @@ app.post("/wanotifier", express.raw({ type: "*/*", limit: "2mb" }), parseWanotif
 
     if (isBuyIntent(userTextRaw) && !isExplicitOrderStatusQuery(userTextRaw)) {
       const reply = finalizeReply(BUY_INTENT_TEMPLATE.replace("{ORDER_LINK}", ORDER_FORM_URL), 520);
+      memory.push(key, "assistant", reply);
+      resetStrikes(key);
+      return res.json({ ok: true, reply });
+    }
+
+    if (isProductAdviceIntent(userTextRaw)) {
+      const reply = finalizeReply(resolveAdvice(userTextRaw, ctxData), 650);
       memory.push(key, "assistant", reply);
       resetStrikes(key);
       return res.json({ ok: true, reply });
