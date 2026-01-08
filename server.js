@@ -7,6 +7,7 @@ import os from "os";
 import assert from "assert";
 import { fileURLToPath } from "url";
 import { getFetch, getOpenAI, getNowMs, setDepsForTests } from "./src/deps.js";
+import { processAudioPipeline, isTranscriptLowQuality } from "./src/audio/index.js";
 import {
   detectBrand as detectBrandKnowledge,
   detectCategory as detectCategoryKnowledge,
@@ -120,6 +121,7 @@ const {
 
   OPENAI_VISION_MODEL = "",
   OPENAI_TRANSCRIBE_MODEL = "gpt-4o-mini-transcribe",
+  AUDIO_MIN_SCORE = "0.45",
 
   SYSTEM_PROMPT = "",
   SYSTEM_PROMPT_FILE = "",
@@ -162,6 +164,7 @@ const CFG = {
 
   openaiVisionModel: String(OPENAI_VISION_MODEL || "").trim(),
   openaiTranscribeModel: String(OPENAI_TRANSCRIBE_MODEL || "gpt-4o-mini-transcribe").trim(),
+  audioMinScore: Math.max(0, Math.min(1, Number(AUDIO_MIN_SCORE) || 0.45)),
 
   wcBase: String(WC_BASE_URL || "").replace(/\/$/g, ""),
   wcKey: String(WC_CONSUMER_KEY || ""),
@@ -5364,6 +5367,8 @@ async function deriveMediaText(mediaInput, lang, reqId) {
     const tmpFile = path.join(dir, `audio${ext || ".mp3"}`);
     let sizeBytes = 0;
     let mimeType = normalized.mime || "";
+    const downloadStart = Date.now();
+    let pipelineTmpDirs = { preprocess: null, chunk: null };
     try {
       if (raw && raw.base64) {
         const buf = Buffer.from(String(raw.base64 || ""), "base64");
@@ -5377,27 +5382,90 @@ async function deriveMediaText(mediaInput, lang, reqId) {
       } else {
         throw new Error("audio_url_missing");
       }
+      const downloadMs = Date.now() - downloadStart;
+      const transcribeOverride =
+        typeof audioTranscriberOverride === "function"
+          ? async ({ filePath, mimeType: overrideMime, language }) => {
+              const out = await audioTranscriberOverride(filePath, overrideMime, language);
+              if (out && typeof out === "object") {
+                return {
+                  rawTranscript: String(out.text || out.rawTranscript || ""),
+                  segments: Array.isArray(out.segments) ? out.segments : null,
+                  modelUsed: out.modelUsed || "override",
+                };
+              }
+              return { rawTranscript: String(out || ""), segments: null, modelUsed: "override" };
+            }
+          : null;
+      const pipeline = await processAudioPipeline({
+        filePath: tmpFile,
+        mimeType: mimeType || normalized.mime || raw.mime || "",
+        sizeBytes,
+        languageHint: lang,
+        maxBytes: CFG.mediaMaxBytesAudio,
+        model: CFG.openaiTranscribeModel || "gpt-4o-mini-transcribe",
+        minScore: CFG.audioMinScore,
+        allowFfmpeg: true,
+        deps: transcribeOverride ? { transcribe: transcribeOverride } : {},
+      });
+      pipelineTmpDirs = { preprocess: pipeline.preprocessTmpDir, chunk: pipeline.chunkTmpDir };
 
-      const transcript = await transcribeAudioOpenAI(
-        {
-          filePath: tmpFile,
-          model: CFG.openaiTranscribeModel || "gpt-4o-mini-transcribe",
-          mimeType: mimeType || normalized.mime || raw.mime || "",
-          filename: normalized.filename || null,
+      const snippet = LOG_DEBUG ? pipeline.cleanTranscript.slice(0, 200) : undefined;
+      console.log(
+        JSON.stringify({
+          level: "info",
+          msg: "audio_pipeline",
           reqId,
-          language: lang,
-        },
-        getOpenAIClient()
+          durationSec: pipeline.durationSec,
+          sizeBytes: pipeline.sizeBytes,
+          chunksCount: pipeline.chunksCount,
+          modelUsed: pipeline.modelUsed,
+          transcriptChars: pipeline.transcriptChars,
+          transcriptQualityScore: pipeline.transcriptQualityScore,
+          latencyMs: { downloadMs, ...pipeline.timings },
+          transcriptSnippet: snippet,
+          qualityReasons: pipeline.transcriptQualityReasons,
+        })
       );
-      const safe = ensureNoQuestion(sanitizeDerivedText(transcript));
+
+      if (!pipeline.cleanTranscript) throw new Error("transcription_empty");
+      if (isTranscriptLowQuality(pipeline)) {
+        return {
+          ok: false,
+          reason: "low_quality",
+          path: "audio",
+          sizeBytes: pipeline.sizeBytes,
+          mimeType: mimeType || raw.mime || null,
+          transcriptChars: pipeline.transcriptChars,
+        };
+      }
+
+      const safe = ensureNoQuestion(sanitizeDerivedText(pipeline.cleanTranscript));
       if (!safe) throw new Error("transcription_empty");
-      return { ok: true, text: safe.slice(0, 1800), path: "audio", sizeBytes, mimeType: mimeType || raw.mime || null };
+      return {
+        ok: true,
+        text: safe,
+        path: "audio",
+        sizeBytes: pipeline.sizeBytes,
+        mimeType: mimeType || raw.mime || null,
+        transcriptChars: pipeline.transcriptChars,
+        durationSec: pipeline.durationSec,
+        chunksCount: pipeline.chunksCount,
+        modelUsed: pipeline.modelUsed,
+        transcriptQualityScore: pipeline.transcriptQualityScore,
+      };
     } catch (err) {
       console.error(JSON.stringify({ level: "error", msg: "media_audio_derive_fail", reqId, error: (err && err.message) || String(err) }));
       return { ok: false, error: err };
     } finally {
       try {
         fs.rmSync(dir, { recursive: true, force: true });
+      } catch {}
+      try {
+        if (pipelineTmpDirs.preprocess) fs.rmSync(pipelineTmpDirs.preprocess, { recursive: true, force: true });
+      } catch {}
+      try {
+        if (pipelineTmpDirs.chunk) fs.rmSync(pipelineTmpDirs.chunk, { recursive: true, force: true });
       } catch {}
     }
   }
@@ -6645,6 +6713,13 @@ function contactInfoSavedMessage(lang) {
   return "Shokran 3la l-infos 👍 Goul lia kifach n3awnk.";
 }
 
+function thankYouFollowUpMessage(lang) {
+  const L = lang || "dzl";
+  if (L === "fr") return "Merci 👍 Envoyez la marque, le modèle, la taille ou le budget pour continuer.";
+  if (L === "ar") return "شكراً 👍 صيفط ليا الماركة والموديل والحجم ولا الميزانية باش نكمل الخدمة.";
+  return "Shokran 👍 Sift lia l-marque w l-model w l-taille wla l-budget bach nkemlo.";
+}
+
 function hasProductInquirySignal(text) {
   const raw = String(text || "");
   const optionKeywords = [
@@ -6695,6 +6770,16 @@ function isAcknowledgementMessage(text) {
   ];
   for (let i = 0; i < ackTokens.length; i += 1) {
     if (includesToken(raw, ackTokens[i])) return true;
+  }
+  return false;
+}
+
+function isThankYouMessage(text) {
+  const raw = normMatch(text || "");
+  if (!raw) return false;
+  const thanksTokens = ["شكرا", "شكران", "merci", "thank you", "thanks", "mersi"];
+  for (let i = 0; i < thanksTokens.length; i += 1) {
+    if (includesToken(raw, thanksTokens[i])) return true;
   }
   return false;
 }
@@ -8576,6 +8661,33 @@ function buildSystemPrompt(offersSubset, lang, opts) {
   ).trim();
 }
 
+function buildAnswerPlan(userText, opts = {}) {
+  const parsed = opts.parsed || parseUserQuery(userText, { ctx: getCtx(opts.key || "") });
+  const memoryState = opts.memoryState || {};
+  const intentFromParsed = parsed.category || parsed.cls || parsed.brand || parsed.model || null;
+  const intentFromMemory = memoryState.category || memoryState.brand || (memoryState.specs && memoryState.specs.size ? memoryState.category : null);
+
+  const user_intent = intentFromParsed || intentFromMemory || "general";
+  const tools_to_call = [];
+  const required_facts = [];
+
+  const hasShoppingSignal = Boolean(
+    parsed.brand ||
+      parsed.category ||
+      parsed.cls ||
+      parsed.model ||
+      Number.isFinite(parsed.size) ||
+      Number.isFinite(parsed.budgetDh) ||
+      hasProductInquirySignal(userText)
+  );
+  const hasMemoryIntent = Boolean(intentFromMemory);
+
+  if (hasShoppingSignal || hasMemoryIntent) tools_to_call.push("offers_lookup");
+  if (tools_to_call.includes("offers_lookup")) required_facts.push("stock/availability");
+
+  return { user_intent, tools_to_call, required_facts };
+}
+
 function buildIntentHintsForLLM(userText, historyMsgs, key) {
   const ctx = getCtx(key);
   const parsed = parseUserQuery(userText, { ctx });
@@ -8667,6 +8779,118 @@ async function digibotLLMReply(userText, historyMsgs, lang, key) {
   } catch (_err) {
     const direct = tryDirectOfferAnswer(userText, historyMsgs, lang, key);
     if (direct) return ensureNoQuestion(direct);
+    return ensureNoQuestion(fallbackWithAgent(lang));
+  }
+}
+
+function parseJsonBlock(text) {
+  const raw = String(text || "");
+  const start = raw.indexOf("{");
+  const end = raw.lastIndexOf("}");
+  if (start < 0 || end <= start) return null;
+  try {
+    return JSON.parse(raw.slice(start, end + 1));
+  } catch {
+    return null;
+  }
+}
+
+function hasPriceSignal(text) {
+  const s = String(text || "").toLowerCase();
+  return /\b\d{2,}\s*(dh|dhs|dirham|mad|د\.م|درهم)\b/.test(s);
+}
+
+function hasUrl(text) {
+  return /https?:\/\/\S+/i.test(String(text || ""));
+}
+
+function verifyVoiceAnswer({ reply, transcript }) {
+  if (!reply) return { ok: false, reason: "empty_reply" };
+  if (hasUrl(reply)) return { ok: false, reason: "url_blocked" };
+  if (hasPriceSignal(reply) && !hasPriceSignal(transcript)) {
+    return { ok: false, reason: "price_unverified" };
+  }
+  return { ok: true };
+}
+
+function voiceLabels(lang) {
+  if (lang === "fr") return { confirmed: "Confirmé", assumed: "Assumé" };
+  return { confirmed: "مؤكد", assumed: "مفترض" };
+}
+
+function formatVoiceAnswer(structured, lang) {
+  const payload = structured || {};
+  const direct = String(payload.direct || "").trim();
+  const bullets = Array.isArray(payload.bullets) ? payload.bullets.map((b) => String(b || "").trim()).filter(Boolean) : [];
+  const confirmed = Array.isArray(payload.confirmed)
+    ? payload.confirmed.map((b) => String(b || "").trim()).filter(Boolean)
+    : [];
+  const assumed = Array.isArray(payload.assumed)
+    ? payload.assumed.map((b) => String(b || "").trim()).filter(Boolean)
+    : [];
+  const labels = voiceLabels(lang);
+
+  const lines = [];
+  if (direct) lines.push(direct);
+  if (bullets.length) lines.push(...bullets.map((b) => `• ${b}`));
+  if (confirmed.length) lines.push(`${labels.confirmed}: ${confirmed.join(", ")}`);
+  if (assumed.length) lines.push(`${labels.assumed}: ${assumed.join(", ")}`);
+  return ensureNoQuestion(lines.join("\n").trim());
+}
+
+async function extractVoiceIntent(transcript, lang) {
+  const messages = [
+    {
+      role: "system",
+      content:
+        "Extract intent and product fields from a voice transcript. Respond only with compact JSON in this schema: " +
+        "{ intentSummary: string, language: \"fr\"|\"ar\"|\"dzl\", product: { brand, category, model, size, budget, location } }.",
+    },
+    { role: "user", content: String(transcript || "") },
+  ];
+  const r = await withTimeout(callOpenAIChat(messages, 180), 8000);
+  const choice = r && r.choices && r.choices[0] && r.choices[0].message ? r.choices[0].message.content : "";
+  return parseJsonBlock(choice);
+}
+
+async function digibotVoiceLLMReply(userText, historyMsgs, lang, key) {
+  const transcript = String(userText || "").trim();
+  if (!transcript) return ensureNoQuestion(fallbackWithAgent(lang));
+  const hist = Array.isArray(historyMsgs) ? historyMsgs : [];
+
+  let intent = null;
+  try {
+    intent = await extractVoiceIntent(transcript, lang);
+  } catch {
+    intent = null;
+  }
+
+  const messages = [{ role: "system", content: buildSystemPrompt({}, lang, { alreadyLimited: true }) }];
+  const intentHints = buildIntentHintsForLLM(transcript, hist, key);
+  if (intentHints) messages.push({ role: "system", content: intentHints });
+  if (intent) messages.push({ role: "system", content: "VOICE_INTENT_JSON:\n" + JSON.stringify(intent) });
+  messages.push({
+    role: "system",
+    content:
+      "Return ONLY JSON with fields: { direct: string, bullets: string[], confirmed: string[], assumed: string[] }." +
+      " direct is 1-2 short lines. bullets are short, grounded details. confirmed must be facts stated in transcript." +
+      " assumed are minor assumptions. No URLs. No question marks. No prices unless explicitly said in the transcript.",
+  });
+
+  const maxHist = CFG.memoryMaxMessages;
+  const slice = hist.slice(Math.max(0, hist.length - maxHist));
+  for (let i = 0; i < slice.length; i += 1) messages.push({ role: slice[i].role, content: slice[i].content });
+  messages.push({ role: "user", content: transcript });
+
+  try {
+    const r = await withTimeout(callOpenAIChat(messages, 420), 12000);
+    const choice = r && r.choices && r.choices[0] && r.choices[0].message ? r.choices[0].message.content : "";
+    const structured = parseJsonBlock(choice) || {};
+    const formatted = formatVoiceAnswer(structured, lang);
+    const verify = verifyVoiceAnswer({ reply: formatted, transcript });
+    if (!verify.ok) return ensureNoQuestion(fallbackWithAgent(lang));
+    return formatted || ensureNoQuestion(fallbackWithAgent(lang));
+  } catch (_err) {
     return ensureNoQuestion(fallbackWithAgent(lang));
   }
 }
@@ -8934,7 +9158,7 @@ app.post("/wanotifier", express.raw({ type: "*/*", limit: "2mb" }), parseWanotif
         return res.json({ ok: true, reply });
       }
 
-      userTextRaw = transcript.slice(0, 2000);
+      userTextRaw = transcript;
       incoming.text = userTextRaw;
       audioAnswerNoteText = audioAnswerNote(lang);
     } else if (mediaDerivedText) {
@@ -8956,6 +9180,7 @@ app.post("/wanotifier", express.raw({ type: "*/*", limit: "2mb" }), parseWanotif
       hasUrl: Boolean(mediaInfo && mediaInfo.url),
       sizeBytes: (mediaResult && mediaResult.sizeBytes) || null,
       transcriptChars: (mediaResult && mediaResult.transcriptChars) || null,
+      transcriptQualityScore: (mediaResult && mediaResult.transcriptQualityScore) || null,
     };
     console.log(JSON.stringify(logLine));
 
@@ -9347,6 +9572,13 @@ app.post("/wanotifier", express.raw({ type: "*/*", limit: "2mb" }), parseWanotif
       return res.json({ ok: true, reply: out });
     }
 
+    if (isThankYouMessage(userTextRaw)) {
+      const out = finalizeReply(thankYouFollowUpMessage(lang), 420);
+      memory.push(key, "assistant", out);
+      resetStrikes(key);
+      return res.json({ ok: true, reply: out });
+    }
+
     if (isPreferBest(userTextRaw) || isPreferCheapest(userTextRaw)) {
       const prefer = isPreferCheapest(userTextRaw) ? "cheapest" : "best";
       const picked = pickFromLastShown(key, prefer);
@@ -9463,7 +9695,9 @@ app.post("/wanotifier", express.raw({ type: "*/*", limit: "2mb" }), parseWanotif
       }
     }
 
-    let reply = await digibotLLMReply(userTextRaw, history, lang, key);
+    let reply = isAudioMessage
+      ? await digibotVoiceLLMReply(userTextRaw, history, lang, key)
+      : await digibotLLMReply(userTextRaw, history, lang, key);
 
     if (looksLikeFallback(reply)) {
       const n = addStrike(key);
@@ -9522,6 +9756,7 @@ export {
   isGreetingLikeOpener,
   findOfferFromLinks,
   buildSystemPrompt,
+  buildAnswerPlan,
   DEFAULT_SYSTEM_PROMPT,
   isContactTemplateIntent,
   tryWebsiteCatalogAnswer,
@@ -9561,6 +9796,7 @@ export {
   SUPPORT_TEMPLATE,
   BUY_INTENT_TEMPLATE,
   ORDER_FORM_URL,
+  thankYouFollowUpMessage,
   isAudioMime,
   isAudioMeta,
   extFromAudioMime,
@@ -9773,6 +10009,7 @@ async function processIncomingMedia({ mediaInfo, mediaMeta, msgType, lang, key, 
   if (route.audioLikely && normalizedMedia) {
     let audioDl = null;
     let tmpDir = null;
+    let pipelineTmpDirs = { preprocess: null, chunk: null };
     try {
       const dir = fs.mkdtempSync(path.join(os.tmpdir(), "wanotifier-audio-"));
       tmpDir = dir;
@@ -9780,6 +10017,7 @@ async function processIncomingMedia({ mediaInfo, mediaMeta, msgType, lang, key, 
       const tmpFile = path.join(dir, `audio${ext || ".ogg"}`);
       let sizeBytes = 0;
       let mimeType = normalizedMedia.mimeType || "";
+      const downloadStart = Date.now();
 
       if (typeof audioDownloaderOverride === "function") {
         audioDl = await audioDownloaderOverride(normalizedMedia, reqId);
@@ -9802,16 +10040,64 @@ async function processIncomingMedia({ mediaInfo, mediaMeta, msgType, lang, key, 
       }
 
       const safeMime = mimeType || inferMimeFromPath(normalizedMedia.filename || normalizedMedia.url || tmpFile, "audio/ogg");
-      const transcriptText = await transcribeAudioFile((audioDl && audioDl.filePath) || tmpFile, safeMime, lang);
-      if (!transcriptText) throw new Error("transcription_empty");
-      const userTextRaw = String(transcriptText || "").slice(0, 2000);
-      const preview = userTextRaw.slice(0, 120);
+      const downloadMs = Date.now() - downloadStart;
+      const transcribeOverride =
+        typeof audioTranscriberOverride === "function"
+          ? async ({ filePath, mimeType: overrideMime, language }) => {
+              const out = await audioTranscriberOverride(filePath, overrideMime, language);
+              if (out && typeof out === "object") {
+                return {
+                  rawTranscript: String(out.text || out.rawTranscript || ""),
+                  segments: Array.isArray(out.segments) ? out.segments : null,
+                  modelUsed: out.modelUsed || "override",
+                };
+              }
+              return { rawTranscript: String(out || ""), segments: null, modelUsed: "override" };
+            }
+          : null;
+
+      const pipeline = await processAudioPipeline({
+        filePath: (audioDl && audioDl.filePath) || tmpFile,
+        mimeType: safeMime,
+        sizeBytes,
+        languageHint: lang,
+        maxBytes: CFG.mediaMaxBytesAudio,
+        model: CFG.openaiTranscribeModel || "gpt-4o-mini-transcribe",
+        minScore: CFG.audioMinScore,
+        allowFfmpeg: true,
+        deps: transcribeOverride ? { transcribe: transcribeOverride } : {},
+      });
+      pipelineTmpDirs = { preprocess: pipeline.preprocessTmpDir, chunk: pipeline.chunkTmpDir };
+
+      const preview = pipeline.cleanTranscript.slice(0, 120);
       console.log(
-        JSON.stringify({ level: "info", msg: "audio_transcribed", reqId, textPreview: preview, sizeBytes, mimeType: safeMime })
+        JSON.stringify({
+          level: "info",
+          msg: "audio_transcribed",
+          reqId,
+          textPreview: LOG_DEBUG ? preview : undefined,
+          sizeBytes: pipeline.sizeBytes,
+          mimeType: safeMime,
+          durationSec: pipeline.durationSec,
+          chunksCount: pipeline.chunksCount,
+          modelUsed: pipeline.modelUsed,
+          transcriptChars: pipeline.transcriptChars,
+          transcriptQualityScore: pipeline.transcriptQualityScore,
+          latencyMs: { downloadMs, ...pipeline.timings },
+        })
       );
-      return { ...route, userText: userTextRaw, sizeBytes, transcriptChars: userTextRaw.length, mimeType: safeMime };
+
+      if (!pipeline.cleanTranscript) throw new Error("transcription_empty");
+      if (isTranscriptLowQuality(pipeline)) throw new Error("transcription_low_quality");
+
+      const userTextRaw = String(pipeline.cleanTranscript || "");
+      return { ...route, userText: userTextRaw, sizeBytes: pipeline.sizeBytes, transcriptChars: userTextRaw.length, mimeType: safeMime };
     } catch (e) {
       console.error(JSON.stringify({ level: "error", msg: "audio_failed", reqId, error: (e && e.message) || String(e) }));
+      if (e && (e.message === "transcription_low_quality" || e.message === "transcription_empty")) {
+        const reply = ensureNoQuestion(voiceNotUnderstoodTemplate());
+        return { ...route, reply };
+      }
       const parts = [];
       if (shouldSendAudioReminder(key)) parts.push(audioReminderText(lang));
       parts.push(fallbackWithAgent(lang));
@@ -9823,6 +10109,12 @@ async function processIncomingMedia({ mediaInfo, mediaMeta, msgType, lang, key, 
       } catch {}
       try {
         if (tmpDir) fs.rmSync(tmpDir, { recursive: true, force: true });
+      } catch {}
+      try {
+        if (pipelineTmpDirs.preprocess) fs.rmSync(pipelineTmpDirs.preprocess, { recursive: true, force: true });
+      } catch {}
+      try {
+        if (pipelineTmpDirs.chunk) fs.rmSync(pipelineTmpDirs.chunk, { recursive: true, force: true });
       } catch {}
     }
   }
