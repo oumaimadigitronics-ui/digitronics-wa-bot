@@ -771,6 +771,27 @@ test("deriveMediaText handles base64 images", async () => {
   assert.ok(result.text.includes("Samsung"));
 });
 
+test("deriveMediaText renames downloaded audio to match mime", async () => {
+  const oggPayload = Buffer.from("OggS");
+  const oggDataUrl = `data:audio/ogg;base64,${oggPayload.toString("base64")}`;
+  let seenPath = null;
+  let seenMime = null;
+
+  setAudioTranscriberForTest((filePath, mimeType) => {
+    seenPath = filePath;
+    seenMime = mimeType;
+    assert.ok(filePath.endsWith(".ogg"));
+    return "voice ok";
+  });
+
+  const result = await deriveMediaText({ kind: "audio", url: oggDataUrl, mime: "" }, "fr", "req-audio-ogg");
+  assert.ok(result.ok);
+  assert.strictEqual(result.path, "audio");
+  assert.ok(result.text.includes("voice ok"));
+  assert.ok(seenPath);
+  assert.strictEqual(seenMime, "audio/ogg");
+});
+
 test("audio mime helpers map extensions", () => {
   assert.ok(isAudioMime("audio/ogg"));
   assert.strictEqual(extFromAudioMime("audio/aac"), ".m4a");

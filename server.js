@@ -4697,6 +4697,17 @@ function extFromAudioMime(mime) {
   return ".mp3";
 }
 
+function ensureAudioFileExtMatchesMime(filePath, mimeType) {
+  const desiredExt = extFromAudioMime(mimeType || "");
+  const currentExt = path.extname(filePath || "");
+  if (!desiredExt || desiredExt.toLowerCase() === currentExt.toLowerCase()) {
+    return { filePath, ext: currentExt || desiredExt, renamed: false };
+  }
+  const renamedPath = path.join(path.dirname(filePath), `audio${desiredExt}`);
+  fs.renameSync(filePath, renamedPath);
+  return { filePath: renamedPath, ext: desiredExt, renamed: true };
+}
+
 function inferMimeFromPath(filepath, fallbackMime) {
   const ext = path.extname(String(filepath || "")).toLowerCase();
   if (!ext) return fallbackMime || "";
@@ -5364,7 +5375,8 @@ async function deriveMediaText(mediaInput, lang, reqId) {
   if (baseKind === "audio") {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "wan-derive-audio-"));
     const ext = path.extname(normalized.filename || normalized.url || "") || extFromAudioMime(normalized.mime || "");
-    const tmpFile = path.join(dir, `audio${ext || ".mp3"}`);
+    let tmpFile = path.join(dir, `audio${ext || ".mp3"}`);
+    let filename = normalized.filename || `voice${ext || ".mp3"}`;
     let sizeBytes = 0;
     let mimeType = normalized.mime || "";
     const downloadStart = Date.now();
@@ -5378,11 +5390,50 @@ async function deriveMediaText(mediaInput, lang, reqId) {
       } else if (normalized.url) {
         const dl = await downloadToTemp(normalized.url, tmpFile);
         sizeBytes = dl.sizeBytes || 0;
-        mimeType = mimeType || dl.mimeType || "";
+        const downloadMime = String(dl.mimeType || "").trim();
+        mimeType = mimeType || downloadMime;
+        let resolvedMime = downloadMime || inferMimeFromPath(tmpFile, mimeType || "");
+        if (!resolvedMime || !isAudioMime(resolvedMime)) {
+          const inferred = inferMimeFromPath(tmpFile, "");
+          resolvedMime = inferred && isAudioMime(inferred) ? inferred : "audio/ogg";
+        }
+        const renameResult = ensureAudioFileExtMatchesMime(tmpFile, resolvedMime);
+        tmpFile = renameResult.filePath;
+        const resolvedExt = renameResult.ext || path.extname(tmpFile) || extFromAudioMime(resolvedMime);
+        if (renameResult.renamed) filename = `voice${resolvedExt || ""}`;
+        mimeType = resolvedMime;
+        console.log(
+          JSON.stringify({
+            level: "info",
+            msg: "audio_download",
+            reqId,
+            sizeBytes,
+            mimeType: downloadMime || null,
+            tmpFile,
+            ext: resolvedExt || null,
+          })
+        );
       } else {
         throw new Error("audio_url_missing");
       }
       const downloadMs = Date.now() - downloadStart;
+      let chosenMime = mimeType;
+      if (!chosenMime || !isAudioMime(chosenMime)) {
+        const inferred = inferMimeFromPath(tmpFile, "");
+        chosenMime = inferred && isAudioMime(inferred) ? inferred : "audio/ogg";
+      }
+      mimeType = chosenMime;
+      const chosenModel = CFG.openaiTranscribeModel || "gpt-4o-mini-transcribe";
+      console.log(
+        JSON.stringify({
+          level: "info",
+          msg: "audio_transcribe_request",
+          reqId,
+          mimeType: chosenMime,
+          filename,
+          model: chosenModel,
+        })
+      );
       const transcribeOverride =
         typeof audioTranscriberOverride === "function"
           ? async ({ filePath, mimeType: overrideMime, language }) => {
@@ -5399,11 +5450,11 @@ async function deriveMediaText(mediaInput, lang, reqId) {
           : null;
       const pipeline = await processAudioPipeline({
         filePath: tmpFile,
-        mimeType: mimeType || normalized.mime || raw.mime || "",
+        mimeType: chosenMime || normalized.mime || raw.mime || "",
         sizeBytes,
         languageHint: lang,
         maxBytes: CFG.mediaMaxBytesAudio,
-        model: CFG.openaiTranscribeModel || "gpt-4o-mini-transcribe",
+        model: chosenModel,
         minScore: CFG.audioMinScore,
         allowFfmpeg: true,
         deps: transcribeOverride ? { transcribe: transcribeOverride } : {},
