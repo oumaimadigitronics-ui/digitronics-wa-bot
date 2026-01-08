@@ -7,6 +7,12 @@ import os from "os";
 import assert from "assert";
 import { fileURLToPath } from "url";
 import { getFetch, getOpenAI, getNowMs, setDepsForTests } from "./src/deps.js";
+import {
+  detectBrand as detectBrandKnowledge,
+  detectCategory as detectCategoryKnowledge,
+  detectProductModel,
+  updateContextFromMessage,
+} from "./src/knowledge/productKnowledge.js";
 import { toFile } from "openai/uploads";
 
 const app = express();
@@ -2253,6 +2259,7 @@ function resolveAdvice(text, ctxData) {
   const raw = String(text || "");
   const s = normMatch(arabicIndicToAsciiDigits(raw)).toLowerCase();
   const ctx = ctxData && typeof ctxData === "object" ? ctxData : {};
+  const knowledgeProduct = detectProductModel(raw);
 
   const hasGoogle = s.includes("google");
   const hasAndroid = s.includes("android");
@@ -2285,6 +2292,12 @@ function resolveAdvice(text, ctxData) {
     usage.push("Gaming/Console");
   }
 
+  if (isGoodSignal && !modelHit && knowledgeProduct && knowledgeProduct.name) {
+    return PRODUCT_REVIEW_TEMPLATE(knowledgeProduct.name, {
+      useCase: usage.length ? usage : undefined,
+    });
+  }
+
   if (isGoodSignal && !modelHit && ctx.lastProductName) {
     return PRODUCT_REVIEW_TEMPLATE(ctx.lastProductName, {
       useCase: usage.length ? usage : undefined,
@@ -2296,7 +2309,13 @@ function resolveAdvice(text, ctxData) {
     return PRODUCT_COMPARE_TEMPLATE(left, right);
   }
 
-  const fallbackName = ctx.lastProductName || ctx.lastModel || ctx.lastBrand || "ce produit";
+  const fallbackName =
+    ctx.lastProductName ||
+    ctx.lastModel ||
+    [ctx.lastBrand, ctx.lastCategory].filter(Boolean).join(" ") ||
+    ctx.lastBrand ||
+    ctx.lastCategory ||
+    "ce produit";
   return PRODUCT_REVIEW_TEMPLATE(fallbackName, {
     useCase: usage.length ? usage : undefined,
   });
@@ -8286,7 +8305,15 @@ app.post("/wanotifier", express.raw({ type: "*/*", limit: "2mb" }), parseWanotif
 
     memory.push(key, "user", userTextRaw);
     const history = memory.get(key);
-    const ctxData = getCtx(key);
+    let ctxData = getCtx(key);
+    const ctxUpdated = updateContextFromMessage(userTextRaw, ctxData);
+    if (ctxUpdated) {
+      setCtx(key, ctxUpdated);
+      ctxData = ctxUpdated;
+    }
+    const knowledgeBrand = detectBrandKnowledge(userTextRaw);
+    const knowledgeCategory = detectCategoryKnowledge(userTextRaw);
+    const knowledgeProduct = detectProductModel(userTextRaw);
 
     if (isBuyIntent(userTextRaw) && !isExplicitOrderStatusQuery(userTextRaw)) {
       const reply = finalizeReply(BUY_INTENT_TEMPLATE.replace("{ORDER_LINK}", ORDER_FORM_URL), 520);
@@ -8296,7 +8323,15 @@ app.post("/wanotifier", express.raw({ type: "*/*", limit: "2mb" }), parseWanotif
     }
 
     if (isProductAdviceIntent(userTextRaw)) {
-      const reply = finalizeReply(resolveAdvice(userTextRaw, ctxData), 650);
+      const adviceCtx = knowledgeProduct
+        ? {
+            ...ctxData,
+            lastProductName: knowledgeProduct.name || ctxData.lastProductName,
+            lastModel: knowledgeProduct.name || ctxData.lastModel,
+            lastTags: Array.isArray(knowledgeProduct.tags) ? [...knowledgeProduct.tags] : ctxData.lastTags,
+          }
+        : ctxData;
+      const reply = finalizeReply(resolveAdvice(userTextRaw, adviceCtx), 650);
       memory.push(key, "assistant", reply);
       resetStrikes(key);
       return res.json({ ok: true, reply });
@@ -8310,9 +8345,17 @@ app.post("/wanotifier", express.raw({ type: "*/*", limit: "2mb" }), parseWanotif
     }
 
     if (isOffersIntent(userTextRaw)) {
-      const brandHint = detectBrand(userTextRaw) || ctxData.lastBrand || null;
+      if (!knowledgeBrand && !knowledgeCategory) {
+        const reply = finalizeReply(OFFERS_FALLBACK_MESSAGE, 520);
+        memory.push(key, "assistant", reply);
+        resetStrikes(key);
+        return res.json({ ok: true, reply });
+      }
+
+      const brandHint = detectBrand(userTextRaw) || knowledgeBrand || ctxData.lastBrand || null;
       const classHint = detectClass(userTextRaw) || ctxData.lastClass || null;
-      const categoryHint = resolveCategoryIntent(userTextRaw) || detectCategory(userTextRaw) || null;
+      const categoryHint =
+        resolveCategoryIntent(userTextRaw) || detectCategory(userTextRaw) || knowledgeCategory || null;
 
       if (!brandHint && !classHint && !categoryHint) {
         const reply = finalizeReply(OFFERS_FALLBACK_MESSAGE, 520);
