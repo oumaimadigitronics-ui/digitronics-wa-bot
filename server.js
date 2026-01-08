@@ -1739,6 +1739,24 @@ const ESCALATION_TEMPLATE = [
   "━━━━━━━━━━━━━━",
 ].join("\n");
 
+const SUPPORT_TEMPLATE = [
+  "╭──────────────────────────────╮",
+  "│   🛠️ *Support Premium*   │",
+  "╰──────────────────────────────╯",
+  "",
+  "🇫🇷 Nous sommes là pour résoudre votre problème rapidement.",
+  "🇲🇦 حنا هنا باش نحلّو المشكل ديالك بسرعة.",
+  "",
+  "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
+  "✅ Diagnostic immédiat",
+  "✅ Assistance étape par étape",
+  "✅ Retour/échange si لازم",
+  "✅ Suivi jusqu’à résolution",
+  "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
+  "",
+  "✨ Support fiable, الحل مضمون."
+].join("\n");
+
 function getInfoTemplate(type, lang, vars) {
   const templates = {
     contact: CONTACT_TEMPLATE,
@@ -1762,7 +1780,7 @@ function getInfoTemplate(type, lang, vars) {
 
 function routeInfoTemplate(userTextRaw, lang) {
   const text = String(userTextRaw || "");
-  if (isContactTemplateIntent(text)) {
+  if (isContactIntent(text)) {
     return getInfoTemplate("contact", lang, {
       PHONE: "+2126XXXXXXX",
       EMAIL: "contact@tenten.ma",
@@ -1771,54 +1789,666 @@ function routeInfoTemplate(userTextRaw, lang) {
       MAP_LINK: "https://maps.google.com/?q=...",
     });
   }
-  if (hasDeliveryIntent(text)) return getInfoTemplate("delivery", lang);
-  if (hasPaymentIntent(text)) return getInfoTemplate("payment", lang);
-  if (hasWarrantyIntent(text)) return getInfoTemplate("warranty", lang);
+  if (isDeliveryIntent(text)) return getInfoTemplate("delivery", lang);
+  if (isPaymentIntent(text)) return getInfoTemplate("payment", lang);
+  if (isWarrantyIntent(text)) return getInfoTemplate("warranty", lang);
   return null;
 }
 
-function hasDeliveryIntent(text) {
-  const s = String(text || "").trim().toLowerCase();
+function normalizeIntentText(text) {
+  const s = normMatch(arabicIndicToAsciiDigits(text));
+  if (!s) return "";
+  return s.replace(/\s+/g, " ").trim();
+}
+
+function hasAnyEmoji(raw, emojis) {
+  const s = String(raw || "");
+  for (let i = 0; i < emojis.length; i += 1) {
+    if (s.includes(emojis[i])) return true;
+  }
+  return false;
+}
+
+function hasAnyToken(text, tokens) {
+  const s = normalizeIntentText(text);
   if (!s) return false;
-  return [
+  for (let i = 0; i < tokens.length; i += 1) {
+    const token = tokens[i];
+    if (!token) continue;
+    if (includesToken(s, token)) return true;
+  }
+  return false;
+}
+
+function hasAnyPhrase(text, phrases) {
+  const s = normalizeIntentText(text);
+  if (!s) return false;
+  for (let i = 0; i < phrases.length; i += 1) {
+    const phrase = normalizeIntentText(phrases[i]);
+    if (phrase && s.indexOf(phrase) >= 0) return true;
+  }
+  return false;
+}
+
+function isContactIntent(text) {
+  if (isOrderStatusIntent(text)) return false;
+
+  const raw = String(text || "");
+  const s = normalizeIntentText(raw);
+  if (!raw && !s) return false;
+
+  if (hasAnyEmoji(raw, ["📍", "🗺️", "📞", "☎️", "📱", "✉️", "📧", "🕒", "⏰"])) return true;
+  if (raw.includes("@") && raw.includes(".")) return true;
+
+  if (s.indexOf("contactless") >= 0 || s.indexOf("sans contact") >= 0) {
+    if (!hasAnyToken(s, ["tel", "phone", "numero", "num", "whatsapp", "call"])) return false;
+  }
+
+  const locationTokens = [
+    "location",
+    "address",
+    "where",
+    "map",
+    "maps",
+    "google map",
+    "google maps",
+    "direction",
+    "directions",
+    "pin",
+    "gps",
+    "near",
+    "store",
+    "shop",
+    "adresse",
+    "localisation",
+    "ou",
+    "où",
+    "plan",
+    "itineraire",
+    "itinéraire",
+    "magasin",
+    "boutique",
+    "fin",
+    "finn",
+    "win",
+    "blasa",
+    "lblasa",
+    "kifach njik",
+    "kifach nji",
+    "fin kaynin",
+    "فين",
+    "العنوان",
+    "عنوان",
+    "الموقع",
+    "لوكيشن",
+    "ماب",
+    "خرائط",
+    "الخريطة",
+    "غوغل ماب",
+    "جوجل ماب",
+    "كيفاش نجي",
+    "الاتجاهات",
+    "دلني",
+    "فين كاينين",
+  ];
+
+  const phoneTokens = [
+    "contact",
+    "contacts",
+    "contactez",
+    "contacter",
+    "call",
+    "call me",
+    "phone",
+    "tel",
+    "telephone",
+    "téléphone",
+    "numero",
+    "num",
+    "numéro",
+    "whatsapp",
+    "watsap",
+    "whtsapp",
+    "wattsap",
+    "whats app",
+    "whatsap",
+    "appel",
+    "appelez",
+    "3ayet",
+    "3ayt",
+    "t3ayet",
+    "n3ayet",
+    "tsl",
+    "warid",
+    "اتصل",
+    "عيط",
+    "هاتف",
+    "تلفون",
+    "رقم",
+    "نمرة",
+    "واتساب",
+    "واتس",
+    "اتصال",
+  ];
+
+  const emailTokens = [
+    "email",
+    "e-mail",
+    "mail",
+    "gmail",
+    "adresse mail",
+    "e mail",
+    "imail",
+    "إيميل",
+    "ايميل",
+    "بريد",
+    "البريد",
+    "البريد الإلكتروني",
+    "البريد الالكتروني",
+  ];
+
+  const hoursTokens = [
+    "hours",
+    "working hours",
+    "opening hours",
+    "open",
+    "close",
+    "schedule",
+    "time",
+    "when open",
+    "horaires",
+    "heures",
+    "heure",
+    "ouvert",
+    "ferme",
+    "ouverture",
+    "fermeture",
+    "wa9tach kat7lou",
+    "wa9tach kat7lu",
+    "wa9tach katsdo",
+    "wa9tach katsdou",
+    "wa9tach",
+    "waqtach",
+    "kat7el",
+    "katsed",
+    "horaire",
+    "wach m7lolin",
+    "m7lolin",
+    "أوقات العمل",
+    "اوقات العمل",
+    "ساعات العمل",
+    "الدوام",
+    "مفتوح",
+    "مسدود",
+    "كيحل",
+    "كيسد",
+    "واش محلولين",
+    "متى تفتحون",
+  ];
+
+  return (
+    hasAnyToken(s, locationTokens) ||
+    hasAnyToken(s, phoneTokens) ||
+    hasAnyToken(s, emailTokens) ||
+    hasAnyToken(s, hoursTokens)
+  );
+}
+
+function isDeliveryIntent(text) {
+  const raw = String(text || "");
+  const s = normalizeIntentText(raw);
+  if (!s) return false;
+
+  if (hasAnyEmoji(raw, ["🚚", "📦", "🧾", "⏱️", "🕒", "🗓️"])) return true;
+
+  const tokens = [
     "delivery",
-    "livraison",
+    "deliver",
+    "delivered",
     "shipping",
     "ship",
+    "shipment",
+    "courier",
+    "dispatch",
+    "expedition",
+    "expédition",
+    "envoi",
     "transport",
-    "livraison maroc",
+    "livraison",
+    "livrer",
+    "livre",
+    "livré",
+    "colis",
+    "suivi",
+    "tracking",
+    "track",
+    "delai",
+    "délai",
+    "time",
+    "jours",
+    "1-2 jours",
+    "tawsil",
+    "tawssil",
+    "tossil",
+    "twasil",
+    "twasel",
+    "tوصيل",
     "توصيل",
-  ].some((term) => s.includes(term));
+    "شحن",
+    "الشحن",
+    "التوصيل",
+    "تسليم",
+    "التسليم",
+    "ديليفري",
+  ];
+
+  return hasAnyToken(s, tokens);
 }
 
-function hasPaymentIntent(text) {
-  const s = String(text || "").trim().toLowerCase();
+function isPaymentIntent(text) {
+  const raw = String(text || "");
+  const s = normalizeIntentText(raw);
   if (!s) return false;
-  return [
+
+  if (hasAnyEmoji(raw, ["💳", "💵", "💰", "🧾", "🏦"])) return true;
+
+  const tokens = [
     "payment",
-    "paiement",
     "pay",
+    "payer",
+    "paiement",
+    "paiements",
+    "payer",
+    "paid",
     "cod",
     "cash on delivery",
+    "pay on delivery",
+    "payment on delivery",
+    "cash",
+    "especes",
+    "espèces",
+    "contre remboursement",
     "virement",
+    "virment",
+    "virmnt",
     "bank transfer",
-    "تحويل",
+    "transfer",
+    "iban",
+    "rib",
+    "carte",
+    "carte bancaire",
+    "card",
+    "visa",
+    "mastercard",
+    "paypal",
+    "payement",
     "دفع",
-  ].some((term) => s.includes(term));
+    "الأداء",
+    "اداء",
+    "كاش",
+    "فلوس",
+    "تحويل",
+    "تحويل بنكي",
+    "حوالة",
+    "بطاقة",
+    "فيزا",
+    "ماستر",
+    "عند التسليم",
+    "الدفع عند الاستلام",
+  ];
+
+  return hasAnyToken(s, tokens);
 }
 
-function hasWarrantyIntent(text) {
-  const s = String(text || "").trim().toLowerCase();
+function isWarrantyIntent(text) {
+  const raw = String(text || "");
+  const s = normalizeIntentText(raw);
   if (!s) return false;
-  return [
+
+  if (hasAnyEmoji(raw, ["🛡️", "✅", "🔒"])) return true;
+
+  const tokens = [
     "warranty",
+    "guarantee",
+    "guaranty",
     "garantie",
-    "ضمان",
+    "garanti",
+    "garanty",
+    "garantie officielle",
+    "warranty period",
+    "coverage",
+    "cover",
     "sav",
-    "exchange",
+    "after sales",
+    "after-sale",
+    "service apres vente",
+    "service après vente",
+    "assurance",
     "defect",
+    "defective",
+    "factory defect",
     "remplacement",
-  ].some((term) => s.includes(term));
+    "replacement",
+    "exchange",
+    "échanger",
+    "échange",
+    "ضمان",
+    "كفالة",
+    "تأمين",
+    "خدمة ما بعد البيع",
+  ];
+
+  return hasAnyToken(s, tokens);
+}
+
+function isAngryIntent(text) {
+  const raw = String(text || "");
+  const s = normalizeIntentText(raw);
+  if (!s) return false;
+
+  if (hasAnyEmoji(raw, ["😡", "🤬", "😠", "😤", "😾", "💢", "🖕", "😒", "😞", "😢", "😭"])) return true;
+
+  const phrases = [
+    "very angry",
+    "so angry",
+    "really angry",
+    "im angry",
+    "i am angry",
+    "im furious",
+    "i am furious",
+    "fed up",
+    "sick of",
+    "worst service",
+    "bad service",
+    "terrible service",
+    "unacceptable",
+    "never again",
+    "extremely disappointed",
+    "not happy",
+    "service nul",
+    "c est nul",
+    "c'est nul",
+    "c'est honteux",
+    "tres mauvais",
+    "très mauvais",
+    "je suis en colere",
+    "je suis en colère",
+    "je suis fache",
+    "je suis fâché",
+    "je suis enerve",
+    "je suis énervé",
+    "pas satisfait du tout",
+    "arnaque",
+    "escroquerie",
+    "voleurs",
+    "fraude",
+    "scam",
+    "ripoff",
+    "cheated",
+    "n9darsh",
+    "7chouma",
+    "hchouma",
+    "fdi7a",
+    "fdiha",
+    "za3fan",
+    "m9hor",
+    "m9horr",
+    "mgharban",
+    "makaynch lkhadma",
+    "khayb بزاف",
+    "khayb",
+    "نصب",
+    "نصاب",
+    "سرقة",
+    "فضيحة",
+    "حشومة",
+    "مشي مزيان",
+    "ماشي راضي",
+    "متقلق",
+    "زعفان",
+  ];
+
+  if (hasAnyPhrase(s, phrases)) return true;
+
+  const tokens = [
+    "angry",
+    "furious",
+    "pissed",
+    "mad",
+    "upset",
+    "annoyed",
+    "rage",
+    "complaint",
+    "complain",
+    "dissatisfied",
+    "insatisfied",
+    "insatisfait",
+    "mécontent",
+    "mecontent",
+    "colere",
+    "colère",
+    "fache",
+    "fâché",
+    "enervé",
+    "énervé",
+    "pas content",
+    "pas satis",
+    "service mauvais",
+    "service nul",
+    "service zero",
+    "machi mzyan",
+    "machi mzin",
+    "za3fan",
+    "m9hor",
+    "m9horr",
+    "m9hwr",
+    "مقهو ر",
+    "غاضب",
+    "غضبان",
+    "متضايق",
+    "غاضب جدا",
+    "شكوى",
+    "أشتكي",
+  ];
+
+  return hasAnyToken(s, tokens);
+}
+
+function isConfusedIntent(text) {
+  const raw = String(text || "");
+  const s = normalizeIntentText(raw);
+  if (!s) return false;
+
+  if (hasAnyEmoji(raw, ["🤔", "😕", "😵‍💫", "❓", "❔", "⁉️", "🤯"])) return true;
+
+  const phrases = [
+    "i dont understand",
+    "i don't understand",
+    "do not understand",
+    "i dont get it",
+    "i don't get it",
+    "i am confused",
+    "im confused",
+    "not sure",
+    "unclear",
+    "what do you mean",
+    "can you explain",
+    "could you explain",
+    "please explain",
+    "clarify",
+    "clarification",
+    "je comprends pas",
+    "je comprend pas",
+    "j ai pas compris",
+    "j'ai pas compris",
+    "pas compris",
+    "c est pas clair",
+    "c'est pas clair",
+    "pas clair",
+    "tu peux expliquer",
+    "vous pouvez expliquer",
+    "explique moi",
+    "expliquez moi",
+    "ma fhemtch",
+    "mafhemtch",
+    "ma fhmtch",
+    "mashi fahm",
+    "machi fahm",
+    "ma3reftch",
+    "m3rftch",
+    "wach t9dr twd7",
+    "tawdih",
+    "tawdi7",
+    "twdih",
+    "شنو كتعني",
+    "شنو كتقصد",
+    "ما فهمتش",
+    "مش فاهم",
+    "مش فاهمة",
+    "غير واضح",
+  ];
+
+  if (hasAnyPhrase(s, phrases)) return true;
+
+  const tokens = [
+    "confused",
+    "confusing",
+    "clarity",
+    "clarte",
+    "clarté",
+    "clarifier",
+    "clarify",
+    "clarification",
+    "explain",
+    "explanation",
+    "understand",
+    "comprend",
+    "compris",
+    "fhemt",
+    "fahm",
+    "wach mafhemtch",
+    "توضيح",
+    "وضح",
+    "تفسير",
+    "مش واضح",
+  ];
+
+  return hasAnyToken(s, tokens);
+}
+
+function isSupportIntent(text) {
+  const raw = String(text || "");
+  const s = normalizeIntentText(raw);
+  if (!s) return false;
+
+  const wallMountHints = [
+    "support mural",
+    "wall mount",
+    "wallmount",
+    "bracket",
+    "support tv",
+    "support télé",
+    "support tele",
+    "حامل",
+    "براكي",
+    "براكت",
+    "براكيط",
+  ];
+  if (hasAnyToken(s, wallMountHints)) return false;
+
+  if (hasAnyEmoji(raw, ["🆘", "🚨", "⚠️", "❗", "❌", "🛠️", "🔧", "🧯"])) return true;
+
+  const phrases = [
+    "doesnt work",
+    "doesn't work",
+    "not working",
+    "no signal",
+    "no power",
+    "broken",
+    "defective",
+    "faulty",
+    "damaged",
+    "missing parts",
+    "wrong item",
+    "wrong model",
+    "arrived damaged",
+    "need help",
+    "need support",
+    "service client",
+    "service apres vente",
+    "service après vente",
+    "support technique",
+    "je veux retourner",
+    "je veux retourner le produit",
+    "retour produit",
+    "demande de retour",
+    "refund",
+    "remboursement",
+    "exchange",
+    "echanger",
+    "échanger",
+    "replace",
+    "replacement",
+    "ma kaych3elch",
+    "ma kaych3lch",
+    "ma kaykhdemch",
+    "ma kaykhademch",
+    "ma khadamch",
+    "ma khdamch",
+    "ma kaynash sora",
+    "ma kaynach sora",
+    "ma kaynach sawt",
+    "ma kaynash sawt",
+    "mouchkil",
+    "mochkil",
+    "mushkil",
+    "problem",
+    "issue",
+    "panne",
+    "casse",
+    "cassé",
+    "khsara",
+    "khasser",
+    "khser",
+    "t9et",
+    "mكسور",
+    "مكسور",
+    "معيوب",
+    "عطل",
+    "عطب",
+    "مشكلة",
+    "مشكل",
+    "خاسر",
+    "خسر",
+    "ما خدامش",
+    "ما كيخدمش",
+    "غلط",
+    "ناقص",
+    "استرجاع",
+    "إرجاع",
+    "ارجاع",
+    "تعويض",
+    "تبديل",
+    "بدل",
+    "شكاية",
+    "شكوى",
+  ];
+
+  return hasAnyPhrase(s, phrases) || hasAnyToken(s, phrases);
+}
+
+function routeTemplate(text) {
+  if (isAngryIntent(text)) return ESCALATION_TEMPLATE;
+  if (isConfusedIntent(text)) return CLARITY_TEMPLATE;
+  if (isSupportIntent(text)) return SUPPORT_TEMPLATE;
+
+  const templates = [];
+  if (isContactIntent(text)) templates.push(CONTACT_TEMPLATE);
+  if (isDeliveryIntent(text)) templates.push(DELIVERY_TEMPLATE);
+  if (isPaymentIntent(text)) templates.push(PAYMENT_TEMPLATE);
+  if (isWarrantyIntent(text)) templates.push(WARRANTY_TEMPLATE);
+  if (!templates.length) return null;
+  return templates.join("\n\n");
 }
 
 
@@ -5460,31 +6090,6 @@ function isBuyIntent(text) {
   return false;
 }
 
-function isSupportIntent(text) {
-  const raw = String(text || "");
-  const s = normMatch(raw);
-
-  const arabicProblem =
-    hasArabicScript(raw) &&
-    /(ما\s*كيشعلش|ما\s*خدامش|ما\s*كيخدمش|ما\s*كايناش\s*الصورة|ما\s*كايناش\s*الصوت)/.test(raw);
-
-  if (arabicProblem) return true;
-  if (s.indexOf("mouchkil") >= 0) return true;
-  if (s.indexOf("mochkil") >= 0) return true;
-  if (s.indexOf("panne") >= 0) return true;
-  if (s.indexOf("problem") >= 0) return true;
-  if (s.indexOf("doesn't work") >= 0) return true;
-  if (s.indexOf("doesnt work") >= 0) return true;
-  if (s.indexOf("no signal") >= 0) return true;
-  if (s.indexOf("no power") >= 0) return true;
-  if (s.indexOf("ma kaych3elch") >= 0) return true;
-  if (s.indexOf("ma khadamch") >= 0) return true;
-  if (s.indexOf("مشكل") >= 0) return true;
-  if (s.indexOf("مشكلة") >= 0) return true;
-  if (s.indexOf("عطل") >= 0) return true;
-  return false;
-}
-
 function isBankTransferIntent(text) {
   const s = normMatch(text);
   if (!s) return false;
@@ -5891,169 +6496,7 @@ function isLocationIntent(text) {
 }
 
 function isContactTemplateIntent(text) {
-  if (isOrderStatusIntent(text)) return false;
-
-  const raw = String(text || "");
-  const s = normMatch(arabicIndicToAsciiDigits(raw));
-  if (!raw && !s) return false;
-
-  const emojiTriggers = ["📍", "🗺️", "📞", "☎️", "📱", "✉️", "📧", "🕒", "⏰"];
-  for (let i = 0; i < emojiTriggers.length; i += 1) {
-    if (raw.includes(emojiTriggers[i])) return true;
-  }
-
-  if (raw.includes("@")) return true;
-
-  const hasAnyToken = (tokens) => tokens.some((token) => token && includesToken(s, token));
-
-  const locationTokens = [
-    "location",
-    "address",
-    "where",
-    "map",
-    "google map",
-    "maps",
-    "direction",
-    "directions",
-    "pin",
-    "gps",
-    "near",
-    "store",
-    "shop",
-    "adresse",
-    "localisation",
-    "où",
-    "ou",
-    "plan",
-    "google maps",
-    "itinéraire",
-    "itineraire",
-    "magasin",
-    "boutique",
-    "fin",
-    "finn",
-    "win",
-    "blasa",
-    "lblas",
-    "l’adresse",
-    "adresse dyalkom",
-    "kifach njik",
-    "itineraire",
-    "plan",
-    "فين",
-    "فبن",
-    "فيـن",
-    "العنوان",
-    "عنوان",
-    "الموقع",
-    "لوكيشن",
-    "ماب",
-    "خرائط",
-    "الخريطة",
-    "غوغل ماب",
-    "جوجل ماب",
-    "كيفاش نجي",
-    "الاتجاهات",
-    "دلني",
-    "فين كاينين",
-  ];
-
-  const phoneTokens = [
-    "phone",
-    "tel",
-    "telephone",
-    "call",
-    "call me",
-    "whatsapp",
-    "watsap",
-    "whtsapp",
-    "number",
-    "contact number",
-    "téléphone",
-    "numéro",
-    "numero",
-    "appelez",
-    "appel",
-    "contact",
-    "3ayet",
-    "3ayt",
-    "t3ayet",
-    "tsl",
-    "n3ayet",
-    "warid",
-    "num",
-    "اتصل",
-    "عيط",
-    "هاتف",
-    "تلفون",
-    "رقم",
-    "نمرة",
-    "واتساب",
-    "واتس",
-    "اتصال",
-  ];
-
-  const emailTokens = [
-    "email",
-    "e-mail",
-    "mail",
-    "gmail",
-    "adresse mail",
-    "imail",
-    "e mail",
-    "إيميل",
-    "ايميل",
-    "بريد",
-    "البريد",
-    "البريد الإلكتروني",
-    "البريد الالكتروني",
-  ];
-
-  const hoursTokens = [
-    "hours",
-    "working hours",
-    "opening hours",
-    "open",
-    "close",
-    "schedule",
-    "time",
-    "when open",
-    "horaires",
-    "heures",
-    "heure",
-    "ouvert",
-    "ferm",
-    "ouverture",
-    "fermeture",
-    "wa9tach كتـحلو",
-    "wa9tach kat7lou",
-    "wa9tach katsdo",
-    "وقاتاش",
-    "وقتاش",
-    "kat7el",
-    "katsed",
-    "service",
-    "horaire",
-    "wach m7lolin",
-    "m7lolin",
-    "أوقات العمل",
-    "اوقات العمل",
-    "ساعات العمل",
-    "الدوام",
-    "مفتوح",
-    "مسدود",
-    "كيحل",
-    "كيسد",
-    "واش محلولين",
-    "متى تفتحون",
-  ];
-
-  if (hasAnyToken(locationTokens)) return true;
-  if (hasAnyToken(phoneTokens)) return true;
-  if (hasAnyToken(emailTokens)) return true;
-  if (hasAnyToken(hoursTokens)) return true;
-
-  return false;
+  return isContactIntent(text);
 }
 
 function contactTemplate() {
@@ -7693,6 +8136,21 @@ export {
   setAudioTranscriberForTest,
   handleVisionMediaForTest,
   setSystemPromptForTest,
+  isContactIntent,
+  isDeliveryIntent,
+  isPaymentIntent,
+  isWarrantyIntent,
+  isAngryIntent,
+  isConfusedIntent,
+  isSupportIntent,
+  routeTemplate,
+  CONTACT_TEMPLATE,
+  DELIVERY_TEMPLATE,
+  PAYMENT_TEMPLATE,
+  WARRANTY_TEMPLATE,
+  ESCALATION_TEMPLATE,
+  CLARITY_TEMPLATE,
+  SUPPORT_TEMPLATE,
   isAudioMime,
   isAudioMeta,
   extFromAudioMime,
