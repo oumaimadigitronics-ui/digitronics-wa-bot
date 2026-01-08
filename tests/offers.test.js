@@ -24,6 +24,7 @@ import {
   setVisionAnalyzerForTest,
   setAudioDownloaderForTest,
   setAudioTranscriberForTest,
+  setAudioConverterForTest,
   setWcFetchJsonForTest,
   isAudioMime,
   isAudioMeta,
@@ -128,6 +129,7 @@ afterEach(() => {
   setVisionAnalyzerForTest(ORIGINAL_VISION_ANALYZER);
   setAudioDownloaderForTest(null);
   setAudioTranscriberForTest(null);
+  setAudioConverterForTest(null);
   setWcFetchJsonForTest(null);
   setDepsForTests({});
   setSystemPromptForTest("");
@@ -771,16 +773,21 @@ test("deriveMediaText handles base64 images", async () => {
   assert.ok(result.text.includes("Samsung"));
 });
 
-test("deriveMediaText renames downloaded audio to match mime", async () => {
+test("deriveMediaText converts ogg audio before transcription", async () => {
   const oggPayload = Buffer.from("OggS");
   const oggDataUrl = `data:audio/ogg;base64,${oggPayload.toString("base64")}`;
   let seenPath = null;
   let seenMime = null;
 
+  setAudioConverterForTest((inputPath, outputPath) => {
+    fs.writeFileSync(outputPath, fs.readFileSync(inputPath));
+    return { ok: true };
+  });
+
   setAudioTranscriberForTest((filePath, mimeType) => {
     seenPath = filePath;
     seenMime = mimeType;
-    assert.ok(filePath.endsWith(".ogg"));
+    assert.ok(filePath.endsWith(".mp3"));
     return "voice ok";
   });
 
@@ -789,7 +796,7 @@ test("deriveMediaText renames downloaded audio to match mime", async () => {
   assert.strictEqual(result.path, "audio");
   assert.ok(result.text.includes("voice ok"));
   assert.ok(seenPath);
-  assert.strictEqual(seenMime, "audio/ogg");
+  assert.strictEqual(seenMime, "audio/mpeg");
 });
 
 test("audio mime helpers map extensions", () => {
@@ -835,12 +842,48 @@ test("vision routing uses offers and analyzer", async () => {
   assertNoQuestionMarks(replyObj.reply);
 });
 
+test("audio media converts ogg before transcription", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "audio-convert-test-"));
+  const tmpFile = path.join(dir, "audio.ogg");
+  fs.writeFileSync(tmpFile, "dummy");
+  let seenPath = null;
+  let seenMime = null;
+
+  setAudioDownloaderForTest(() => ({ filePath: tmpFile, mimeType: "audio/ogg", tmpDir: dir, sizeBytes: 5 }));
+  setAudioConverterForTest((inputPath, outputPath) => {
+    fs.writeFileSync(outputPath, fs.readFileSync(inputPath));
+    return { ok: true };
+  });
+  setAudioTranscriberForTest((filePath, mimeType) => {
+    seenPath = filePath;
+    seenMime = mimeType;
+    return "ثلاجة";
+  });
+
+  const res = await processIncomingMedia({
+    mediaInfo: { url: "http://example.com/a.ogg", mimeType: "audio/ogg" },
+    msgType: "audio",
+    lang: "dzl",
+    key: "k-audio-convert",
+    reqId: "req-audio-convert",
+  });
+
+  assert.strictEqual(res.path, "audio");
+  assert.strictEqual(res.userText, "ثلاجة");
+  assert.ok(seenPath && seenPath.endsWith(".mp3"));
+  assert.strictEqual(seenMime, "audio/mpeg");
+});
+
 test("audio media routes through transcription flow", async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "audio-test-"));
   const tmpFile = path.join(dir, "audio.ogg");
   fs.writeFileSync(tmpFile, "dummy");
 
   setAudioDownloaderForTest(() => ({ filePath: tmpFile, mimeType: "", tmpDir: dir, sizeBytes: 5 }));
+  setAudioConverterForTest((inputPath, outputPath) => {
+    fs.writeFileSync(outputPath, fs.readFileSync(inputPath));
+    return { ok: true };
+  });
   let transcribeLang = null;
   setAudioTranscriberForTest((_path, _mime, langHint) => {
     transcribeLang = langHint;
