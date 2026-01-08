@@ -4147,20 +4147,20 @@ function buildProductLink(product, fallbackName) {
 
 function buildOfferDisplayName(brand, offer, lang = "dzl") {
   const safeBrand = String(brand || "").trim();
-  const type = String((offer && offer.type) || "").trim();
   const name = String((offer && offer.name) || "").trim();
   const model = String((offer && offer.model) || "").trim();
   const sizeNum = Number((offer && offer.size) || NaN);
   const sizeText = Number.isFinite(sizeNum) && sizeNum > 0 ? formatSize(lang, sizeNum) : "";
   const fallbackName = [safeBrand, model, sizeText].filter(Boolean).join(" ").trim();
   const baseName = name || fallbackName || model || safeBrand || "Produit";
-  return type && normMatch(baseName).indexOf(normMatch(type)) < 0 ? `${baseName} ${type}`.trim() : baseName;
+  return baseName;
 }
 
 // RULE #1 no questions
 // Offer message format: clickable name + "name - price"
 function formatOfferLine(brand, o, opts = {}) {
-  const displayName = buildOfferDisplayName(brand, o, opts.lang || "dzl");
+  let displayName = buildOfferDisplayName(brand, o, opts.lang || "dzl");
+  displayName = displayName.replace(/\s+simple\s+/gi, " ").replace(/\s+simple$/i, "").trim();
   const priceNum = Number((o && o.price) || NaN);
   const pricePart = Number.isFinite(priceNum) ? `${priceNum} dh` : "Prix sur demande";
   const url = buildProductLink(o || {}, displayName);
