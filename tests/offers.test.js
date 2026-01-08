@@ -55,6 +55,7 @@ import {
   thankYouFollowUpMessage,
   DEFAULT_SYSTEM_PROMPT,
   checkProductAvailability,
+  voiceNotUnderstoodTemplate,
 } from "../server.js";
 import { setDepsForTests } from "../src/deps.js";
 
@@ -69,6 +70,8 @@ const TEST_OFFERS = {
   ],
   SCREEN: [{ price: 4000, stock: 5, model: "TV-50", class: "Tv", category: "Tv", size: 50, url: "http://x/TV-50" }],
 };
+
+const VOICE_NOT_UNDERSTOOD = voiceNotUnderstoodTemplate();
 
 function assertNoQuestionMarks(text) {
   assert.ok(!/[؟?]/.test(String(text || "")));
@@ -1068,8 +1071,61 @@ test("media-only audio wanotifier transcribes and replies", async () => {
   const json = await resp.json();
   assert.ok(json.ok);
   assert.ok(json.reply);
+  assert.notStrictEqual(json.reply, VOICE_NOT_UNDERSTOOD);
   assert.notStrictEqual(json.reply, t("dzl", "askTextInsteadMedia"));
   assert.ok(!json.reply.includes("?"));
+  await close();
+});
+
+test("media-only audio wanotifier rejects empty transcript", async () => {
+  const fakeMp3 = Buffer.from([0, 1, 2, 3]);
+  const fetchImpl = async () => ({
+    ok: true,
+    status: 200,
+    headers: { get: (k) => (String(k || "").toLowerCase() === "content-type" ? "audio/mpeg" : null) },
+    arrayBuffer: async () => fakeMp3,
+  });
+  const openai = {
+    audio: { transcriptions: { create: async () => ({ text: "" }) } },
+  };
+  const { close, urlBase } = await createServerForTests({ fetchImpl, openai, env: { MEDIA_ALLOW_INSECURE_HTTP: "1" } });
+  const resp = await fetch(urlBase + "/wanotifier", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      data: { type: "audio", media: { media_url: "http://remote/audio.mp3" } },
+      wa_number: "+21260000000",
+    }),
+  });
+  const json = await resp.json();
+  assert.ok(json.ok);
+  assert.strictEqual(json.reply, VOICE_NOT_UNDERSTOOD);
+  await close();
+});
+
+test("media-only audio wanotifier rejects filler transcript", async () => {
+  const fakeMp3 = Buffer.from([0, 1, 2, 3]);
+  const fetchImpl = async () => ({
+    ok: true,
+    status: 200,
+    headers: { get: (k) => (String(k || "").toLowerCase() === "content-type" ? "audio/mpeg" : null) },
+    arrayBuffer: async () => fakeMp3,
+  });
+  const openai = {
+    audio: { transcriptions: { create: async () => ({ text: "..." }) } },
+  };
+  const { close, urlBase } = await createServerForTests({ fetchImpl, openai, env: { MEDIA_ALLOW_INSECURE_HTTP: "1" } });
+  const resp = await fetch(urlBase + "/wanotifier", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      data: { type: "audio", media: { media_url: "http://remote/audio.mp3" } },
+      wa_number: "+21260000000",
+    }),
+  });
+  const json = await resp.json();
+  assert.ok(json.ok);
+  assert.strictEqual(json.reply, VOICE_NOT_UNDERSTOOD);
   await close();
 });
 
