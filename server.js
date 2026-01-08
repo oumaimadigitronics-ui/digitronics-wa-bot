@@ -217,6 +217,14 @@ const OFFERS_FALLBACK_MESSAGE = `🔥 *NOUVELLES OFFRES* 🔥
 
 📌 Prix affichés – stock limité (jusqu’à épuisement).`;
 
+const BRAND_KNOWLEDGE_PATH = path.join(process.cwd(), "data", "brand_knowledge.json");
+let BRAND_KNOWLEDGE = { topics: {} };
+try {
+  BRAND_KNOWLEDGE = JSON.parse(fs.readFileSync(BRAND_KNOWLEDGE_PATH, "utf8"));
+} catch {
+  BRAND_KNOWLEDGE = { topics: {} };
+}
+
 // RULE #1 no questions
 function brandRank(name, priority = BRAND_PRIORITY) {
   const m = new Map(priority.map((b, idx) => [normMatch(b), idx]));
@@ -317,6 +325,17 @@ async function handleMetaTextMessage(userText, senderId) {
 
   memory.push(key, "user", userText);
   const history = memory.get(key);
+
+  const topicKey = detectTechTopic(userText);
+  if (topicKey) {
+    const topicReply = buildTechTopicAnswer(topicKey, lang);
+    if (topicReply) {
+      const reply = shortenNoQuestion(topicReply, 900);
+      memory.push(key, "assistant", reply);
+      resetStrikes(key);
+      return reply;
+    }
+  }
 
   if ((isBuyIntent(userText) || hasQuantitySignal(userText)) && !isExplicitOrderStatusQuery(userText)) {
     const reply = shortenNoQuestion(BUY_INTENT_TEMPLATE.replace("{ORDER_LINK}", ORDER_FORM_URL), 520);
@@ -2088,6 +2107,125 @@ function isProductAdviceIntent(text) {
   const hasPrice = priceTokens.some((token) => includesToken(normalized, token));
   if (hasPrice && !hasAdvice) return false;
   return hasAdvice;
+}
+
+function detectTechTopic(raw) {
+  const s = normMatch(arabicIndicToAsciiDigits(String(raw || ""))).toLowerCase();
+  if (!s) return null;
+  const normalized = s.replace(/[’']/g, " ").replace(/\s+/g, " ").trim();
+  const noSpace = normalized.replace(/\s+/g, "");
+
+  const priceTokens = ["price", "prix", "ثمن", "سعر"];
+  const compareTokens = [
+    "difference",
+    "différence",
+    "comparaison",
+    "compare",
+    "mieux",
+    "meilleur",
+    "better",
+    "best",
+    "vs",
+    "الفرق",
+    "شنو احسن",
+    "شنو أحسن",
+    "ولا",
+    "مقارنة",
+  ];
+
+  const hasPrice = priceTokens.some((token) => includesToken(normalized, token));
+  const hasCompare =
+    compareTokens.some((token) => normalized.includes(normMatch(token))) ||
+    compareTokens.some((token) => includesToken(normalized, token));
+  if (hasPrice && !hasCompare) return null;
+
+  const hasGoogleTv =
+    normalized.includes("google tv") || noSpace.includes("googletv") || (normalized.includes("google") && normalized.includes("tv"));
+  const hasAndroid =
+    normalized.includes("android tv") || noSpace.includes("androidtv") || normalized.includes("android");
+  const hasArabicGoogle = normalized.includes("قوقل") || normalized.includes("غوغل") || normalized.includes("جوجل");
+  const hasArabicAndroid = normalized.includes("اندرويد") || normalized.includes("أندرويد");
+  if ((hasGoogleTv && hasAndroid) || (hasArabicGoogle && hasArabicAndroid) || (normalized.includes("google") && normalized.includes("android"))) {
+    return "google_tv_vs_android";
+  }
+
+  const hasQled = normalized.includes("qled");
+  const hasOled = normalized.includes("oled");
+  const hasLed = normalized.includes("led");
+  const hasMiniLed =
+    normalized.includes("mini led") || normalized.includes("mini-led") || noSpace.includes("miniled") || (normalized.includes("mini") && normalized.includes("led"));
+
+  if (hasOled && hasQled) return "oled_vs_qled";
+  if (hasQled && hasMiniLed) return "qled_vs_mini_led";
+  if (hasQled && hasLed && !hasMiniLed) return "qled_vs_led";
+
+  const has4k = /\b4k\b/.test(normalized) || noSpace.includes("4k");
+  const hasFhd = normalized.includes("fhd") || normalized.includes("full hd") || normalized.includes("1080");
+  if (has4k && hasFhd) return "4k_vs_fhd";
+
+  const hasHdr = normalized.includes("hdr");
+  const hasDolby = normalized.includes("dolby") || normalized.includes("vision");
+  if (hasHdr && hasDolby) return "hdr_dolby_vision";
+
+  const hasHzNumber = /\b\d{2,3}\s*hz\b/.test(normalized) || /\b\d{2,3}hz\b/.test(noSpace);
+  if (hasHzNumber || normalized.includes("refresh rate")) return "refresh_rate_60_vs_120";
+
+  return null;
+}
+
+function buildTechTopicAnswer(topicKey, lang) {
+  const topics = (BRAND_KNOWLEDGE && BRAND_KNOWLEDGE.topics) || {};
+  const topic = topics && topics[topicKey];
+  if (!topic) return null;
+
+  const pickList = (arr) => (Array.isArray(arr) ? arr.filter(Boolean).slice(0, 3) : []);
+  const pointsFr = pickList(topic.points_fr);
+  const pointsAr = pickList(topic.points_ar);
+  const chooseAFr = Array.isArray(topic.choose_a_fr) ? topic.choose_a_fr.filter(Boolean) : [];
+  const chooseBFr = Array.isArray(topic.choose_b_fr) ? topic.choose_b_fr.filter(Boolean) : [];
+  const chooseAAr = Array.isArray(topic.choose_a_ar) ? topic.choose_a_ar.filter(Boolean) : [];
+  const chooseBAr = Array.isArray(topic.choose_b_ar) ? topic.choose_b_ar.filter(Boolean) : [];
+
+  const build = (frPoints, arPoints, aFr, bFr, aAr, bAr) => {
+    const lines = [
+      "╭──────────────────────────────╮",
+      "│  🎓 *Tech Guide / دليل*      │",
+      "╰──────────────────────────────╯",
+      "",
+      `🇫🇷 ${topic.title_fr || ""}`,
+      `🇲🇦 ${topic.title_ar || ""}`,
+      "",
+      "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
+      ...frPoints.map((p) => `✅ ${p}`),
+      ...arPoints.map((p) => `✅ ${p}`),
+      "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
+      `✅ Choisir A si: ${aFr.join(" · ")}`.trim(),
+      `✅ Choisir B si: ${bFr.join(" · ")}`.trim(),
+      `✅ اختار A إلا: ${aAr.join(" · ")}`.trim(),
+      `✅ اختار B إلا: ${bAr.join(" · ")}`.trim(),
+      "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
+      `📌 ${topic.recommendation_fr || ""}`,
+      `📌 ${topic.recommendation_ar || ""}`,
+      "",
+      "🔒 Service pro — conseils clairs & transparents.",
+      "🔒 خدمة احترافية — نصائح واضحة و شفافة.",
+    ].filter((line) => line !== null && line !== undefined);
+    return lines.join("\n");
+  };
+
+  let answer = build(pointsFr, pointsAr, chooseAFr, chooseBFr, chooseAAr, chooseBAr);
+  let frTrim = [...pointsFr];
+  let arTrim = [...pointsAr];
+  while (answer.length > 900 && (frTrim.length > 1 || arTrim.length > 1)) {
+    if (frTrim.length > 1) frTrim.pop();
+    if (arTrim.length > 1) arTrim.pop();
+    answer = build(frTrim, arTrim, chooseAFr, chooseBFr, chooseAAr, chooseBAr);
+  }
+  if (answer.length > 900 && chooseAFr.length > 1) {
+    answer = build(frTrim, arTrim, chooseAFr.slice(0, 1), chooseBFr.slice(0, 1), chooseAAr.slice(0, 1), chooseBAr.slice(0, 1));
+  }
+
+  return answer;
 }
 
 function isContactIntent(text) {
@@ -8361,6 +8499,17 @@ app.post("/wanotifier", express.raw({ type: "*/*", limit: "2mb" }), parseWanotif
     const knowledgeCategory = detectCategoryKnowledge(userTextRaw);
     const knowledgeProduct = detectProductModel(userTextRaw);
 
+    const topicKey = detectTechTopic(userTextRaw);
+    if (topicKey) {
+      const topicReply = buildTechTopicAnswer(topicKey, lang);
+      if (topicReply) {
+        const reply = finalizeReply(topicReply, 900);
+        memory.push(key, "assistant", reply);
+        resetStrikes(key);
+        return res.json({ ok: true, reply });
+      }
+    }
+
     if (isProductAdviceIntent(userTextRaw)) {
       const adviceCtx = knowledgeProduct
         ? {
@@ -8826,6 +8975,8 @@ export {
   isSupportIntent,
   isBuyIntent,
   isProductAdviceIntent,
+  detectTechTopic,
+  buildTechTopicAnswer,
   hasQuantitySignal,
   routeTemplate,
   CONTACT_TEMPLATE,
