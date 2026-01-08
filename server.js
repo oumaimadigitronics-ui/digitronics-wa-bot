@@ -1858,9 +1858,9 @@ const PRODUCT_REVIEW_TEMPLATE = (productName, highlights = {}) => {
   const useCase = Array.isArray(safe.useCase) && safe.useCase.length ? safe.useCase : ["Netflix/YouTube", "Usage familial"];
 
   return [
-    "╭──────────────────────────────╮",
+  "╭──────────────╮",
     "│   ⭐ *Avis Produit Premium*   │",
-    "╰──────────────────────────────╯",
+  "╰──────────────╯",
     "",
     `🇫🇷 Avis rapide sur ${nameFr}.`,
     `🇲🇦 رأي سريع على ${nameAr}.`,
@@ -1880,9 +1880,9 @@ const PRODUCT_COMPARE_TEMPLATE = (a, b) => {
   const left = a || "Option A";
   const right = b || "Option B";
   return [
-    "╭──────────────────────────────╮",
+  "╭──────────────╮",
     "│   ⚖️ *Comparatif Premium*   │",
-    "╰──────────────────────────────╯",
+  "╰──────────────╯",
     "",
     `🇫🇷 Comparatif clair: *${left}* vs *${right}*.`,
     `🇲🇦 مقارنة واضحة: *${left}* ضد *${right}*.`,
@@ -1901,9 +1901,9 @@ const PRODUCT_COMPARE_TEMPLATE = (a, b) => {
 const TECH_EXPLAIN_TEMPLATE = (topic) => {
   if (topic === "google_vs_android") {
     return [
-      "╭──────────────────────────────╮",
+  "╭──────────────╮",
       "│   🧠 *Tech Premium*   │",
-      "╰──────────────────────────────╯",
+  "╰──────────────╯",
       "",
       "🇫🇷 Google TV vs Android TV.",
       "• Google TV: interface moderne, recommandations meilleures, plus simple.",
@@ -1919,9 +1919,9 @@ const TECH_EXPLAIN_TEMPLATE = (topic) => {
   }
   if (topic === "qled_vs_led") {
     return [
-      "╭──────────────────────────────╮",
+  "╭──────────────╮",
       "│   🧠 *Tech Premium*   │",
-      "╰──────────────────────────────╯",
+  "╰──────────────╯",
       "",
       "🇫🇷 QLED vs LED.",
       "• QLED: couleurs plus vives, meilleure luminosité.",
@@ -1934,9 +1934,9 @@ const TECH_EXPLAIN_TEMPLATE = (topic) => {
     ].join("\n");
   }
   return [
-    "╭──────────────────────────────╮",
+  "╭──────────────╮",
     "│   🧠 *Tech Premium*   │",
-    "╰──────────────────────────────╯",
+  "╰──────────────╯",
     "",
     "🇫🇷 4K vs FHD.",
     "• 4K: netteté supérieure, ممتازة للشاشات الكبيرة.",
