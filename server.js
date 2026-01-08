@@ -1630,6 +1630,24 @@ const GREETING_TEMPLATE = [
   "🚚 Livraison: *1–7 jours*  |  💳 *Paiement à la livraison*"
 ].join("\n");
 
+const CLARITY_TEMPLATE = [
+  "╭──────────────────────────────╮",
+  "│   ✨ *Clarté Premium*   │",
+  "╰──────────────────────────────╯",
+  "",
+  "🇫🇷 Clarté, précision et transparence à chaque étape.",
+  "🇲🇦 وضوح، دقة وشفافية فكل مرحلة.",
+  "",
+  "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
+  "✅ Étape 1: Vérification du produit",
+  "✅ Étape 2: Détails de livraison clairs",
+  "✅ Étape 3: Option de paiement confirmée",
+  "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
+  "",
+  "🇫🇷 Soyez rassuré: suivi pro et service fiable.",
+  "🇲🇦 متطمن: متابعة محترفة وخدمة موثوقة."
+].join("\n");
+
 const DELIVERY_TEMPLATE = [
   "╭──────────────────────────────╮",
   "│   🚚 *Livraison Premium*   │",
