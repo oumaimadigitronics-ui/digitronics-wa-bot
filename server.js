@@ -727,6 +727,24 @@ function t(lang, key, vars) {
         const brands = String((x || {}).brands || "TCL, Haier, Samsung");
         return "Smah lia, ma kanso9osh Xiaomi. 3andna options 7sen b " + brands + ". Hna chi offres:";
       },
+      CONTACT_DETAILS:
+        "📍 L3nwan: " +
+        COMPANY.address +
+        "\n📲 WhatsApp: " +
+        CONTACTS.whatsapp +
+        "\n📞 T3ayet lina: " +
+        CONTACTS.calls.join(" / "),
+      OPENING_HOURS: "🕒 Lkhadma: Lundi–Samedi 10:00–19:00.",
+      DELIVERY_INFO: "🚚 Livraison f Maroc كامل: 24–72h حسب l-mdina.\n✅ COD (cash f livraison) kayn.",
+      WARRANTY_INFO: (x) => {
+        if (x && x.daikoTv) return "🛡️ Garantie: 2 ans (TV DAIKO).";
+        return "🛡️ Garantie standard: 1 an. Exception: TV DAIKO = 2 ans.";
+      },
+      SUPPORT_PROBLEM:
+        "🙏 Smah lina 3la l-mochkil. Ghadi n3tih أولوية و nتابع m3ak حتى l-حل.\n📞 Support: " +
+        CONTACTS.calls.join(" / ") +
+        "\n📲 WhatsApp: " +
+        CONTACTS.whatsapp,
     },
     fr: {
       askTextInsteadMedia: "Merci. Pour que je comprenne, envoyez un message écrit (sans audio/image).",
@@ -795,6 +813,24 @@ function t(lang, key, vars) {
         const brands = String((x || {}).brands || "TCL, Haier et Samsung");
         return "Désolé, nous ne vendons pas Xiaomi. Nous avons de meilleures options comme " + brands + ". Voici des offres dispo:";
       },
+      CONTACT_DETAILS:
+        "📍 Adresse: " +
+        COMPANY.address +
+        "\n📲 WhatsApp: " +
+        CONTACTS.whatsapp +
+        "\n📞 Appels: " +
+        CONTACTS.calls.join(" / "),
+      OPENING_HOURS: "🕒 Horaires: Lun–Sam 10:00–19:00.",
+      DELIVERY_INFO: "🚚 Livraison partout au Maroc: 24–72h selon la ville.\n✅ Paiement à la livraison (COD).",
+      WARRANTY_INFO: (x) => {
+        if (x && x.daikoTv) return "🛡️ Garantie: 2 ans (TV DAIKO).";
+        return "🛡️ Garantie standard: 1 an. Exception: TV DAIKO = 2 ans.";
+      },
+      SUPPORT_PROBLEM:
+        "🙏 Désolé pour le problème. Nous traitons votre demande en priorité et jusqu’à résolution.\n📞 Support: " +
+        CONTACTS.calls.join(" / ") +
+        "\n📲 WhatsApp: " +
+        CONTACTS.whatsapp,
     },
     ar: {
       askTextInsteadMedia: "شكراً. من فضلك ارسل رسالة مكتوبة (بدون صوت/صورة) باش نقدر نفهمك.",
@@ -862,11 +898,49 @@ function t(lang, key, vars) {
         const brands = String((x || {}).brands || "TCL و Haier و Samsung");
         return "سمح ليا، ما كنبيعوش Xiaomi. عندنا اختيارات أحسن بحال " + brands + ". هاهي بعض العروض:";
       },
+      CONTACT_DETAILS:
+        "📍 العنوان: " +
+        COMPANY.address +
+        "\n📲 واتساب: " +
+        CONTACTS.whatsapp +
+        "\n📞 مكالمات: " +
+        CONTACTS.calls.join(" / "),
+      OPENING_HOURS: "🕒 أوقات العمل: الإثنين–السبت 10:00–19:00.",
+      DELIVERY_INFO: "🚚 التوصيل فالمغرب كامل: 24–72 ساعة حسب المدينة.\n✅ الدفع عند الاستلام (COD).",
+      WARRANTY_INFO: (x) => {
+        if (x && x.daikoTv) return "🛡️ الضمان: سنتين (تلفاز DAIKO).";
+        return "🛡️ الضمان القياسي: سنة واحدة. استثناء: تلفاز DAIKO سنتين.";
+      },
+      SUPPORT_PROBLEM:
+        "🙏 كنعتذرو على المشكل. غادي نعطيوه أولوية ونبقاو متابعين حتى يتحل.\n📞 الدعم: " +
+        CONTACTS.calls.join(" / ") +
+        "\n📲 واتساب: " +
+        CONTACTS.whatsapp,
+    },
+    en: {
+      CONTACT_DETAILS:
+        "📍 Address: " +
+        COMPANY.address +
+        "\n📲 WhatsApp: " +
+        CONTACTS.whatsapp +
+        "\n📞 Calls: " +
+        CONTACTS.calls.join(" / "),
+      OPENING_HOURS: "🕒 Hours: Mon–Sat 10:00–19:00.",
+      DELIVERY_INFO: "🚚 Delivery across Morocco: 24–72h by city.\n✅ Cash on delivery (COD) available.",
+      WARRANTY_INFO: (x) => {
+        if (x && x.daikoTv) return "🛡️ Warranty: 2 years (DAIKO TV).";
+        return "🛡️ Standard warranty: 1 year. Exception: DAIKO TVs = 2 years.";
+      },
+      SUPPORT_PROBLEM:
+        "🙏 Sorry for the issue. We are prioritizing it and will follow up until resolved.\n📞 Support: " +
+        CONTACTS.calls.join(" / ") +
+        "\n📲 WhatsApp: " +
+        CONTACTS.whatsapp,
     },
   };
 
   const base = dict[L] || dict.dzl;
-  const val = base[key];
+  const val = base[key] ?? dict.dzl[key];
   if (typeof val === "function") return String(val(v));
   return String(val || "");
 }
@@ -1947,7 +2021,17 @@ function isContactIntent(text) {
     "البريد الالكتروني",
   ];
 
-  const hoursTokens = [
+  return hasAnyToken(s, locationTokens) || hasAnyToken(s, phoneTokens) || hasAnyToken(s, emailTokens);
+}
+
+function isOpeningHoursIntent(text) {
+  const raw = String(text || "");
+  const s = normalizeIntentText(raw);
+  if (!s) return false;
+
+  if (hasAnyEmoji(raw, ["🕒", "⏰", "🗓️", "🕰️"])) return true;
+
+  const tokens = [
     "hours",
     "working hours",
     "opening hours",
@@ -1984,14 +2068,13 @@ function isContactIntent(text) {
     "كيسد",
     "واش محلولين",
     "متى تفتحون",
+    "أوقات",
+    "مواعيد",
+    "وقت",
+    "horaires d'ouverture",
   ];
 
-  return (
-    hasAnyToken(s, locationTokens) ||
-    hasAnyToken(s, phoneTokens) ||
-    hasAnyToken(s, emailTokens) ||
-    hasAnyToken(s, hoursTokens)
-  );
+  return hasAnyToken(s, tokens);
 }
 
 function isDeliveryIntent(text) {
@@ -2136,6 +2219,97 @@ function isWarrantyIntent(text) {
     "كفالة",
     "تأمين",
     "خدمة ما بعد البيع",
+  ];
+
+  return hasAnyToken(s, tokens);
+}
+
+function isAngryOrProblemIntent(text) {
+  const raw = String(text || "");
+  const s = normalizeIntentText(raw);
+  if (!s) return false;
+
+  if (hasAnyEmoji(raw, ["😡", "🤬", "😠", "😤", "😞", "😢", "😭", "⚠️", "❗", "🚨"])) return true;
+
+  const phrases = [
+    "very angry",
+    "so angry",
+    "really angry",
+    "bad service",
+    "terrible service",
+    "not happy",
+    "late delivery",
+    "delivery late",
+    "wrong item",
+    "wrong product",
+    "service nul",
+    "c est nul",
+    "c'est nul",
+    "pas satisfait",
+    "très mauvais",
+    "tres mauvais",
+    "je suis en colere",
+    "je suis en colère",
+    "je suis fache",
+    "je suis fâché",
+    "retard de livraison",
+    "produit cassé",
+    "produit abimé",
+    "produit abîmé",
+    "mouchkil f tawssil",
+    "mouchkil f tawsil",
+    "mouchkil f livraison",
+    "khayb service",
+    "khayb lkhadma",
+    "machi mzyan",
+    "machi mzin",
+    "خدمة خايبة",
+    "توصيل متأخر",
+    "توصيل غلط",
+    "منتوج غلط",
+    "خدمة سيئة",
+  ];
+
+  if (hasAnyPhrase(s, phrases)) return true;
+
+  const tokens = [
+    "problem",
+    "issue",
+    "bad",
+    "angry",
+    "late",
+    "delay",
+    "delayed",
+    "wrong",
+    "complaint",
+    "complain",
+    "dissatisfied",
+    "upset",
+    "service",
+    "retard",
+    "retardé",
+    "retarde",
+    "mauvais",
+    "probleme",
+    "problème",
+    "colere",
+    "colère",
+    "fache",
+    "fâché",
+    "mouchkil",
+    "mochkil",
+    "mushkil",
+    "khayb",
+    "za3fan",
+    "m9hor",
+    "مشكلة",
+    "مشكل",
+    "غلط",
+    "سيء",
+    "متأخر",
+    "متاخر",
+    "شكوى",
+    "شكاية",
   ];
 
   return hasAnyToken(s, tokens);
@@ -7765,6 +7939,46 @@ app.post("/wanotifier", express.raw({ type: "*/*", limit: "2mb" }), parseWanotif
       return res.json({ ok: true, reply });
     }
 
+    if (isContactIntent(userTextRaw)) {
+      const reply = shorten(applyAudioNote(t(lang, "CONTACT_DETAILS")), 420);
+      memory.push(key, "assistant", reply);
+      resetStrikes(key);
+      return res.json({ ok: true, reply });
+    }
+
+    if (isOpeningHoursIntent(userTextRaw)) {
+      const reply = shorten(applyAudioNote(t(lang, "OPENING_HOURS")), 420);
+      memory.push(key, "assistant", reply);
+      resetStrikes(key);
+      return res.json({ ok: true, reply });
+    }
+
+    if (isDeliveryIntent(userTextRaw)) {
+      const reply = shorten(applyAudioNote(t(lang, "DELIVERY_INFO")), 420);
+      memory.push(key, "assistant", reply);
+      resetStrikes(key);
+      return res.json({ ok: true, reply });
+    }
+
+    if (isWarrantyIntent(userTextRaw)) {
+      const historyText = history.map((m) => m.content).join(" ");
+      const brandHint = ctxData.lastBrand || detectBrand(historyText) || null;
+      const classHint = ctxData.lastClass || detectClass(historyText) || null;
+      const hasTvHint = hasTvIntentTokens(historyText) || (classHint && normMatch(classHint).includes("tv"));
+      const isDaikoTv = normMatch(brandHint) === "daiko" && hasTvHint;
+      const reply = shorten(applyAudioNote(t(lang, "WARRANTY_INFO", { daikoTv: isDaikoTv })), 420);
+      memory.push(key, "assistant", reply);
+      resetStrikes(key);
+      return res.json({ ok: true, reply });
+    }
+
+    if (isAngryOrProblemIntent(userTextRaw)) {
+      const reply = shorten(applyAudioNote(t(lang, "SUPPORT_PROBLEM")), 420);
+      memory.push(key, "assistant", reply);
+      resetStrikes(key);
+      return res.json({ ok: true, reply });
+    }
+
     if (isContactTemplateIntent(userTextRaw)) {
       const reply = finalizeReply(contactTemplate(), 520);
       memory.push(key, "assistant", reply);
@@ -7878,39 +8092,28 @@ app.post("/wanotifier", express.raw({ type: "*/*", limit: "2mb" }), parseWanotif
 
     if (asksAboutDeliveryPaymentWarranty(userTextRaw)) {
       const s = normMatch(userTextRaw);
-      const parts = [];
-      const r = RULES_I18N[lang] || RULES_I18N.dzl;
-
-      if (s.indexOf("delivery") >= 0 || s.indexOf("livraison") >= 0 || s.indexOf("توصيل") >= 0 || s.indexOf("التوصيل") >= 0) parts.push(r.deliveryCallback || r.delivery);
-
-      if (
+      const deliveryHit = s.indexOf("delivery") >= 0 || s.indexOf("livraison") >= 0 || s.indexOf("توصيل") >= 0 || s.indexOf("التوصيل") >= 0;
+      const paymentHit =
         s.indexOf("payment") >= 0 ||
         s.indexOf("paiement") >= 0 ||
         s.indexOf("الدفع") >= 0 ||
         s.indexOf("cash") >= 0 ||
         s.indexOf("virement") >= 0 ||
         s.indexOf("bank") >= 0 ||
-        s.indexOf("rib") >= 0
-      )
-        parts.push(r.payment);
+        s.indexOf("rib") >= 0;
+      const warrantyHit = s.indexOf("warranty") >= 0 || s.indexOf("garantie") >= 0 || s.indexOf("الضمان") >= 0 || s.indexOf("ضمان") >= 0;
+      const parts = [];
 
-      if (s.indexOf("warranty") >= 0 || s.indexOf("garantie") >= 0 || s.indexOf("الضمان") >= 0 || s.indexOf("ضمان") >= 0) {
-        const ctx = getCtx(key);
-        let brandGuess = ctx.lastBrand || null;
-        if (!brandGuess) {
-          const combined = history.map((m) => m.content).join(" ");
-          brandGuess = detectBrand(combined) || null;
-        }
-        const clsGuess = ctx.lastClass || null;
-        parts.push(warrantyTextForBrand(lang, brandGuess, clsGuess));
+      if (deliveryHit) parts.push(DELIVERY_TEMPLATE);
+      if (paymentHit) parts.push(PAYMENT_TEMPLATE);
+      if (warrantyHit) parts.push(WARRANTY_TEMPLATE);
+
+      if (parts.length) {
+        const reply = finalizeReply(parts.join("\n\n"), 520);
+        memory.push(key, "assistant", reply);
+        resetStrikes(key);
+        return res.json({ ok: true, reply });
       }
-
-      if (s.indexOf("wall mount") >= 0 || s.indexOf("support") >= 0 || s.indexOf("حامل") >= 0 || s.indexOf("براكي") >= 0) parts.push(r.wall_mount);
-
-      const reply = finalizeReply(parts.length ? parts.join("\n") : fallbackWithAgent(lang), 520);
-      memory.push(key, "assistant", reply);
-      resetStrikes(key);
-      return res.json({ ok: true, reply });
     }
 
     if (isBuyIntent(userTextRaw)) {
@@ -8137,9 +8340,11 @@ export {
   handleVisionMediaForTest,
   setSystemPromptForTest,
   isContactIntent,
+  isOpeningHoursIntent,
   isDeliveryIntent,
   isPaymentIntent,
   isWarrantyIntent,
+  isAngryOrProblemIntent,
   isAngryIntent,
   isConfusedIntent,
   isSupportIntent,
