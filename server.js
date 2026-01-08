@@ -43,6 +43,7 @@ const REQUIRE_ENV = process.argv[1] === ENTRY_FILE && !RUN_SELF_TESTS;
 const MAX_AUDIO_BYTES = Number(process.env.MEDIA_MAX_BYTES_AUDIO || 12000000) || 12000000;
 let systemPromptLoaded = false;
 let systemPromptValue = "";
+const DEFAULT_SYSTEM_PROMPT = "You are DigiBot for Digitronics.ma.";
 
 function debugLog(event, payload) {
   if (!LOG_DEBUG) return;
@@ -199,6 +200,14 @@ const COMPANY = {
   name: "Digitronics",
   address: "Ville de Casablanca – Quartier Oulfa (Haj Fateh) – Rue 9 – Rond-point Chahdiya – à côté de la boulangerie Pan Com",
 };
+
+const VOICE_NOT_UNDERSTOOD_TEMPLATE = `╭───────────────╮
+│  🎤 *Message vocal*          │
+╰───────────────╯
+🇫🇷 Je n’ai pas pu comprendre clairement votre message vocal.
+🇲🇦 ما قدرتش نفهم مزيان الصوت.
+✅ Envoyez-le مرة أخرى بصوت واضح أو كتب ليا الرسالة.
+🔒 Service pro — réponse rapide.`;
 
 const OFFERS_FALLBACK_MESSAGE = `🔥 *NOUVELLES OFFRES* 🔥
 (Stock limité – jusqu’à épuisement)
@@ -2086,6 +2095,12 @@ function hasAnyEmoji(raw, emojis) {
     if (s.includes(emojis[i])) return true;
   }
   return false;
+}
+
+function isOnlyEmojiOrPunct(raw) {
+  const s = String(raw || "").trim();
+  if (!s) return true;
+  return !/[\p{L}\p{N}]/u.test(s);
 }
 
 function hasAnyToken(text, tokens) {
@@ -8516,7 +8531,7 @@ function buildOffersSubsetForPrompt(userText, historyMsgs, key) {
 function buildSystemPrompt(offersSubset, lang, opts) {
   const L = lang || "dzl";
   const rulesForLang = RULES_I18N[L] || RULES_I18N.dzl;
-  const basePrompt = getSystemPrompt().trim() || "You are DigiBot for Digitronics.ma.";
+  const basePrompt = getSystemPrompt().trim() || DEFAULT_SYSTEM_PROMPT;
 
   return (
     basePrompt +
@@ -8895,11 +8910,34 @@ app.post("/wanotifier", express.raw({ type: "*/*", limit: "2mb" }), parseWanotif
       }
     }
 
-    if (mediaResult && mediaResult.ok && mediaResult.path === "audio") {
-      audioAnswerNoteText = audioAnswerNote(lang);
-    }
+    const isAudioMessage = Boolean(
+      msgType === "audio" ||
+        msgType === "voice" ||
+        (normalizedMedia && (normalizedMedia.kind === "audio" || guessMediaKind(normalizedMedia) === "audio"))
+    );
+    if (isAudioMessage) {
+      const transcription = mediaResult && mediaResult.ok ? mediaDerivedText : null;
+      const transcript = String(transcription || "").trim();
+      const transcriptNorm = normMatch(transcript);
+      const fillerTokens = new Set(["...", "audio", "voice", "message", "ok", "merci", "hello"]);
+      const invalidTranscript =
+        transcription === null ||
+        transcription === undefined ||
+        transcriptNorm.length < 10 ||
+        fillerTokens.has(transcriptNorm) ||
+        isOnlyEmojiOrPunct(transcript);
 
-    if (mediaDerivedText) {
+      if (invalidTranscript) {
+        const reply = finalizeReply(voiceNotUnderstoodTemplate(), 520);
+        memory.push(key, "assistant", reply);
+        resetStrikes(key);
+        return res.json({ ok: true, reply });
+      }
+
+      userTextRaw = transcript.slice(0, 2000);
+      incoming.text = userTextRaw;
+      audioAnswerNoteText = audioAnswerNote(lang);
+    } else if (mediaDerivedText) {
       if (userTextRaw) userTextRaw = (userTextRaw + "\n" + mediaDerivedText).slice(0, 2000);
       else userTextRaw = mediaDerivedText;
       incoming.text = userTextRaw;
@@ -9484,6 +9522,7 @@ export {
   isGreetingLikeOpener,
   findOfferFromLinks,
   buildSystemPrompt,
+  DEFAULT_SYSTEM_PROMPT,
   isContactTemplateIntent,
   tryWebsiteCatalogAnswer,
   tryDirectOfferAnswer,
@@ -9543,6 +9582,7 @@ export {
   INITIAL_GREETING_TTL_MS,
   describeImage,
   checkProductAvailability,
+  voiceNotUnderstoodTemplate,
 };
 
 function runSelfTests() {
@@ -9699,6 +9739,10 @@ function audioAnswerNote(lang) {
     return "Je suis un bot IA. Voici ce que j’ai compris de votre audio et ma réponse. Si c’est correct, parfait ! Sinon, il se peut que je n’aie pas bien entendu—désolé. Merci d’écrire votre message pour que je puisse mieux répondre.";
   }
   return "أنا بوت بالذكاء الاصطناعي. هاد الشي اللي فهمت من الصوت ديالك وهدي هي الجواب ديالي. إلا كان هذا هو القصد ديالك مزيان! إلا ما كانش، يمكن ما فهمتش مزيان الصوت ديالك كنعتذر، وكتب ليا الرسالة باش نجاوبك أحسن.";
+}
+
+function voiceNotUnderstoodTemplate() {
+  return VOICE_NOT_UNDERSTOOD_TEMPLATE;
 }
 
 function shouldSendAudioReminder(key) {
