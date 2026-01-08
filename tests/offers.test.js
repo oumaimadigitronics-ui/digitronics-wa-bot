@@ -54,6 +54,7 @@ import {
   offerFromWooProduct,
   thankYouFollowUpMessage,
   DEFAULT_SYSTEM_PROMPT,
+  checkProductAvailability,
 } from "../server.js";
 import { setDepsForTests } from "../src/deps.js";
 
@@ -85,6 +86,27 @@ function mockWcFetch(pages) {
     const page = Number(u.searchParams.get("page") || "1");
     const idx = page - 1;
     return pages[idx] || [];
+  };
+}
+
+function mockFetchWithResponses(responses = {}) {
+  return async (url) => {
+    const key = String(url);
+    const resp = responses[key] || { status: 200, body: "" };
+    return {
+      ok: resp.status >= 200 && resp.status < 300,
+      status: resp.status,
+      headers: { get: () => null },
+      text: async () => String(resp.body || ""),
+      json: async () => {
+        try {
+          return JSON.parse(resp.body || "{}");
+        } catch {
+          return {};
+        }
+      },
+      arrayBuffer: async () => Buffer.from(String(resp.body || ""), "utf8"),
+    };
   };
 }
 
@@ -1118,6 +1140,208 @@ test("size-only reply ignores lastBrand leak", () => {
 test("formatSize formats RTL and Latin styles", () => {
   assert.strictEqual(formatSize("ar", 50), "50 بوصة");
   assert.strictEqual(formatSize("dzl", 50), "50″");
+});
+
+test("checkProductAvailability handles availability signals", () => {
+  assert.deepStrictEqual(
+    checkProductAvailability({ searchEmpty: true, modelCodePresent: true, searchCompleted: true }),
+    { status: "not_found", reason: "search_empty" }
+  );
+
+  assert.deepStrictEqual(
+    checkProductAvailability({ productPageStatus: 404, modelCodePresent: true }),
+    { status: "not_found", reason: "product_page_404" }
+  );
+
+  assert.deepStrictEqual(
+    checkProductAvailability({ productPageHtml: "Rupture de stock", modelCodePresent: true }),
+    { status: "out_of_stock", reason: "product_page_out_of_stock" }
+  );
+
+  assert.deepStrictEqual(
+    checkProductAvailability({ productJson: { stock_status: "outofstock" }, modelCodePresent: true }),
+    { status: "out_of_stock", reason: "wc_outofstock" }
+  );
+
+  assert.deepStrictEqual(
+    checkProductAvailability({ modelCodePresent: true, knowledgeModel: null, offerHit: null }),
+    { status: "not_found", reason: "model_missing_offers" }
+  );
+});
+
+test("availability routing returns out-of-stock for empty search results", async () => {
+  setOffersForTest({
+    TCL: [{ price: 8999, stock: 2, model: "TCL-85", class: "Tv", category: "Tv", size: 85 }],
+  });
+  setWcFetchJsonForTest(mockWcFetch([[]]));
+  const { urlBase, close } = await createServerForTests({ fetchImpl: mockFetchWithResponses() });
+
+  try {
+    const resp = await fetch(`${urlBase}/wanotifier`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ text: "prix 85p8k tcl", waId: "os-empty" }),
+    });
+    const json = await resp.json();
+    assert.ok(json.reply.includes("indisponible"));
+    assert.ok(json.reply.includes("Alternatives disponibles"));
+  } finally {
+    await close();
+    setOffersForTest(null);
+  }
+});
+
+test("availability routing returns not_found for product page 404", async () => {
+  const productUrl = "https://example.com/85p8k";
+  setOffersForTest({
+    TCL: [{ price: 8999, stock: 2, model: "TCL-85", class: "Tv", category: "Tv", size: 85 }],
+  });
+  setWcFetchJsonForTest(
+    mockWcFetch([
+      [
+        {
+          name: "TCL 85P8K",
+          sku: "85P8K",
+          stock_status: "instock",
+          categories: [{ name: "Tv" }],
+          brands: [{ name: "TCL" }],
+          permalink: productUrl,
+          regular_price: "10000",
+        },
+      ],
+    ])
+  );
+
+  const fetchImpl = mockFetchWithResponses({ [productUrl]: { status: 404, body: "Not Found" } });
+  const { urlBase, close } = await createServerForTests({ fetchImpl });
+
+  try {
+    const resp = await fetch(`${urlBase}/wanotifier`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ text: "85p8k tcl prix", waId: "os-404" }),
+    });
+    const json = await resp.json();
+    assert.ok(json.reply.includes("indisponible"));
+    assert.ok(json.reply.includes("Alternatives disponibles"));
+  } finally {
+    await close();
+    setOffersForTest(null);
+  }
+});
+
+test("availability routing returns out_of_stock for page stock marker", async () => {
+  const productUrl = "https://example.com/85p8k";
+  setOffersForTest({
+    TCL: [{ price: 8999, stock: 2, model: "TCL-85", class: "Tv", category: "Tv", size: 85 }],
+  });
+  setWcFetchJsonForTest(
+    mockWcFetch([
+      [
+        {
+          name: "TCL 85P8K",
+          sku: "85P8K",
+          stock_status: "instock",
+          categories: [{ name: "Tv" }],
+          brands: [{ name: "TCL" }],
+          permalink: productUrl,
+          regular_price: "10000",
+        },
+      ],
+    ])
+  );
+
+  const fetchImpl = mockFetchWithResponses({ [productUrl]: { status: 200, body: "Rupture de stock" } });
+  const { urlBase, close } = await createServerForTests({ fetchImpl });
+
+  try {
+    const resp = await fetch(`${urlBase}/wanotifier`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ text: "85p8k tcl prix", waId: "os-html" }),
+    });
+    const json = await resp.json();
+    assert.ok(json.reply.includes("indisponible"));
+    assert.ok(json.reply.includes("Alternatives disponibles"));
+  } finally {
+    await close();
+    setOffersForTest(null);
+  }
+});
+
+test("availability routing returns out_of_stock for wc outofstock", async () => {
+  const productUrl = "https://example.com/85p8k";
+  setOffersForTest({
+    TCL: [{ price: 8999, stock: 2, model: "TCL-85", class: "Tv", category: "Tv", size: 85 }],
+  });
+  setWcFetchJsonForTest(
+    mockWcFetch([
+      [
+        {
+          name: "TCL 85P8K",
+          sku: "85P8K",
+          stock_status: "outofstock",
+          categories: [{ name: "Tv" }],
+          brands: [{ name: "TCL" }],
+          permalink: productUrl,
+          regular_price: "10000",
+        },
+      ],
+    ])
+  );
+
+  const fetchImpl = mockFetchWithResponses({ [productUrl]: { status: 200, body: "" } });
+  const { urlBase, close } = await createServerForTests({ fetchImpl });
+
+  try {
+    const resp = await fetch(`${urlBase}/wanotifier`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ text: "85p8k tcl prix", waId: "os-json" }),
+    });
+    const json = await resp.json();
+    assert.ok(json.reply.includes("indisponible"));
+    assert.ok(json.reply.includes("Alternatives disponibles"));
+  } finally {
+    await close();
+    setOffersForTest(null);
+  }
+});
+
+test("availability routing returns not_found when offers miss model", async () => {
+  setOffersForTest({
+    TCL: [{ price: 8999, stock: 2, model: "TCL-85", class: "Tv", category: "Tv", size: 85 }],
+  });
+  setWcFetchJsonForTest(
+    mockWcFetch([
+      [
+        {
+          name: "TCL 75P7K",
+          sku: "75P7K",
+          stock_status: "instock",
+          categories: [{ name: "Tv" }],
+          brands: [{ name: "TCL" }],
+          permalink: "https://example.com/75p7k",
+          regular_price: "8000",
+        },
+      ],
+    ])
+  );
+  const { urlBase, close } = await createServerForTests({ fetchImpl: mockFetchWithResponses() });
+
+  try {
+    const resp = await fetch(`${urlBase}/wanotifier`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ text: "prix 85p8k tcl", waId: "os-missing" }),
+    });
+    const json = await resp.json();
+    assert.ok(json.reply.includes("indisponible"));
+    assert.ok(json.reply.includes("Alternatives disponibles"));
+  } finally {
+    await close();
+    setOffersForTest(null);
+  }
 });
 
 test("wanotifier HMAC uses rawBody including whitespace", async () => {
