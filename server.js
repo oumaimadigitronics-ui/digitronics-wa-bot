@@ -212,7 +212,7 @@ const OFFERS_FALLBACK_MESSAGE = `🔥 *NOUVELLES OFFRES* 🔥
 💰 Prix : *1499 DH*
 🔗 https://digitronics.ma/produit/tcl-tv-qled-32-full-hd-32s5k/
 
-📌 Pour un prix exact, envoyez le nom du produit (ex: "TCL 32S5K")`;
+📌 Prix affichés – stock limité (jusqu’à épuisement).`;
 
 // RULE #1 no questions
 function brandRank(name, priority = BRAND_PRIORITY) {
@@ -6527,6 +6527,32 @@ function isNegotiationIntent(text) {
   return false;
 }
 
+function isOffersIntent(text) {
+  const raw = String(text || "");
+  if (!raw) return false;
+  const s = normMatch(arabicIndicToAsciiDigits(raw)).toLowerCase();
+  if (!s) return false;
+
+  if (raw.includes("🔥") || raw.includes("💸") || raw.includes("🏷️") || raw.includes("%")) return true;
+
+  const enTokens = ["offer", "offers", "deal", "deals", "promo", "discount", "sale"];
+  for (let i = 0; i < enTokens.length; i += 1) {
+    if (includesToken(s, enTokens[i])) return true;
+  }
+
+  const frTokens = ["offre", "offres", "promo", "promotion", "solde", "soldes", "reduction", "bon plan"];
+  for (let i = 0; i < frTokens.length; i += 1) {
+    if (includesToken(s, frTokens[i])) return true;
+  }
+
+  const arTokens = ["عرض", "عروض", "تخفيض", "تخفيضات", "برومو", "بروموها", "بومو", "واش كاين عروض", "العروض"];
+  for (let i = 0; i < arTokens.length; i += 1) {
+    if (s.indexOf(arTokens[i]) >= 0) return true;
+  }
+
+  return false;
+}
+
 function isIptvIntent(text) {
   const s = normMatch(text);
   if (!s) return false;
@@ -8006,6 +8032,19 @@ app.post("/wanotifier", express.raw({ type: "*/*", limit: "2mb" }), parseWanotif
     memory.push(key, "user", userTextRaw);
     const history = memory.get(key);
     const ctxData = getCtx(key);
+
+    if (isOffersIntent(userTextRaw)) {
+      const brandHint = detectBrand(userTextRaw) || ctxData.lastBrand || null;
+      const classHint = detectClass(userTextRaw) || ctxData.lastClass || null;
+      const categoryHint = resolveCategoryIntent(userTextRaw) || detectCategory(userTextRaw) || null;
+
+      if (!brandHint && !classHint && !categoryHint) {
+        const reply = finalizeReply(OFFERS_FALLBACK_MESSAGE, 520);
+        memory.push(key, "assistant", reply);
+        resetStrikes(key);
+        return res.json({ ok: true, reply });
+      }
+    }
 
     if (isNegotiationIntent(userTextRaw)) {
       const reply = fixedPriceTemplate();
