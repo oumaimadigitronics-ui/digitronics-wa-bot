@@ -1874,6 +1874,46 @@ const SUPPORT_TEMPLATE = [
   "✨ Support fiable, الحل مضمون."
 ].join("\n");
 
+const TV_DIMENSION_TEMPLATE = [
+  "╭──────────────╮",
+  "│   📏 *Dimensions TV en cm*   │",
+  "╰──────────────╯",
+  "",
+  "🇫🇷 Les cm indiquent la largeur ou la hauteur de l’écran, pas les pouces.",
+  "🇫🇷 Repères approximatifs en largeur d’écran:",
+  "• 55\" ≈ 123 cm",
+  "• 65\" ≈ 145 cm",
+  "• 75\" ≈ 167 cm",
+  "",
+  "🇲🇦 السنتيمتر كيدل على العرض ولا العلو ديال الشاشة، ماشي البوصة.",
+  "🇲🇦 قياسات تقريبية للعرض:",
+  "• 55\" ≈ 123 سم",
+  "• 65\" ≈ 145 سم",
+  "• 75\" ≈ 167 سم",
+  "━━━━━━━━━━━━━━",
+].join("\n");
+
+const DIMENSION_SELECTION_TEMPLATE = [
+  "╭──────────────╮",
+  "│   📐 *Dimensions Premium*   │",
+  "╰──────────────╯",
+  "",
+  "🇫🇷 Choisissez la catégorie:",
+  "• TV",
+  "• Frigo",
+  "• Cuisinière",
+  "• Machine à laver",
+  "• Clim",
+  "",
+  "🇲🇦 اختار الصنف:",
+  "• TV",
+  "• Frigo",
+  "• Cuisinière",
+  "• Machine à laver",
+  "• Clim",
+  "━━━━━━━━━━━━━━",
+].join("\n");
+
 const PRODUCT_REVIEW_TEMPLATE = (productName, highlights = {}) => {
   const nameFr = productName ? `*${productName}*` : "ce produit";
   const nameAr = productName ? `*${productName}*` : "هاد المنتوج";
@@ -4048,6 +4088,26 @@ const CATEGORY_ALIASES = Object.freeze({
     "stove",
     "range",
   ],
+});
+
+const APPLIANCE_CATEGORY_KEYWORDS = Object.freeze({
+  cooker: CATEGORY_ALIASES.Cuisiniere,
+  refrigerator: CATEGORY_ALIASES.Refrigerateur,
+  washing_machine: CATEGORY_ALIASES["Machine A Laver"],
+  air_conditioner: CATEGORY_ALIASES.Climatiseur,
+  microwave: CATEGORY_ALIASES["Micro-ondes"],
+  dishwasher: CATEGORY_ALIASES["Lave Vaisselle"],
+  water_heater: CATEGORY_ALIASES["Chauffe-eau"],
+});
+
+const APPLIANCE_CATEGORY_CANON = Object.freeze({
+  cooker: "Cuisiniere",
+  refrigerator: "Refrigerateur",
+  washing_machine: "Machine A Laver",
+  air_conditioner: "Climatiseur",
+  microwave: "Micro-ondes",
+  dishwasher: "Lave Vaisselle",
+  water_heater: "Chauffe-eau",
 });
 
 const CATEGORY_CLASS_KEYWORDS = Object.freeze([
@@ -6663,6 +6723,146 @@ function hasTvSizeContext(text) {
   return false;
 }
 
+function extractSizeInfo(text) {
+  const raw = arabicIndicToAsciiDigits(String(text || ""));
+  const cmUnitRe = /(cm|centimetre|centimètre|centimeter|سنتيم|سم)/i;
+  const cmRe = /(\d{1,4})\s*(cm|centimetre|centimètre|centimeter|سنتيم|سم)/i;
+  const inchUnitRe = /(\"|''|”|″|pouce|pouces|inch|inches|بوصة|بوص|بوس)/i;
+  const inchRe = /(\d{2,3})\s*(\"|''|”|″|pouce|pouces|inch|inches|بوصة|بوص|بوس)/i;
+
+  let value = null;
+  let unit = null;
+  let isCmDimension = false;
+  let isTvInches = false;
+
+  const cmMatch = raw.match(cmRe);
+  if (cmMatch && cmMatch[1]) {
+    const cmNum = Number(cmMatch[1]);
+    value = Number.isFinite(cmNum) ? cmNum : null;
+    unit = "cm";
+    isCmDimension = true;
+  } else if (cmUnitRe.test(raw)) {
+    unit = "cm";
+    isCmDimension = true;
+  }
+
+  const inchMatch = raw.match(inchRe);
+  if (inchMatch && inchMatch[1]) {
+    const inchNum = Number(inchMatch[1]);
+    if (!isCmDimension) {
+      value = Number.isFinite(inchNum) ? inchNum : value;
+      unit = "inch";
+    }
+    isTvInches = true;
+  } else if (inchUnitRe.test(raw)) {
+    if (!isCmDimension && !unit) unit = "inch";
+    isTvInches = true;
+  }
+
+  return {
+    value: Number.isFinite(value) ? value : null,
+    unit,
+    isCmDimension,
+    isTvInches,
+  };
+}
+
+function isTvContext(text) {
+  const s = normMatch(text || "");
+  if (!s) return false;
+  const tokens = [
+    "tv",
+    "smart tv",
+    "google tv",
+    "android tv",
+    "television",
+    "télé",
+    "tele",
+    "qled",
+    "oled",
+    "4k",
+    "تلفاز",
+    "شاشة",
+    "سمارت",
+    "اندرويد",
+    "غوغل",
+    "كيو ال اي دي",
+    "اوليد",
+  ];
+  for (let i = 0; i < tokens.length; i += 1) {
+    if (includesToken(s, tokens[i])) return true;
+  }
+  return false;
+}
+
+function detectApplianceCategory(text) {
+  const s = normMatch(text || "");
+  if (!s) return null;
+  const entries = Object.entries(APPLIANCE_CATEGORY_KEYWORDS);
+  for (let i = 0; i < entries.length; i += 1) {
+    const key = entries[i][0];
+    const keywords = entries[i][1] || [];
+    for (let j = 0; j < keywords.length; j += 1) {
+      const kw = keywords[j];
+      if (kw && includesToken(s, kw)) return key;
+    }
+  }
+  return null;
+}
+
+function routeApplianceCategoryOffers(applianceKey, lang, key) {
+  const category = APPLIANCE_CATEGORY_CANON[applianceKey];
+  if (!category) return null;
+  const k = normMatch(category);
+  let items0 = OFFERS_INDEX.categoryToOffers.get(k) || [];
+  if (!items0.length && OFFERS && OFFERS.offers) {
+    const brandsAll = Object.keys(OFFERS.offers);
+    const rebuilt = [];
+    for (let i = 0; i < brandsAll.length; i += 1) {
+      const b = brandsAll[i];
+      const arr = OFFERS.offers[b] || [];
+      for (let j = 0; j < arr.length; j += 1) {
+        const o = arr[j];
+        if (normMatch(o.category || "") === k) rebuilt.push({ brand: b, offer: o, originalIdx: j });
+      }
+    }
+    items0 = rebuilt;
+  }
+
+  const items = items0
+    .map((it, idx) => Object.assign({}, it, { originalIdx: idx }))
+    .filter((it) => Number(((it.offer || {}).stock) || 0) > 0);
+  if (!items.length) return ensureNoQuestion(t(lang, "categoryUnavailable", { category }));
+
+  const ranked = rankOffers(items, { limit: null });
+  const picks = pickCheapestPerBrand(ranked).slice(0, MAX_OFFERS);
+  if (!picks.length) return ensureNoQuestion(t(lang, "categoryUnavailable", { category }));
+
+  setCtx(key, {
+    lastBrand: undefined,
+    lastCategory: category || undefined,
+    lastClass: undefined,
+    lastSize: undefined,
+    lastOffersShown: picks.map((it) => ({ brand: it.brand, model: (it.offer && it.offer.model) || "" })),
+  });
+
+  const header = offersHeader(lang, { category });
+  const lines = picks.map((it) => formatOfferLine(it.brand, it.offer));
+  return ensureNoQuestion([header, lines.join("\n\n")].filter(Boolean).join("\n"));
+}
+
+function handleCmDimensionRouting(text, lang, key, sizeInfo) {
+  const info = sizeInfo || extractSizeInfo(text);
+  if (!info.isCmDimension) return null;
+  if (isTvContext(text)) return ensureNoQuestion(TV_DIMENSION_TEMPLATE);
+  const applianceCat = detectApplianceCategory(text);
+  if (applianceCat) {
+    const reply = routeApplianceCategoryOffers(applianceCat, lang, key);
+    if (reply) return reply;
+  }
+  return ensureNoQuestion(DIMENSION_SELECTION_TEMPLATE);
+}
+
 function parseUserQuery(text, opts = {}) {
   const raw = String(text || "");
   const ctx = opts.ctx || {};
@@ -9188,6 +9388,17 @@ app.post("/wanotifier", express.raw({ type: "*/*", limit: "2mb" }), parseWanotif
       }
     }
 
+    const sizeInfo = extractSizeInfo(userTextRaw);
+    if (sizeInfo.isCmDimension) {
+      const cmReply = handleCmDimensionRouting(userTextRaw, lang, key, sizeInfo);
+      if (cmReply) {
+        const reply = finalizeReply(cmReply, 520);
+        memory.push(key, "assistant", reply);
+        resetStrikes(key);
+        return res.json({ ok: true, reply });
+      }
+    }
+
     const directReply = tryDirectOfferAnswer(userTextRaw, history, lang, key);
     if (directReply) {
       const reply = finalizeReply(directReply, 520);
@@ -9383,8 +9594,13 @@ function runSelfTests() {
       DAIKO: [
         { model: "DK-32", name: "Daiko 32", category: tvCanon, class: tvCanon, size: 32, type: "LED", price: 2100, stock: 3, link: "http://example.com/dk32?1=1" },
         { model: "DK-55", name: "Daiko 55", category: tvCanon, class: tvCanon, size: 55, type: "LED", price: 3800, stock: 2, link: "http://example.com/dk55?1=1" },
+        { model: "DK-FR185", name: "Daiko Frigo 185", category: "Refrigerateur", class: "Refrigerateur", size: 0, type: "Frigo", price: 2200, stock: 2, link: "http://example.com/dkfr185?1=1" },
+        { model: "DK-CK75", name: "Daiko Cuisiniere 75", category: "Cuisiniere", class: "Cuisiniere", size: 0, type: "Gaz", price: 1800, stock: 2, link: "http://example.com/dkck75?1=1" },
       ],
-      TCL: [{ model: "TCL-50", name: "TCL 50", category: tvCanon, class: tvCanon, size: 50, type: "LED", price: 2700, stock: 1, link: "http://example.com/tcl50?1=1" }],
+      TCL: [
+        { model: "TCL-50", name: "TCL 50", category: tvCanon, class: tvCanon, size: 50, type: "LED", price: 2700, stock: 1, link: "http://example.com/tcl50?1=1" },
+        { model: "TCL-75", name: "TCL 75", category: tvCanon, class: tvCanon, size: 75, type: "QLED", price: 9500, stock: 1, link: "http://example.com/tcl75?1=1" },
+      ],
       SAMSUNG: [{ model: "SM-55", name: "Samsung 55", category: tvCanon, class: tvCanon, size: 55, type: "LED", price: 4100, stock: 1, link: "http://example.com/sm55?1=1" }],
       OTHER: [{ model: "MW-32", name: "Micro-ondes 32L", category: "Micro-ondes", class: "Micro-ondes", size: 0, type: "Micro", price: 800, stock: 4, link: "http://example.com/mw32?1=1" }],
     },
@@ -9433,6 +9649,27 @@ function runSelfTests() {
   assert.ok(normMatch(frigoReply).indexOf("refrigerateur") >= 0);
   assert.ok(normMatch(frigoReply).indexOf("tv") < 0);
   assert.ok(!/[\?؟]/.test(frigoReply));
+
+  const tvCmReply = handleCmDimensionRouting("largeur tv 75 cm", "fr", "self_cm_tv") || "";
+  assert.ok(tvCmReply.indexOf("Dimensions TV en cm") >= 0);
+  assert.ok(tvCmReply.indexOf("http") < 0);
+
+  const tvCmArReply = handleCmDimensionRouting("شحال عرض التلفاز بالسم", "ar", "self_cm_tv_ar") || "";
+  assert.ok(tvCmArReply.indexOf("السنتيمتر") >= 0);
+
+  const frigoCmReply = handleCmDimensionRouting("frigo 185 cm", "fr", "self_cm_frigo") || "";
+  assert.ok(frigoCmReply.indexOf("Refrigerateur") >= 0);
+  assert.ok(frigoCmReply.indexOf("http") >= 0);
+
+  const cookerCmReply = handleCmDimensionRouting("cuisiniere 75 cm", "fr", "self_cm_cooker") || "";
+  assert.ok(cookerCmReply.indexOf("Cuisiniere") >= 0);
+
+  const selectionReply = handleCmDimensionRouting("75 cm", "fr", "self_cm_pick") || "";
+  assert.ok(selectionReply.indexOf("Dimensions Premium") >= 0);
+
+  const tvPouceReply = tryDirectOfferAnswer("tv 75 pouces", [], "fr", "self_tv_pouces") || "";
+  assert.ok(tvPouceReply.indexOf(formatSize("fr", 75)) >= 0);
+  assert.ok(tvPouceReply.indexOf("http") >= 0);
 }
 
 async function main() {
