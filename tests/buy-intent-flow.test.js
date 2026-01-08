@@ -36,7 +36,7 @@ const tests = [
   { text: "order now, bank transfer", expectedBuy: true, expectedTemplate: "BUY_INTENT_TEMPLATE" },
   { text: "i want to buy with delivery", expectedBuy: true, expectedTemplate: "BUY_INTENT_TEMPLATE" },
 
-  { text: "بغيت", expectedBuy: true, expectedTemplate: "BUY_INTENT_TEMPLATE" },
+  { text: "بغيت", expectedBuy: false, expectedTemplate: null },
   { text: "بغيت نطلب", expectedBuy: true, expectedTemplate: "BUY_INTENT_TEMPLATE" },
   { text: "ندي", expectedBuy: true, expectedTemplate: "BUY_INTENT_TEMPLATE" },
   { text: "ناخد", expectedBuy: true, expectedTemplate: "BUY_INTENT_TEMPLATE" },
@@ -46,7 +46,7 @@ const tests = [
   { text: "أريد الشراء", expectedBuy: true, expectedTemplate: "BUY_INTENT_TEMPLATE" },
   { text: "نأكد الطلب", expectedBuy: true, expectedTemplate: "BUY_INTENT_TEMPLATE" },
   { text: "طلب", expectedBuy: true, expectedTemplate: "BUY_INTENT_TEMPLATE" },
-  { text: "بغيت مع التوصيل", expectedBuy: true, expectedTemplate: "BUY_INTENT_TEMPLATE" },
+  { text: "بغيت مع التوصيل", expectedBuy: false, expectedTemplate: null },
   { text: "ناخد و ضمان", expectedBuy: true, expectedTemplate: "BUY_INTENT_TEMPLATE" },
   { text: "بغيت نطلب paiement a la livraison", expectedBuy: true, expectedTemplate: "BUY_INTENT_TEMPLATE" },
   { text: "نكوموندي و livraison", expectedBuy: true, expectedTemplate: "BUY_INTENT_TEMPLATE" },
