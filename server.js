@@ -200,17 +200,14 @@ const OFFERS_FALLBACK_MESSAGE = `🔥 *NOUVELLES OFFRES* 🔥
 1) *Samsung Smart TV HD 32" One UI Tizen (32H5000F)*
 ✅ HD • Tizen • 32 pouces
 💰 Prix : *1499 DH*
-🔗 https://digitronics.ma/produit/samsung-smart-tv-hd-32-one-ui-tizen-32h5000f/
 
 2) *Daiko Google TV 32" Smart Silver Frameless FHD (GLED32AI93DK)*
 ✅ Google TV • FHD • Frameless
 💰 Prix : *1199 DH*
-🔗 https://digitronics.ma/produit/daiko-google-tv-32-smart-silver-frameless-fhd-gled32ai93dk/
 
 3) *TCL GoogleTV QLED 32" Full HD (32S5K)*
 ✅ QLED • Google TV • Full HD (1920×1080)
 💰 Prix : *1499 DH*
-🔗 https://digitronics.ma/produit/tcl-tv-qled-32-full-hd-32s5k/
 
 📌 Prix affichés – stock limité (jusqu’à épuisement).`;
 
