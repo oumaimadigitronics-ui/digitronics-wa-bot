@@ -315,6 +315,13 @@ async function handleMetaTextMessage(userText, senderId) {
   memory.push(key, "user", userText);
   const history = memory.get(key);
 
+  if ((isBuyIntent(userText) || hasQuantitySignal(userText)) && !isExplicitOrderStatusQuery(userText)) {
+    const reply = shortenNoQuestion(BUY_INTENT_TEMPLATE.replace("{ORDER_LINK}", ORDER_FORM_URL), 520);
+    memory.push(key, "assistant", reply);
+    resetStrikes(key);
+    return reply;
+  }
+
   let reply =
     tryDirectOfferAnswer(userText, history, lang, key) ||
     (await tryWebsiteCatalogAnswer(userText, lang, key)) ||
@@ -1705,9 +1712,9 @@ const GREETING_TEMPLATE = [
 ].join("\n");
 
 const BUY_INTENT_TEMPLATE = [
-  "╭───────────────╮",
+  "╭──────────────────────────────╮",
   "│   🛒 *Achat Premium*   │",
-  "╰───────────────╯",
+  "╰──────────────────────────────╯",
   "",
   "🇫🇷 Achat rapide et sécurisé en 1 clic.",
   "🇲🇦 شري سريع وآمن فـ ضغطة وحدة.",
@@ -6260,7 +6267,6 @@ function answerGoogleTvOfficialQuestion({ text, lang, parsed, key, modelOffer })
 function isBuyIntent(raw) {
   const s = normMatch(arabicIndicToAsciiDigits(String(raw || ""))).toLowerCase();
   if (!s) return false;
-  if (isOrderStatusIntent(raw)) return false;
 
   const normalized = s
     .replace(/[’']/g, " ")
@@ -6330,6 +6336,47 @@ function isBuyIntent(raw) {
     } else if (includesToken(s, signal)) {
       return true;
     }
+  }
+
+  return false;
+}
+
+function isExplicitOrderStatusQuery(text) {
+  const raw = String(text || "");
+  const s = normMatch(raw);
+  if (!s) return false;
+  if (extractOrderNumber(raw)) return true;
+
+  const statusHints = [
+    "status",
+    "statut",
+    "suivi",
+    "tracking",
+    "ou est",
+    "où est",
+    "where",
+    "fin",
+    "wsl",
+    "wsla",
+    "wasla",
+    "retard",
+    "late",
+    "delayed",
+    "pas recu",
+    "pas reçu",
+    "لم اتوصل",
+    "ما توصلتش",
+    "متأخر",
+    "تأخر",
+    "واصلة",
+    "وصل",
+    "وصلات",
+    "توصلت",
+  ];
+
+  for (let i = 0; i < statusHints.length; i += 1) {
+    const hint = normMatch(statusHints[i]);
+    if (hint && s.indexOf(hint) >= 0) return true;
   }
 
   return false;
@@ -8033,6 +8080,13 @@ app.post("/wanotifier", express.raw({ type: "*/*", limit: "2mb" }), parseWanotif
     const history = memory.get(key);
     const ctxData = getCtx(key);
 
+    if ((isBuyIntent(userTextRaw) || hasQuantitySignal(userTextRaw)) && !isExplicitOrderStatusQuery(userTextRaw)) {
+      const reply = finalizeReply(BUY_INTENT_TEMPLATE.replace("{ORDER_LINK}", ORDER_FORM_URL), 520);
+      memory.push(key, "assistant", reply);
+      resetStrikes(key);
+      return res.json({ ok: true, reply });
+    }
+
     if (isOffersIntent(userTextRaw)) {
       const brandHint = detectBrand(userTextRaw) || ctxData.lastBrand || null;
       const classHint = detectClass(userTextRaw) || ctxData.lastClass || null;
@@ -8236,14 +8290,6 @@ app.post("/wanotifier", express.raw({ type: "*/*", limit: "2mb" }), parseWanotif
         resetStrikes(key);
         return res.json({ ok: true, reply });
       }
-    }
-
-    if (isBuyIntent(userTextRaw)) {
-      supportModeStore.delete(key);
-      const reply = finalizeReply(BUY_INTENT_TEMPLATE.replace("{ORDER_LINK}", ORDER_FORM_URL), 520);
-      memory.push(key, "assistant", reply);
-      resetStrikes(key);
-      return res.json({ ok: true, reply });
     }
 
     const pending = pendingOrderStore.get(key);
