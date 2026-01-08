@@ -1,6 +1,7 @@
 import "dotenv/config";
 import express from "express";
 import crypto from "crypto";
+import { spawn } from "child_process";
 import fs from "fs";
 import path from "path";
 import os from "os";
@@ -4433,6 +4434,7 @@ let visionAnalyzer = analyzeProductImage;
 let mediaFetcherOverride = null;
 let audioDownloaderOverride = null;
 let audioTranscriberOverride = null;
+let audioConverterOverride = null;
 
 function guessMediaKind(meta) {
   const mime = String((meta && (meta.mime || meta.mimetype || meta.mimeType || meta.contentType || meta.type)) || "").toLowerCase();
@@ -4726,6 +4728,67 @@ function inferMimeFromPath(filepath, fallbackMime) {
     ".webm": "audio/webm",
   };
   return map[ext] || fallbackMime || "";
+}
+
+function shouldConvertAudioToMp3(filePath, mimeType) {
+  const mime = String(mimeType || "").toLowerCase();
+  const ext = path.extname(String(filePath || "")).toLowerCase();
+  const oggLike =
+    mime.includes("audio/ogg") ||
+    mime.includes("audio/opus") ||
+    mime.includes("application/ogg") ||
+    mime.includes("audio/webm") ||
+    mime.includes("audio/3gpp") ||
+    mime.includes("audio/3gp") ||
+    mime.includes("audio/amr");
+  if (oggLike) return true;
+  if (isAudioMime(mime) && ext !== ".mp3") return true;
+  return false;
+}
+
+async function convertAudioToMp3(inputPath, outputPath, reqId) {
+  if (typeof audioConverterOverride === "function") {
+    return audioConverterOverride(inputPath, outputPath, reqId);
+  }
+  const args = ["-y", "-i", inputPath, "-vn", "-acodec", "libmp3lame", "-ar", "44100", "-ac", "1", "-b:a", "96k", outputPath];
+  let stderr = "";
+  const maxTail = 3000;
+
+  return new Promise((resolve) => {
+    let settled = false;
+    const proc = spawn("ffmpeg", args);
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      try {
+        proc.kill("SIGKILL");
+      } catch {}
+      resolve({ ok: false, stderrTail: stderr.slice(-maxTail), error: "timeout" });
+    }, 25000);
+
+    proc.stderr.on("data", (chunk) => {
+      stderr += chunk.toString();
+      if (stderr.length > 20000) stderr = stderr.slice(-20000);
+    });
+
+    proc.on("error", (err) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve({ ok: false, stderrTail: stderr.slice(-maxTail), error: (err && err.message) || String(err) });
+    });
+
+    proc.on("close", (code, signal) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      if (code === 0) {
+        resolve({ ok: true, stderrTail: stderr.slice(-maxTail) });
+        return;
+      }
+      resolve({ ok: false, stderrTail: stderr.slice(-maxTail), code, signal });
+    });
+  });
 }
 
 async function downloadToTemp(url, filepath) {
@@ -5357,6 +5420,10 @@ function setAudioTranscriberForTest(fn) {
   audioTranscriberOverride = fn;
 }
 
+function setAudioConverterForTest(fn) {
+  audioConverterOverride = fn;
+}
+
 function handleVisionMediaForTest(mediaInput, lang, key) {
   return handleVisionMedia(mediaInput, lang, key);
 }
@@ -5426,6 +5493,50 @@ async function deriveMediaText(mediaInput, lang, reqId) {
       if (!chosenMime || !isAudioMime(chosenMime)) {
         const inferred = inferMimeFromPath(tmpFile, "");
         chosenMime = inferred && isAudioMime(inferred) ? inferred : "audio/ogg";
+      }
+      if (shouldConvertAudioToMp3(tmpFile, chosenMime)) {
+        const mp3Path = path.join(dir, "audio_converted.mp3");
+        console.log(
+          JSON.stringify({
+            level: "info",
+            msg: "audio_convert_start",
+            reqId,
+            fromPath: tmpFile,
+            fromMime: chosenMime,
+            toPath: mp3Path,
+          })
+        );
+        const conversion = await convertAudioToMp3(tmpFile, mp3Path, reqId);
+        if (conversion && conversion.ok) {
+          console.log(
+            JSON.stringify({
+              level: "info",
+              msg: "audio_convert_done",
+              reqId,
+              fromPath: tmpFile,
+              fromMime: chosenMime,
+              toPath: mp3Path,
+              stderrTail: conversion.stderrTail || null,
+            })
+          );
+          tmpFile = mp3Path;
+          chosenMime = "audio/mpeg";
+          mimeType = "audio/mpeg";
+          filename = "audio_converted.mp3";
+        } else {
+          console.error(
+            JSON.stringify({
+              level: "error",
+              msg: "audio_convert_fail",
+              reqId,
+              fromPath: tmpFile,
+              fromMime: chosenMime,
+              toPath: mp3Path,
+              stderrTail: conversion && conversion.stderrTail ? conversion.stderrTail : null,
+            })
+          );
+          throw new Error("audio_convert_failed");
+        }
       }
       mimeType = chosenMime;
       filename = path.basename(tmpFile) || filename;
@@ -9828,6 +9939,7 @@ export {
   setMediaFetcherForTest,
   setAudioDownloaderForTest,
   setAudioTranscriberForTest,
+  setAudioConverterForTest,
   handleVisionMediaForTest,
   setSystemPromptForTest,
   isContactIntent,
@@ -10097,8 +10209,51 @@ async function processIncomingMedia({ mediaInfo, mediaMeta, msgType, lang, key, 
         throw new Error("audio_url_missing");
       }
 
-      const safeMime = mimeType || inferMimeFromPath(normalizedMedia.filename || normalizedMedia.url || tmpFile, "audio/ogg");
+      let safeMime = mimeType || inferMimeFromPath(normalizedMedia.filename || normalizedMedia.url || tmpFile, "audio/ogg");
       const downloadMs = Date.now() - downloadStart;
+      let inputPath = (audioDl && audioDl.filePath) || tmpFile;
+      if (shouldConvertAudioToMp3(inputPath, safeMime)) {
+        const mp3Path = path.join(tmpDir || path.dirname(inputPath), "audio_converted.mp3");
+        console.log(
+          JSON.stringify({
+            level: "info",
+            msg: "audio_convert_start",
+            reqId,
+            fromPath: inputPath,
+            fromMime: safeMime,
+            toPath: mp3Path,
+          })
+        );
+        const conversion = await convertAudioToMp3(inputPath, mp3Path, reqId);
+        if (conversion && conversion.ok) {
+          console.log(
+            JSON.stringify({
+              level: "info",
+              msg: "audio_convert_done",
+              reqId,
+              fromPath: inputPath,
+              fromMime: safeMime,
+              toPath: mp3Path,
+              stderrTail: conversion.stderrTail || null,
+            })
+          );
+          inputPath = mp3Path;
+          safeMime = "audio/mpeg";
+        } else {
+          console.error(
+            JSON.stringify({
+              level: "error",
+              msg: "audio_convert_fail",
+              reqId,
+              fromPath: inputPath,
+              fromMime: safeMime,
+              toPath: mp3Path,
+              stderrTail: conversion && conversion.stderrTail ? conversion.stderrTail : null,
+            })
+          );
+          throw new Error("audio_convert_failed");
+        }
+      }
       const transcribeOverride =
         typeof audioTranscriberOverride === "function"
           ? async ({ filePath, mimeType: overrideMime, language }) => {
@@ -10115,7 +10270,7 @@ async function processIncomingMedia({ mediaInfo, mediaMeta, msgType, lang, key, 
           : null;
 
       const pipeline = await processAudioPipeline({
-        filePath: (audioDl && audioDl.filePath) || tmpFile,
+        filePath: inputPath,
         mimeType: safeMime,
         sizeBytes,
         languageHint: lang,
