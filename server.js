@@ -3831,6 +3831,27 @@ function detectModel(text) {
   return null;
 }
 
+function extractModelCode(text) {
+  const normalized = normMatch(arabicIndicToAsciiDigits(text)).toLowerCase();
+  if (!normalized) return { model: null, size: null };
+  const tokens = normalized
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean);
+  for (let i = 0; i < tokens.length; i += 1) {
+    const tok = tokens[i];
+    if (!tok || tok.length < 4 || tok.length > 20) continue;
+    if (!/[a-z]/.test(tok) || !/\d/.test(tok)) continue;
+    if (!/[a-z]{1,}\d{1,}|\d{1,}[a-z]{1,}/.test(tok)) continue;
+    const sizeMatch = tok.match(/\d{2,3}/);
+    const sizeNum = sizeMatch ? Number(sizeMatch[0]) : null;
+    const size = Number.isFinite(sizeNum) && sizeNum >= MIN_TV_SIZE && sizeNum <= MAX_TV_SIZE ? sizeNum : null;
+    return { model: tok, size };
+  }
+  return { model: null, size: null };
+}
+
 function extractUrls(text) {
   const s = String(text || "");
   const re = /https?:\/\/[^\s)]+/gi;
@@ -5792,6 +5813,228 @@ async function tryWebsiteCatalogAnswer(userText, lang, key) {
   return shortenNoQuestion(reply, CFG.maxReplyChars);
 }
 
+function checkProductAvailability(lookupResult) {
+  const res = lookupResult || {};
+  const htmlRaw = String(res.productPageHtml || "");
+  const htmlNorm = normMatch(arabicIndicToAsciiDigits(htmlRaw)).toLowerCase();
+  const outOfStockMarkers = [
+    "out of stock",
+    "rupture de stock",
+    "épuisé",
+    "epuise",
+    "غير متوفر",
+    "نفاذ المخزون",
+  ];
+  const notFoundMarkers = ["page not found", "not found", "introuvable", "غير موجود"];
+
+  if (res.searchNoProductsFound || res.searchEmpty) {
+    return { status: "not_found", reason: res.searchNoProductsFound ? "search_no_products" : "search_empty" };
+  }
+
+  if (res.productPageStatus === 404 || res.productPageStatus === 410) {
+    return { status: "not_found", reason: "product_page_404" };
+  }
+
+  if (notFoundMarkers.some((m) => htmlNorm.includes(normMatch(m)))) {
+    return { status: "not_found", reason: "product_page_not_found" };
+  }
+
+  if (outOfStockMarkers.some((m) => htmlNorm.includes(normMatch(m)))) {
+    return { status: "out_of_stock", reason: "product_page_out_of_stock" };
+  }
+
+  const stockStatus = String((res.productJson && res.productJson.stock_status) || "").toLowerCase();
+  if (stockStatus === "outofstock") return { status: "out_of_stock", reason: "wc_outofstock" };
+  if (stockStatus === "instock") return { status: "available", reason: "wc_instock" };
+
+  if (res.productJson && res.productJson.purchasable === false) {
+    return { status: "out_of_stock", reason: "product_not_purchasable" };
+  }
+
+  if (res.offerHit) {
+    const stock = Number((res.offerHit && res.offerHit.stock) || 0);
+    if (stock <= 0) return { status: "out_of_stock", reason: "offers_out_of_stock" };
+    return { status: "available", reason: "offers_in_stock" };
+  }
+
+  if (res.modelCodePresent && res.searchCompleted && !res.modelMatched) {
+    return { status: "not_found", reason: "model_not_found_in_search" };
+  }
+
+  if (res.modelCodePresent && !res.knowledgeModel && !res.offerHit) {
+    return { status: "not_found", reason: "model_missing_offers" };
+  }
+
+  return { status: "available", reason: "default_available" };
+}
+
+function outOfStockTemplate(model, brand, size, alternativesText) {
+  const modelSafe = String(model || "").trim() || "ce modèle";
+  const sizeTxt = Number.isFinite(size) ? ` ${size}"` : "";
+  const brandTxt = String(brand || "").trim();
+  const header = "━━━━━━━━━━━━━━━━━━━\n" + "𝗗𝗜𝗚𝗜𝗧𝗥𝗢𝗡𝗜𝗖𝗦\n" + "━━━━━━━━━━━━━━━━━━━";
+  const lines = [];
+  lines.push(header);
+  lines.push("");
+  lines.push(`🇫🇷 Le modèle ${modelSafe}${sizeTxt}${brandTxt ? " (" + brandTxt + ")" : ""} est actuellement indisponible (rupture de stock).`);
+  lines.push(`🇲🇦 الموديل ${modelSafe}${sizeTxt} ما متوفرش دابا (غير متوفر / نفاذ المخزون).`);
+  lines.push("");
+  lines.push("✅ Alternatives disponibles :");
+  if (alternativesText) lines.push(alternativesText);
+  lines.push("");
+  lines.push("🔒 Produits originaux, service fiable, livraison rapide.");
+  return lines.join("\n");
+}
+
+function filterItemsBySizePreference(items, size) {
+  const sizeNum = Number(size);
+  if (!Number.isFinite(sizeNum)) return items;
+  const sized = items.filter((it) => Number.isFinite(Number(it && it.offer && it.offer.size)));
+  if (!sized.length) return items;
+  const within = sized.filter((it) => Math.abs(Number(it.offer.size) - sizeNum) <= 10);
+  const pool = within.length ? within : sized;
+  return pool.sort((a, b) => Math.abs(Number(a.offer.size) - sizeNum) - Math.abs(Number(b.offer.size) - sizeNum));
+}
+
+function collectScopeItems({ brand, category, cls }) {
+  const brands = brand ? [brand] : OFFERS_INDEX.brands || Object.keys((OFFERS && OFFERS.offers) || {});
+  const items = [];
+  const categoryNorm = normMatch(category || "");
+  const classNorm = normMatch(cls || "");
+
+  for (let i = 0; i < brands.length; i += 1) {
+    const b = brands[i];
+    const arr = ((OFFERS && OFFERS.offers && OFFERS.offers[b]) || [])
+      .map((offer, idx) => ({ brand: b, offer, originalIdx: idx }))
+      .filter((it) => {
+        const o1 = it.offer || {};
+        if (categoryNorm && normMatch(o1.category || "") !== categoryNorm) return false;
+        if (classNorm && normMatch(o1.class || "") !== classNorm) return false;
+        return Number((o1 && o1.stock) || 0) > 0;
+      });
+    items.push(...arr);
+  }
+  return items;
+}
+
+function pickAlternativesFromItems(items, { size, cls, limit }) {
+  const sized = filterItemsBySizePreference(items, size);
+  const ranked = rankOffers(sized, {
+    size: Number.isFinite(Number(size)) ? Number(size) : null,
+    className: cls || null,
+    limit: null,
+  });
+  const picked = pickCheapestPerBrand(ranked).slice(0, limit);
+  return picked;
+}
+
+function collectOutOfStockAlternatives({ status, brand, size, category, cls }) {
+  const limit = 3;
+  const tvCanon = OFFERS_INDEX.classCanon.tv || "Tv";
+  const clsHint = cls || (Number.isFinite(Number(size)) ? tvCanon : null);
+  const categoryHint = category || (clsHint && normMatch(clsHint) === normMatch(tvCanon) ? tvCanon : null);
+  const lines = [];
+  const offers = [];
+  const seen = new Set();
+
+  const scopes =
+    status === "out_of_stock"
+      ? [
+          { brand, category: categoryHint, cls: clsHint },
+          { brand, category: null, cls: clsHint },
+          { brand: null, category: categoryHint, cls: clsHint },
+          { brand: null, category: null, cls: clsHint },
+        ]
+      : [
+          { brand, category: categoryHint, cls: clsHint },
+          { brand: null, category: categoryHint, cls: clsHint },
+          { brand: null, category: null, cls: clsHint },
+        ];
+
+  for (let i = 0; i < scopes.length && lines.length < limit; i += 1) {
+    const scope = scopes[i];
+    if (scope.brand === null && scope.category === null && scope.cls === null) continue;
+    const items = collectScopeItems(scope);
+    const picked = pickAlternativesFromItems(items, { size, cls: scope.cls || null, limit });
+    for (let j = 0; j < picked.length && lines.length < limit; j += 1) {
+      const it = picked[j];
+      const key = `${normMatch(it.brand || "")}|${normMatch((it.offer && it.offer.model) || (it.offer && it.offer.name) || "")}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      lines.push(formatOfferLine(it.brand, it.offer));
+      offers.push({ brand: it.brand, model: (it.offer && it.offer.model) || "" });
+    }
+  }
+
+  return { lines, offers };
+}
+
+async function lookupWebsiteModel(textModel, brandHint) {
+  const modelNorm = normMatch(textModel || "");
+  if (!modelNorm) return { searchCompleted: true, modelMatched: false, searchEmpty: true, noProductsFound: false };
+
+  const perPage = CFG.wcPerPage;
+  const status = CFG.wcStatus;
+  const maxPages = 3;
+  const fetchJson = wcFetchJsonOverride || wcFetchJson;
+  const brandNorm = normMatch(brandHint || "");
+  const out = {
+    searchCompleted: true,
+    modelMatched: false,
+    searchEmpty: false,
+    noProductsFound: false,
+    productJson: null,
+    productUrl: null,
+    productPageStatus: null,
+    productPageHtml: "",
+  };
+
+  for (let page = 1; page <= maxPages; page += 1) {
+    const url = buildWooUrl("/wp-json/wc/v3/products", { per_page: perPage, page, status });
+    const arr = await fetchJson(url);
+    if (!Array.isArray(arr)) {
+      const msg = (arr && (arr.message || arr.error)) || "";
+      if (String(msg).includes("No products found")) out.noProductsFound = true;
+      return out;
+    }
+    if (arr.length === 0) {
+      out.searchEmpty = true;
+      break;
+    }
+
+    for (let i = 0; i < arr.length; i += 1) {
+      const p = arr[i];
+      if (!p) continue;
+      const sku = String((p && p.sku) || "").trim();
+      const name = String((p && p.name) || "").trim();
+      const searchText = normMatch(`${sku} ${name}`);
+      if (!searchText || searchText.indexOf(modelNorm) < 0) continue;
+      const brand = (getBrandFromWoo(p) || "").toUpperCase();
+      if (brandNorm && normMatch(brand) !== brandNorm) continue;
+      out.modelMatched = true;
+      out.productJson = p;
+      out.productUrl = String((p && p.permalink) || "").trim() || null;
+      break;
+    }
+    if (out.modelMatched) break;
+  }
+
+  if (out.productUrl) {
+    try {
+      const fetchImpl = getFetch();
+      const resp = await fetchImpl(out.productUrl, { method: "GET" });
+      out.productPageStatus = resp && typeof resp.status === "number" ? resp.status : null;
+      out.productPageHtml = (await resp.text().catch(() => "")) || "";
+    } catch (err) {
+      out.productPageStatus = out.productPageStatus || null;
+      out.productPageHtml = out.productPageHtml || "";
+      debugLog("product_page_fetch_failed", { error: (err && err.message) || String(err) });
+    }
+  }
+
+  return out;
+}
+
 function salesIntro(lang, ctx) {
   const L = lang || "dzl";
   const c = ctx || {};
@@ -6520,6 +6763,26 @@ function findOfferByBrandModel(brand, model) {
   const arr = ((OFFERS && OFFERS.offers && OFFERS.offers[b]) || []);
   for (let i = 0; i < arr.length; i += 1) {
     if (normMatch(arr[i].model || "") === m) return arr[i];
+  }
+  return null;
+}
+
+function findOfferByModelCode(model, brandHint) {
+  const m = normMatch(model || "");
+  if (!m) return null;
+  if (brandHint) {
+    const offer = findOfferByBrandModel(brandHint, model);
+    if (offer) return { brand: String(brandHint || "").toUpperCase(), offer };
+  }
+  const brands = OFFERS_INDEX.brands || Object.keys((OFFERS && OFFERS.offers) || {});
+  for (let i = 0; i < brands.length; i += 1) {
+    const b = brands[i];
+    const arr = ((OFFERS && OFFERS.offers && OFFERS.offers[b]) || []);
+    for (let j = 0; j < arr.length; j += 1) {
+      const o = arr[j] || {};
+      const modelKey = normMatch(o.model || o.sku || o.name || "");
+      if (modelKey && modelKey === m) return { brand: b, offer: o };
+    }
   }
   return null;
 }
@@ -8865,6 +9128,66 @@ app.post("/wanotifier", express.raw({ type: "*/*", limit: "2mb" }), parseWanotif
       return res.json({ ok: true, reply: out });
     }
 
+    const modelCode = extractModelCode(userTextRaw);
+    const hasPriceOrInfoIntent = detectPriceIntent(userTextRaw) || hasProductInquirySignal(userTextRaw);
+    if (modelCode.model && hasPriceOrInfoIntent) {
+      const parsed = parseUserQuery(userTextRaw, { ctx: ctxData });
+      const requestedBrand = parsed.brand || (parsed.modelHit && parsed.modelHit.brand) || null;
+      const requestedSize = Number.isFinite(modelCode.size) ? modelCode.size : parsed.size || null;
+      const offerHit = findOfferByModelCode(modelCode.model, requestedBrand);
+      const offerInList = offerHit && offerHit.offer ? offerHit.offer : null;
+      const websiteLookup = await lookupWebsiteModel(modelCode.model, requestedBrand);
+      const availability = checkProductAvailability({
+        modelCodePresent: true,
+        knowledgeModel: detectProductModel(userTextRaw),
+        offerHit: offerInList,
+        searchCompleted: Boolean(websiteLookup && websiteLookup.searchCompleted),
+        modelMatched: Boolean(websiteLookup && websiteLookup.modelMatched),
+        searchEmpty: Boolean(websiteLookup && websiteLookup.searchEmpty),
+        searchNoProductsFound: Boolean(websiteLookup && websiteLookup.noProductsFound),
+        productJson: websiteLookup && websiteLookup.productJson,
+        productPageStatus: websiteLookup && websiteLookup.productPageStatus,
+        productPageHtml: websiteLookup && websiteLookup.productPageHtml,
+      });
+
+      logger.info({
+        msg: "availability_check",
+        status: availability.status,
+        reason: availability.reason,
+        requestedModel: modelCode.model,
+        requestedBrand,
+        requestedSize,
+      });
+
+      if (availability.status === "out_of_stock" || availability.status === "not_found") {
+        const alternatives = collectOutOfStockAlternatives({
+          status: availability.status,
+          brand: requestedBrand,
+          size: requestedSize,
+          category: parsed.category || parsed.cls || null,
+          cls: parsed.cls || null,
+        });
+        const alternativesText = alternatives.lines.slice(0, 3).join("\n");
+        const reply = finalizeReply(
+          outOfStockTemplate(modelCode.model, requestedBrand, requestedSize, alternativesText),
+          900
+        );
+        console.log(
+          JSON.stringify({
+            level: "info",
+            msg: "out_of_stock_fallback",
+            requestedModel: modelCode.model,
+            requestedBrand,
+            requestedSize,
+            alternativesCount: alternatives.lines.length,
+          })
+        );
+        memory.push(key, "assistant", reply);
+        resetStrikes(key);
+        return res.json({ ok: true, reply });
+      }
+    }
+
     const directReply = tryDirectOfferAnswer(userTextRaw, history, lang, key);
     if (directReply) {
       const reply = finalizeReply(directReply, 520);
@@ -9008,6 +9331,7 @@ export {
   isNegotiationIntent,
   INITIAL_GREETING_TTL_MS,
   describeImage,
+  checkProductAvailability,
 };
 
 function runSelfTests() {
