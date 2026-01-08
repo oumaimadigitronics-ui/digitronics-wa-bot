@@ -1630,6 +1630,179 @@ const GREETING_TEMPLATE = [
   "🚚 Livraison: *1–7 jours*  |  💳 *Paiement à la livraison*"
 ].join("\n");
 
+const DELIVERY_TEMPLATE = [
+  "╭──────────────────────────────╮",
+  "│   🚚 *Livraison Premium*   │",
+  "╰──────────────────────────────╯",
+  "",
+  "🇫🇷 Livraison nationale au Maroc, rapide et fiable.",
+  "🇲🇦 توصيل فالمغرب كامل، سريع وموثوق.",
+  "",
+  "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
+  "✅ Délais: *24–72h* selon la ville",
+  "✅ Emballage sécurisé et protégé",
+  "✅ Frais de livraison selon *ville + حجم*",
+  "✅ Confirmation + suivi après validation",
+  "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
+  "",
+  "✨ Service premium, sérénité garantie."
+].join("\n");
+
+const PAYMENT_TEMPLATE = [
+  "╭──────────────────────────────╮",
+  "│   💳 *Paiement Premium*   │",
+  "╰──────────────────────────────╯",
+  "",
+  "🇫🇷 Paiement clair, sécurisé et professionnel.",
+  "🇲🇦 الأداء واضح، آمن واحترافي.",
+  "",
+  "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
+  "✅ *Paiement à la livraison* (Cash on Delivery)",
+  "✅ *Virement bancaire* (Bank transfer)",
+  "✅ Traitement sécurisé des paiements",
+  "✅ Processus pro et suivi avec rigueur",
+  "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
+  "",
+  "✨ Fiabilité premium, tranquillité assurée."
+].join("\n");
+
+const WARRANTY_TEMPLATE = [
+  "╭──────────────────────────────╮",
+  "│   🛡️ *Garantie Premium*   │",
+  "╰──────────────────────────────╯",
+  "",
+  "🇫🇷 Produits 100% originaux, sélectionnés avec soin.",
+  "🇲🇦 منتجات أصلية 100%، مختارة بعناية.",
+  "",
+  "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
+  "✅ Garantie officielle حسب الماركة",
+  "✅ Couvre les défauts de fabrication selon شروط العلامة",
+  "✅ Facture fournie avec chaque achat",
+  "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
+  "",
+  "✨ Qualité premium, confiance assurée."
+].join("\n");
+
+const CONTACT_TEMPLATE = [
+  "╭──────────────────────────────╮",
+  "│   ☎️ *Contact Premium*   │",
+  "╰──────────────────────────────╯",
+  "",
+  "🇫🇷 Nos coordonnées officielles, claires et fiables.",
+  "🇲🇦 معلومات التواصل الرسمية، واضحة وموثوقة.",
+  "",
+  "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
+  "📞 WhatsApp: {PHONE}",
+  "📧 Email: {EMAIL}",
+  "📍 Adresse: {ADDRESS}",
+  "🕒 Horaires: {HOURS}",
+  "🗺️ Maps: {MAP_LINK}",
+  "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
+  "",
+  "🇫🇷 ✨ Service client disponible avant et après achat.",
+  "🇲🇦 ✨ خدمة الزبناء متوفرة قبل و بعد الشراء."
+].join("\n");
+
+const ESCALATION_TEMPLATE = [
+  "╭──────────────────────────────╮",
+  "│   🛟 *Assistance Prioritaire*   │",
+  "╰──────────────────────────────╯",
+  "",
+  "🇫🇷 Nous comprenons votre insatisfaction.",
+  "🇲🇦 كنقدّرو عدم الرضا ديالك.",
+  "",
+  "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
+  "🙏 Nous vous présentons nos excuses.",
+  "🚨 Traitement prioritaire immédiat",
+  "✅ Escalade vers le support en cours",
+  "🔍 Vérification en progression",
+  "🤝 Suivi jusqu’à résolution complète",
+  "🙏 Merci pour votre patience",
+  "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+].join("\n");
+
+function getInfoTemplate(type, lang, vars) {
+  const templates = {
+    contact: CONTACT_TEMPLATE,
+    delivery: DELIVERY_TEMPLATE,
+    payment: PAYMENT_TEMPLATE,
+    warranty: WARRANTY_TEMPLATE,
+  };
+
+  const template = templates[type];
+  if (!template) return null;
+  if (type !== "contact") return template;
+
+  const values = vars && typeof vars === "object" ? vars : {};
+  return template
+    .replaceAll("{PHONE}", values.PHONE ?? "{PHONE}")
+    .replaceAll("{EMAIL}", values.EMAIL ?? "{EMAIL}")
+    .replaceAll("{ADDRESS}", values.ADDRESS ?? "{ADDRESS}")
+    .replaceAll("{HOURS}", values.HOURS ?? "{HOURS}")
+    .replaceAll("{MAP_LINK}", values.MAP_LINK ?? "{MAP_LINK}");
+}
+
+function routeInfoTemplate(userTextRaw, lang) {
+  const text = String(userTextRaw || "");
+  if (isContactTemplateIntent(text)) {
+    return getInfoTemplate("contact", lang, {
+      PHONE: "+2126XXXXXXX",
+      EMAIL: "contact@tenten.ma",
+      ADDRESS: "Casablanca, Maroc",
+      HOURS: "Lun–Sam 10:00–19:00",
+      MAP_LINK: "https://maps.google.com/?q=...",
+    });
+  }
+  if (hasDeliveryIntent(text)) return getInfoTemplate("delivery", lang);
+  if (hasPaymentIntent(text)) return getInfoTemplate("payment", lang);
+  if (hasWarrantyIntent(text)) return getInfoTemplate("warranty", lang);
+  return null;
+}
+
+function hasDeliveryIntent(text) {
+  const s = String(text || "").trim().toLowerCase();
+  if (!s) return false;
+  return [
+    "delivery",
+    "livraison",
+    "shipping",
+    "ship",
+    "transport",
+    "livraison maroc",
+    "توصيل",
+  ].some((term) => s.includes(term));
+}
+
+function hasPaymentIntent(text) {
+  const s = String(text || "").trim().toLowerCase();
+  if (!s) return false;
+  return [
+    "payment",
+    "paiement",
+    "pay",
+    "cod",
+    "cash on delivery",
+    "virement",
+    "bank transfer",
+    "تحويل",
+    "دفع",
+  ].some((term) => s.includes(term));
+}
+
+function hasWarrantyIntent(text) {
+  const s = String(text || "").trim().toLowerCase();
+  if (!s) return false;
+  return [
+    "warranty",
+    "garantie",
+    "ضمان",
+    "sav",
+    "exchange",
+    "defect",
+    "remplacement",
+  ].some((term) => s.includes(term));
+}
+
 
 function resetStrikes(key) {
   fallbackStrikeStore.delete(String(key || ""));
