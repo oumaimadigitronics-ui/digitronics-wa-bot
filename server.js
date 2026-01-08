@@ -2682,6 +2682,17 @@ function isGreetingLikeOpener(text) {
   return false;
 }
 
+function isForcedGreeting(text) {
+  const raw = String(text || "");
+  const s = normMatch(raw);
+  if (!s) return false;
+  if (hasArabicScript(raw) && (/مرحب/.test(s) || /سلام/.test(s) || /كيفاش/.test(s) || /اهلا/.test(s))) return true;
+  if (/(^|\s)(bonjour|salut|hello|hi|hey)/i.test(raw)) return true;
+  if (/(^|\s)(salam|salem|selam|slm)(\s|$)/i.test(raw)) return true;
+  if (/kifach n3awnk/i.test(raw)) return true;
+  return false;
+}
+
 function maybeSendInitialGreeting({ key, lang }) {
   const k = String(key || "");
   const ctx = getCtx(k);
@@ -8069,21 +8080,21 @@ app.post("/wanotifier", express.raw({ type: "*/*", limit: "2mb" }), parseWanotif
       return res.status(429).json({ ok: false, error: "Rate limit exceeded" });
     }
 
-    if (!offersAvailable) {
-      const reply = finalizeReply(t(lang, "cannot3"), 420);
-      console.error(JSON.stringify({ level: "error", msg: "offers_unavailable", lastOffersSync }));
-      memory.push(key, "assistant", reply);
-      return res.json({ ok: true, reply });
-    }
-
     memory.push(key, "user", userTextRaw);
     const history = memory.get(key);
     const ctxData = getCtx(key);
 
-    if ((isBuyIntent(userTextRaw) || hasQuantitySignal(userTextRaw)) && !isExplicitOrderStatusQuery(userTextRaw)) {
+    if (isBuyIntent(userTextRaw) && !isExplicitOrderStatusQuery(userTextRaw)) {
       const reply = finalizeReply(BUY_INTENT_TEMPLATE.replace("{ORDER_LINK}", ORDER_FORM_URL), 520);
       memory.push(key, "assistant", reply);
       resetStrikes(key);
+      return res.json({ ok: true, reply });
+    }
+
+    if (!offersAvailable) {
+      const reply = finalizeReply(t(lang, "cannot3"), 420);
+      console.error(JSON.stringify({ level: "error", msg: "offers_unavailable", lastOffersSync }));
+      memory.push(key, "assistant", reply);
       return res.json({ ok: true, reply });
     }
 
@@ -8107,7 +8118,12 @@ app.post("/wanotifier", express.raw({ type: "*/*", limit: "2mb" }), parseWanotif
       return res.json({ ok: true, reply });
     }
 
-    const greetingReply = isBuyIntent(userTextRaw) ? null : handleGreetingMessage({ key, lang, text: userTextRaw });
+    const forcedGreeting = isForcedGreeting(userTextRaw) && !isBuyIntent(userTextRaw);
+    const greetingReply = forcedGreeting
+      ? maybeSendInitialGreeting({ key, lang })
+      : isBuyIntent(userTextRaw)
+        ? null
+        : handleGreetingMessage({ key, lang, text: userTextRaw });
     if (greetingReply) {
       const reply = finalizeReply(greetingReply, 520);
       memory.push(key, "assistant", reply);
