@@ -1,6 +1,11 @@
 import { isBuyIntent, hasQuantitySignal, routeTemplate, BUY_INTENT_TEMPLATE, ORDER_FORM_URL } from "../server.js";
 
 const tests = [
+  { text: "أريد الشراء", expectedBuy: true, expectedTemplate: "BUY_INTENT_TEMPLATE" },
+  { text: "بغيت نشري", expectedBuy: true, expectedTemplate: "BUY_INTENT_TEMPLATE" },
+  { text: "commander", expectedBuy: true, expectedTemplate: "BUY_INTENT_TEMPLATE" },
+  { text: "I want to buy", expectedBuy: true, expectedTemplate: "BUY_INTENT_TEMPLATE" },
+  { text: "order now", expectedBuy: true, expectedTemplate: "BUY_INTENT_TEMPLATE" },
   { text: "je commande", expectedBuy: true, expectedTemplate: "BUY_INTENT_TEMPLATE" },
   { text: "je le prends", expectedBuy: true, expectedTemplate: "BUY_INTENT_TEMPLATE" },
   { text: "acheter", expectedBuy: true, expectedTemplate: "BUY_INTENT_TEMPLATE" },
@@ -135,11 +140,15 @@ function runTest(test, index) {
       details += `${details ? "; " : ""}routeTemplate unexpectedly included BUY_INTENT_TEMPLATE`;
     }
     if (buyDetected) {
-      const hasPlaceholder = BUY_INTENT_TEMPLATE.includes("{ORDER_LINK}");
-      const hasOrderUrl = outputStr.includes(ORDER_FORM_URL);
-      if (!hasPlaceholder && !hasOrderUrl) {
+      const headerLine = BUY_INTENT_TEMPLATE.split("\n")[0];
+      const finalized = BUY_INTENT_TEMPLATE.replace("{ORDER_LINK}", ORDER_FORM_URL);
+      if (!finalized.includes(ORDER_FORM_URL)) {
         ok = false;
-        details += `${details ? "; " : ""}missing order link placeholder or ORDER_FORM_URL`;
+        details += `${details ? "; " : ""}missing ORDER_FORM_URL`;
+      }
+      if (!finalized.includes(headerLine)) {
+        ok = false;
+        details += `${details ? "; " : ""}missing BUY_INTENT_TEMPLATE header box`;
       }
     }
   }
