@@ -1904,6 +1904,28 @@ const PRODUCT_COMPARE_TEMPLATE = (a, b) => {
   ].join("\n");
 };
 
+const BRAND_COMPARE_TEMPLATE = (a, b) => {
+  const left = a || "Option A";
+  const right = b || "Option B";
+  return [
+    "╭──────────────╮",
+    "│   ⚖️ *Comparatif Premium*   │",
+    "╰──────────────╯",
+    "",
+    `🇫🇷 Marques: *${left}* vs *${right}*.`,
+    `🇲🇦 الماركات: *${left}* ضد *${right}*.`,
+    "",
+    "━━━━━━━━━━━━━━",
+    "✅ Différences typiques:",
+    "• Garantie & SAV",
+    "• Qualité de fabrication",
+    "• Système/OS",
+    "• Qualité dalle/image",
+    "• Disponibilité pièces & service بعد البيع",
+    "━━━━━━━━━━━━━━",
+  ].join("\n");
+};
+
 const TECH_EXPLAIN_TEMPLATE = (topic) => {
   if (topic === "google_vs_android") {
     return [
@@ -2031,42 +2053,39 @@ function hasAnyPhrase(text, phrases) {
 function isProductAdviceIntent(text) {
   const s = normMatch(arabicIndicToAsciiDigits(text)).toLowerCase();
   if (!s) return false;
+  const normalized = s.replace(/[’']/g, " ").replace(/\s+/g, " ").trim();
 
-  const priceTokens = ["price", "prix", "thمن", "ثمن", "سعر", "combien"];
-  const adviceTokens = [
-    "good",
-    "best",
-    "better",
-    "worth",
-    "quality",
-    "recommend",
+  const priceTokens = ["price", "prix", "ثمن", "سعر"];
+  const advicePhrases = [
+    "difference",
+    "différence",
     "compare",
-    "vs",
-    "which better",
-    "bon",
-    "meilleur",
-    "mieux",
-    "qualite",
-    "qualité",
-    "ca vaut",
-    "ça vaut",
     "comparaison",
-    "zwine",
-    "mzyan",
-    "زين",
-    "زوين",
-    "مزيان",
-    "أحسن",
-    "احسن",
-    "الفرق",
-    "ولا",
+    "which one",
+    "c est quoi le mieux",
+    "c'est quoi le mieux",
     "شنو احسن",
     "شنو أحسن",
-    "واش زوين",
+  ];
+  const adviceTokens = [
+    "better",
+    "best",
+    "mieux",
+    "meilleur",
+    "vs",
+    "الفرق",
+    "فرق",
+    "مقارنة",
+    "أحسن",
+    "احسن",
+    "ولا",
+    "مزيان",
   ];
 
-  const hasAdvice = adviceTokens.some((token) => includesToken(s, token));
-  const hasPrice = priceTokens.some((token) => includesToken(s, token));
+  const hasAdvice =
+    advicePhrases.some((phrase) => normalized.includes(normMatch(phrase))) ||
+    adviceTokens.some((token) => includesToken(normalized, token));
+  const hasPrice = priceTokens.some((token) => includesToken(normalized, token));
   if (hasPrice && !hasAdvice) return false;
   return hasAdvice;
 }
@@ -2255,6 +2274,15 @@ function extractCompareParts(text) {
   return [null, null];
 }
 
+function extractDifferenceBetweenParts(text) {
+  const raw = String(text || "");
+  const match = raw.match(/(?:الفرق|فرق)\s+بين\s+(.+?)\s+و\s+(.+)/i);
+  if (!match) return [null, null];
+  const left = match[1].replace(/[؟?!.،]+/g, " ").trim().slice(0, 40);
+  const right = match[2].replace(/[؟?!.،]+/g, " ").trim().slice(0, 40);
+  return [left || null, right || null];
+}
+
 function resolveAdvice(text, ctxData) {
   const raw = String(text || "");
   const s = normMatch(arabicIndicToAsciiDigits(raw)).toLowerCase();
@@ -2304,7 +2332,17 @@ function resolveAdvice(text, ctxData) {
     });
   }
 
-  if (s.includes("vs") || s.includes("ولا") || s.includes("ou") || s.includes(" or ")) {
+  const [diffLeft, diffRight] = extractDifferenceBetweenParts(raw);
+  if (diffLeft && diffRight) {
+    return BRAND_COMPARE_TEMPLATE(diffLeft, diffRight);
+  }
+
+  if (s.includes("ولا")) {
+    const [left, right] = extractCompareParts(raw);
+    if (left && right) return BRAND_COMPARE_TEMPLATE(left, right);
+  }
+
+  if (s.includes("vs") || s.includes("ou") || s.includes(" or ")) {
     const [left, right] = extractCompareParts(raw);
     return PRODUCT_COMPARE_TEMPLATE(left, right);
   }
@@ -2859,6 +2897,7 @@ function routeTemplate(text) {
   if (isAngryIntent(text)) return ESCALATION_TEMPLATE;
   if (isConfusedIntent(text)) return CLARITY_TEMPLATE;
   if (isSupportIntent(text)) return SUPPORT_TEMPLATE;
+  if (isProductAdviceIntent(text)) return resolveAdvice(text, {});
 
   const templates = [];
   if (isBuyIntent(text) || hasQuantitySignal(text)) templates.push(BUY_INTENT_TEMPLATE);
@@ -6526,7 +6565,12 @@ function isBuyIntent(raw) {
     "cart",
     "place an order",
     "order now",
-    "بغيت",
+    "بغيت نشري",
+    "بغيت نطلب",
+    "بغيت ندي",
+    "بغيت ناخد",
+    "بغيت نكوموندي",
+    "بغيت نأكد الطلب",
     "ندي",
     "ناخد",
     "نطلب",
@@ -6535,6 +6579,8 @@ function isBuyIntent(raw) {
     "نأكد الطلب",
     "تأكيد الطلب",
     "أريد الشراء",
+    "أريد طلب",
+    "بدي اشتري",
     "طلب",
   ];
 
@@ -8315,13 +8361,6 @@ app.post("/wanotifier", express.raw({ type: "*/*", limit: "2mb" }), parseWanotif
     const knowledgeCategory = detectCategoryKnowledge(userTextRaw);
     const knowledgeProduct = detectProductModel(userTextRaw);
 
-    if (isBuyIntent(userTextRaw) && !isExplicitOrderStatusQuery(userTextRaw)) {
-      const reply = finalizeReply(BUY_INTENT_TEMPLATE.replace("{ORDER_LINK}", ORDER_FORM_URL), 520);
-      memory.push(key, "assistant", reply);
-      resetStrikes(key);
-      return res.json({ ok: true, reply });
-    }
-
     if (isProductAdviceIntent(userTextRaw)) {
       const adviceCtx = knowledgeProduct
         ? {
@@ -8332,6 +8371,13 @@ app.post("/wanotifier", express.raw({ type: "*/*", limit: "2mb" }), parseWanotif
           }
         : ctxData;
       const reply = finalizeReply(resolveAdvice(userTextRaw, adviceCtx), 650);
+      memory.push(key, "assistant", reply);
+      resetStrikes(key);
+      return res.json({ ok: true, reply });
+    }
+
+    if (isBuyIntent(userTextRaw) && !isExplicitOrderStatusQuery(userTextRaw)) {
+      const reply = finalizeReply(BUY_INTENT_TEMPLATE.replace("{ORDER_LINK}", ORDER_FORM_URL), 520);
       memory.push(key, "assistant", reply);
       resetStrikes(key);
       return res.json({ ok: true, reply });
@@ -8779,6 +8825,7 @@ export {
   isConfusedIntent,
   isSupportIntent,
   isBuyIntent,
+  isProductAdviceIntent,
   hasQuantitySignal,
   routeTemplate,
   CONTACT_TEMPLATE,
