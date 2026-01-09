@@ -228,15 +228,26 @@ const VOICE_NOT_UNDERSTOOD_TEMPLATE = `╭────────────�
 ✅ Envoyez-le مرة أخرى بصوت واضح أو كتب ليا الرسالة.
 🔒 Service pro — réponse rapide.`;
 
-const OFFERS_FALLBACK_ITEMS = [
-  { brand: "SAMSUNG", offer: { name: 'Samsung Smart TV HD 32" One UI Tizen (32H5000F)', price: 1499 } },
-  { brand: "DAIKO", offer: { name: 'Daiko Google TV 32" Smart Silver Frameless FHD (GLED32AI93DK)', price: 1199 } },
-  { brand: "TCL", offer: { name: 'TCL GoogleTV QLED 32" Full HD (32S5K)', price: 1499 } },
-];
+const OFFERS_FALLBACK_MESSAGE = `🔥 *NOUVELLES OFFRES* 📢 عروض اليوم 🔥
+(Stock limité – حتى يكمّل الستوك)
 
-function offersFallbackMessage(lang) {
-  const title = "🔥 Offres premium";
-  return buildPremiumOffersReply({ title, entries: OFFERS_FALLBACK_ITEMS, lang, maxChars: CFG.maxReplyChars });
+1) *Samsung TV HD 32" (32H5000F)*
+✅ 1499 DH 🎁 سبورة هدية + 🚛 توصيل مجاني
+2) *Echolink TV QLED 32" (Q32WM)*
+✅ 1199 DH 🎁 سبورة هدية + 🚛 توصيل مجاني
+3) *Morsat TV HD 32"*
+✅ 1120 DH 🎁 سبورة هدية + 🚛 توصيل مجاني
+4) *Morsat TV 43"*
+✅ 1999 DH 🎁 سبورة هدية + 🚛 توصيل مجاني
+5) *TCL 32" QLED 32S5K*
+✅ 1499 DH 🎁 سبورة هدية + 🚛 توصيل مجاني
+6) *TCL 43" P7K QLED 4K*
+✅ 3389 DH 🎁 عام ديال الاشتراك + سبورة هدية + 🚛 توصيل مجاني
+
+📝 Commande/طلب: digitronics.ma`;
+
+function offersFallbackMessage() {
+  return OFFERS_FALLBACK_MESSAGE;
 }
 
 const BRAND_KNOWLEDGE_PATH = path.join(process.cwd(), "data", "brand_knowledge.json");
