@@ -43,6 +43,7 @@ const FEATURE_STRICT_CATEGORY_SWITCH = String(process.env.FEATURE_STRICT_CATEGOR
 const FEATURE_OFFER_TAIL_COMPACT = String(process.env.FEATURE_OFFER_TAIL_COMPACT || "0") === "1";
 const FEATURE_STRICT_STOCK_FILTER = String(process.env.FEATURE_STRICT_STOCK_FILTER || "0") === "1";
 const FEATURE_SHOW_SKU_IN_OFFERS = String(process.env.FEATURE_SHOW_SKU_IN_OFFERS || "0") === "1";
+const FEATURE_LEGACY_OFFER_LINE = String(process.env.FEATURE_LEGACY_OFFER_LINE || "0") === "1";
 const FEATURE_OFFER_ITEM_EMOJI_FORMAT = String(process.env.FEATURE_OFFER_ITEM_EMOJI_FORMAT || "0") === "1";
 const IS_TEST = String(process.env.NODE_ENV || "").toLowerCase() === "test";
 const ENTRY_FILE = fileURLToPath(import.meta.url);
@@ -4687,34 +4688,45 @@ function buildPremiumOffersReply({ title, entries, lang, maxChars }) {
 // RULE #1 no questions
 // Offer message format: simple name + price
 function formatOfferLine(brand, o, opts = {}) {
-  if (FEATURE_SHOW_SKU_IN_OFFERS) {
-    const offer = o || {};
-    const brandName = String(brand || "").trim();
-    const nameRaw = String(offer.name || "").trim();
-    const modelRaw = String(offer.model || "").trim();
-    const skuRaw = String(offer.sku || "").trim();
-    let displayName = nameRaw;
-    if (!displayName) {
-      displayName = [brandName, modelRaw || skuRaw].filter(Boolean).join(" ").trim();
+  if (FEATURE_LEGACY_OFFER_LINE) {
+    if (FEATURE_SHOW_SKU_IN_OFFERS) {
+      const offer = o || {};
+      const brandName = String(brand || "").trim();
+      const nameRaw = String(offer.name || "").trim();
+      const modelRaw = String(offer.model || "").trim();
+      const skuRaw = String(offer.sku || "").trim();
+      let displayName = nameRaw;
+      if (!displayName) {
+        displayName = [brandName, modelRaw || skuRaw].filter(Boolean).join(" ").trim();
+      }
+      if (!displayName) displayName = brandName || modelRaw || skuRaw || "";
+      const displayNorm = normMatch(displayName);
+      if (skuRaw && !displayNorm.includes(normMatch(skuRaw))) {
+        displayName = `${displayName} (SKU: ${skuRaw})`.trim();
+      } else if (modelRaw && !displayNorm.includes(normMatch(modelRaw))) {
+        displayName = `${displayName} (${modelRaw})`.trim();
+      }
+      const pricePart = offerPriceText(offer);
+      return `• ${displayName} - **${pricePart}**`.trim();
     }
-    if (!displayName) displayName = brandName || modelRaw || skuRaw || "";
-    const displayNorm = normMatch(displayName);
-    if (skuRaw && !displayNorm.includes(normMatch(skuRaw))) {
-      displayName = `${displayName} (SKU: ${skuRaw})`.trim();
-    } else if (modelRaw && !displayNorm.includes(normMatch(modelRaw))) {
-      displayName = `${displayName} (${modelRaw})`.trim();
+
+    let displayName = buildOfferDisplayName(brand, o, opts.lang || "dzl");
+    const typeName = String((o && o.type) || "").trim();
+    if (typeName && !normMatch(displayName).includes(normMatch(typeName))) {
+      displayName = `${displayName} ${typeName}`.trim();
     }
-    const pricePart = offerPriceText(offer);
+    displayName = displayName.replace(/\s+simple\s+/gi, " ").replace(/\s+simple$/i, "").trim();
+    const pricePart = offerPriceText(o || {});
     return `• ${displayName} - **${pricePart}**`.trim();
   }
 
-  let displayName = buildOfferDisplayName(brand, o, opts.lang || "dzl");
-  const typeName = String((o && o.type) || "").trim();
-  if (typeName && !normMatch(displayName).includes(normMatch(typeName))) {
-    displayName = `${displayName} ${typeName}`.trim();
+  const offer = o || {};
+  let displayName = String(offer.name || "").trim();
+  if (!displayName) {
+    displayName = buildOfferDisplayName(brand, offer, opts.lang || "dzl");
   }
   displayName = displayName.replace(/\s+simple\s+/gi, " ").replace(/\s+simple$/i, "").trim();
-  const pricePart = offerPriceText(o || {});
+  const pricePart = offerPriceText(offer);
   return `• ${displayName} - **${pricePart}**`.trim();
 }
 

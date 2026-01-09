@@ -382,8 +382,7 @@ test("findOfferFromLinks matches sanitized permalink", () => {
   assert.strictEqual(hit.offer.model, "MX-50");
 });
 
-// Fix: always respect catalog type
-test("formatOfferLine preserves catalog TV type", () => {
+test("formatOfferLine omits catalog TV type when legacy flag is off", () => {
   const product = {
     name: 'HAIER H50K800UX 50"',
     sku: "H50K800UX",
@@ -398,8 +397,8 @@ test("formatOfferLine preserves catalog TV type", () => {
   const offer = offerFromWooProduct(product);
   const line = formatOfferLine("HAIER", offer);
 
-  assert.ok(line.includes("Google TV"));
   assert.ok(!line.includes("Android TV"));
+  assert.ok(!line.includes("Google TV"));
 });
 
 test("tv knowledge is included for size-only queries", () => {
