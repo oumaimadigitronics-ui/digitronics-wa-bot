@@ -30,6 +30,11 @@ Debugging:
 Feature flags (set in Render environment variables when needed):
 - `FEATURE_STRICT_CATEGORY_SWITCH`: set to `1` to reset TV context when an explicit appliance category is detected
 - `FEATURE_OFFER_TAIL_COMPACT`: set to `1` to use a shorter offers footer for fitting more items
+- `FEATURE_STRICT_STOCK_FILTER`: set to `1` to remove out-of-stock offers before ranking
+- `FEATURE_SHOW_SKU_IN_OFFERS`: set to `1` to include SKU/model in offer lines
+
+Render configuration:
+- In the Render dashboard, open your service, go to **Environment**, and add/update the env vars above (for example `FEATURE_STRICT_STOCK_FILTER=1`).
 
 ## Audio pipeline
 See `docs/audio-pipeline.md` for a detailed walkthrough of the audio processing flow, chunking, quality checks, and logging.
