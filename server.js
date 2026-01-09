@@ -1747,9 +1747,9 @@ const GREETING_TEMPLATE = [
 ].join("\n");
 
 const BUY_INTENT_TEMPLATE = [
-  "╭──────────────────────────────╮",
+  "╭───────────────╮",
   "│   🛒 *Achat Premium*   │",
-  "╰──────────────────────────────╯",
+  "╰───────────────╯",
   "",
   "🇫🇷 Achat rapide et sécurisé en 1 clic.",
   "🇲🇦 شري سريع وآمن فـ ضغطة وحدة.",
