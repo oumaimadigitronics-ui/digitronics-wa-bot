@@ -25,9 +25,11 @@ import {
   setAudioDownloaderForTest,
   setAudioTranscriberForTest,
   setAudioConverterForTest,
+  setFeatureAudioSniffMimeForTest,
   setWcFetchJsonForTest,
   isAudioMime,
   isAudioMeta,
+  sniffAudioMime,
   extFromAudioMime,
   stripQuestions,
   tryDirectOfferAnswer,
@@ -62,6 +64,7 @@ import {
   buildProductDetailsReply,
   wantsProductDetails,
   parseSelectedOptionNumber,
+  transcribeAudioFile,
 } from "../server.js";
 import { setDepsForTests } from "../src/deps.js";
 
@@ -142,6 +145,7 @@ afterEach(() => {
   setAudioDownloaderForTest(null);
   setAudioTranscriberForTest(null);
   setAudioConverterForTest(null);
+  setFeatureAudioSniffMimeForTest(false);
   setWcFetchJsonForTest(null);
   setDepsForTests({});
   setSystemPromptForTest("");
@@ -885,6 +889,47 @@ test("audio mime helpers map extensions", () => {
   assert.strictEqual(extFromAudioMime("audio/aac"), ".m4a");
   assert.strictEqual(extFromAudioMime("audio/mpeg"), ".mp3");
   assert.strictEqual(extFromAudioMime("unknown/type"), ".mp3");
+});
+
+test("sniffAudioMime detects common formats", () => {
+  const oggBuf = Buffer.from("OggS");
+  const wavBuf = Buffer.concat([Buffer.from("RIFF"), Buffer.alloc(4), Buffer.from("WAVE")]);
+  const mp4Buf = Buffer.from([0x00, 0x00, 0x00, 0x18, 0x66, 0x74, 0x79, 0x70]);
+
+  assert.strictEqual(sniffAudioMime(oggBuf), "audio/ogg");
+  assert.strictEqual(sniffAudioMime(wavBuf), "audio/wav");
+  assert.strictEqual(sniffAudioMime(mp4Buf), "audio/mp4");
+});
+
+test("audio mime sniffing overrides .mp3 extension when enabled", async () => {
+  setFeatureAudioSniffMimeForTest(true);
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "audio-sniff-test-"));
+  const tmpFile = path.join(dir, "voice.mp3");
+  fs.writeFileSync(tmpFile, Buffer.from("OggS"));
+  let seenFile = null;
+
+  setDepsForTests({
+    openai: {
+      audio: {
+        transcriptions: {
+          create: async ({ file }) => {
+            seenFile = file;
+            return { text: "ok" };
+          },
+        },
+      },
+    },
+  });
+
+  const result = await transcribeAudioFile(tmpFile, "", "fr");
+  assert.strictEqual(result, "ok");
+  assert.ok(seenFile);
+  assert.ok(seenFile.name.endsWith(".ogg"));
+  assert.strictEqual(seenFile.type, "audio/ogg");
+
+  try {
+    fs.rmSync(dir, { recursive: true, force: true });
+  } catch {}
 });
 
 test("extractMediaMetaFromBody handles audio", () => {
