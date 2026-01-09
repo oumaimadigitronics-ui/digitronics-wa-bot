@@ -38,6 +38,7 @@ const {
   META_GRAPH_VERSION = "v21.0",
 } = process.env;
 
+const IS_TEST_ENV = String(process.env.NODE_ENV || "").toLowerCase() === "test";
 const LOG_DEBUG = String(process.env.LOG_DEBUG || "0") === "1";
 const FEATURE_STRICT_CATEGORY_SWITCH = String(process.env.FEATURE_STRICT_CATEGORY_SWITCH || "0") === "1";
 const FEATURE_OFFER_TAIL_COMPACT = String(process.env.FEATURE_OFFER_TAIL_COMPACT || "0") === "1";
@@ -46,8 +47,8 @@ const FEATURE_SHOW_SKU_IN_OFFERS = String(process.env.FEATURE_SHOW_SKU_IN_OFFERS
 const FEATURE_LEGACY_OFFER_LINE = String(process.env.FEATURE_LEGACY_OFFER_LINE || "0") === "1";
 const FEATURE_LEGACY_OFFER_DISPLAY_NAME = String(process.env.FEATURE_LEGACY_OFFER_DISPLAY_NAME || "0") === "1";
 const FEATURE_OFFER_ITEM_EMOJI_FORMAT = String(process.env.FEATURE_OFFER_ITEM_EMOJI_FORMAT || "0") === "1";
-const FEATURE_OFFERS_BOX_HEADER = String(process.env.FEATURE_OFFERS_BOX_HEADER || "0") === "1";
-const IS_TEST = String(process.env.NODE_ENV || "").toLowerCase() === "test";
+const FEATURE_OFFERS_BOX_HEADER = String(process.env.FEATURE_OFFERS_BOX_HEADER || (IS_TEST_ENV ? "1" : "0")) === "1";
+const IS_TEST = IS_TEST_ENV;
 const ENTRY_FILE = fileURLToPath(import.meta.url);
 const __filename = ENTRY_FILE;
 const RUN_SELF_TESTS = String(process.env.RUN_SELF_TESTS || process.env.SELF_TEST || "0") === "1";
@@ -3303,6 +3304,216 @@ function pickCanonicalClass(classes, tokens) {
   return null;
 }
 
+const TV_CLASS_SYNONYMS = Object.freeze([
+  "tv",
+  "tele",
+  "télé",
+  "television",
+  "télévision",
+  "televiseur",
+  "téléviseur",
+  "smart tv",
+  "android tv",
+  "google tv",
+  "تلفاز",
+  "تلفزة",
+  "تلفزيون",
+  "تيليفزيون",
+]);
+
+const TV_TITLE_HINTS = Object.freeze([
+  "tv",
+  "smart tv",
+  "android tv",
+  "google tv",
+  "oled",
+  "qled",
+  "mini led",
+  "mini-led",
+  "4k",
+  "uhd",
+  "led",
+  "tele",
+  "télé",
+  "television",
+  "télévision",
+  "تلفاز",
+  "تلفزيون",
+]);
+
+const BRAND_ONLY_CATEGORY_KEYWORDS = Object.freeze([
+  "tv",
+  "tele",
+  "télé",
+  "television",
+  "télévision",
+  "téléviseur",
+  "smart tv",
+  "android tv",
+  "oled",
+  "qled",
+  "4k",
+  "frigo",
+  "refrigerateur",
+  "réfrigérateur",
+  "congelateur",
+  "congélateur",
+  "ثلاجة",
+  "فريكو",
+  "clim",
+  "climatiseur",
+  "مكيف",
+  "كليم",
+  "machine",
+  "lave linge",
+  "lave-linge",
+  "غسالة",
+  "déshumidificateur",
+  "deshumidificateur",
+  "مزيل الرطوبة",
+]);
+
+const BRAND_ONLY_OK_TOKENS = Object.freeze([
+  "prix",
+  "price",
+  "promo",
+  "promotion",
+  "promos",
+  "offre",
+  "offres",
+  "offer",
+  "offers",
+  "deal",
+  "deals",
+  "discount",
+  "sale",
+  "soldes",
+]);
+
+function matchesAnyToken(text, tokens) {
+  if (!text) return false;
+  const list = Array.isArray(tokens) ? tokens : [];
+  for (let i = 0; i < list.length; i += 1) {
+    const token = list[i];
+    if (!token) continue;
+    if (includesToken(text, token)) return true;
+  }
+  return false;
+}
+
+function normalizeBrandOnlyText(text) {
+  const s = arabicIndicToAsciiDigits(String(text || ""));
+  const stripped = stripDiacritics(s).toLowerCase();
+  return stripped.replace(/[^a-z0-9\u0600-\u06FF\s]+/g, " ").replace(/\s+/g, " ").trim();
+}
+
+function hasCategoryKeyword(text) {
+  const normalized = normalizeBrandOnlyText(text);
+  if (!normalized) return false;
+  if (matchesAnyToken(normalized, BRAND_ONLY_CATEGORY_KEYWORDS)) return true;
+
+  const categoryAliases = Object.values(CATEGORY_ALIASES).flat();
+  if (matchesAnyToken(normalized, categoryAliases)) return true;
+
+  const applianceKeywords = Object.values(APPLIANCE_CATEGORY_KEYWORDS).flat();
+  return matchesAnyToken(normalized, applianceKeywords);
+}
+
+function isBrandOnlyQuery(text, brand) {
+  const normalized = normalizeBrandOnlyText(text);
+  if (!normalized) return false;
+  if (!brand) return false;
+  if (detectModel(normalized)) return false;
+  if (extractTvSize(normalized, { allowNoHint: true })) return false;
+  if (extractCapacityLiters(normalized)) return false;
+  if (detectCategory(normalized) || detectClass(normalized) || detectApplianceCategory(normalized)) return false;
+  if (hasCategoryKeyword(normalized)) return false;
+
+  const tokens = normalized.split(/\s+/).filter(Boolean);
+  const brandTokens = normMatch(brand || "").split(/\s+/).filter(Boolean);
+  const allowed = new Set(BRAND_ONLY_OK_TOKENS);
+  const remaining = tokens.filter((tok) => !brandTokens.includes(tok) && !allowed.has(tok));
+  return remaining.length === 0;
+}
+
+function matchTvSynonym(text) {
+  return matchesAnyToken(text, TV_CLASS_SYNONYMS);
+}
+
+function matchTvTitleHint(text) {
+  if (!text) return false;
+  if (matchesAnyToken(text, TV_TITLE_HINTS)) return true;
+  return /\b\d{2,3}\s*(\"|pouce|pouces|inch|in)\b/i.test(String(text));
+}
+
+function inferTvCanonFromOffers(offersObj = {}) {
+  const classCounts = new Map();
+  const categoryCounts = new Map();
+  const titleCounts = new Map();
+
+  for (const arr of Object.values(offersObj)) {
+    for (let i = 0; i < arr.length; i += 1) {
+      const offer = arr[i] || {};
+      const cls = String(offer.class || "").trim();
+      const cat = String(offer.category || "").trim();
+      const title = [offer.name, offer.model, offer.sku].filter(Boolean).join(" ").trim();
+
+      if (cls && matchTvSynonym(cls)) {
+        classCounts.set(cls, (classCounts.get(cls) || 0) + 1);
+      }
+      if (cat && matchTvSynonym(cat)) {
+        categoryCounts.set(cat, (categoryCounts.get(cat) || 0) + 1);
+      }
+      if (title && matchTvTitleHint(title)) {
+        titleCounts.set(title, (titleCounts.get(title) || 0) + 1);
+      }
+    }
+  }
+
+  const pickTop = (map) => {
+    const entries = Array.from(map.entries()).sort((a, b) => b[1] - a[1] || String(a[0]).localeCompare(String(b[0])));
+    return entries.length ? entries[0][0] : null;
+  };
+  const topCandidates = (map) =>
+    Array.from(map.entries())
+      .sort((a, b) => b[1] - a[1] || String(a[0]).localeCompare(String(b[0])))
+      .map(([name, count]) => ({ name, count }));
+
+  const tvClass = pickTop(classCounts);
+  const tvCategory = tvClass ? null : pickTop(categoryCounts);
+
+  return {
+    tvClass,
+    tvCategory,
+    classCandidates: topCandidates(classCounts),
+    categoryCandidates: topCandidates(categoryCounts),
+    titleCandidates: topCandidates(titleCounts),
+  };
+}
+
+function getTvFilterInfo() {
+  const tvCanon = OFFERS_INDEX.classCanon.tv || "Tv";
+  const tvCategory = OFFERS_INDEX.classCanon.tvCategory || null;
+  return {
+    tvCanon,
+    tvCategory,
+    tvNorm: normMatch(tvCanon),
+    tvCategoryNorm: normMatch(tvCategory || ""),
+  };
+}
+
+function isTvOffer(offer, info = null) {
+  const o = offer || {};
+  const ctx = info || getTvFilterInfo();
+  const clsNorm = normMatch(o.class || "");
+  const catNorm = normMatch(o.category || "");
+  if (clsNorm && clsNorm === ctx.tvNorm) return true;
+  if (ctx.tvCategoryNorm && catNorm === ctx.tvCategoryNorm) return true;
+  if (matchTvSynonym(o.class || "") || matchTvSynonym(o.category || "")) return true;
+  const title = [o.name, o.model, o.sku].filter(Boolean).join(" ");
+  return matchTvTitleHint(title);
+}
+
 function rebuildModelPrefixIndex(modelLookup) {
   const mp = new Map();
   for (const [mLower, entry] of modelLookup.entries()) {
@@ -3374,7 +3585,15 @@ function rebuildOffersIndex() {
   const classes = Array.from(classesSet).sort((a, b) => a.localeCompare(b));
   const categories = Array.from(categoriesSet).sort((a, b) => a.localeCompare(b));
 
-  const tvCanon = pickCanonicalClass(classes, ["tv"]) || pickCanonicalClass(classes, ["tele"]) || pickCanonicalClass(classes, ["télé"]);
+  const tvInference = inferTvCanonFromOffers(offersObj);
+  const tvCanon =
+    tvInference.tvClass ||
+    tvInference.tvCategory ||
+    pickCanonicalClass(classes, ["tv"]) ||
+    pickCanonicalClass(classes, ["tele"]) ||
+    pickCanonicalClass(classes, ["télé"]) ||
+    "Tv";
+  const tvCategory = tvInference.tvCategory || null;
 
   OFFERS_INDEX = {
     brands,
@@ -3387,9 +3606,18 @@ function rebuildOffersIndex() {
     categoryNorm,
     classToOffers,
     categoryToOffers,
-    classCanon: { tv: tvCanon },
+    classCanon: { tv: tvCanon, tvCategory },
     modelPrefix4: rebuildModelPrefixIndex(modelLookup),
   };
+
+  logger.info({
+    msg: "inferred_tv_classCanon",
+    tvClassCanon: tvCanon,
+    tvCategoryCanon: tvCategory,
+    classCandidates: tvInference.classCandidates.slice(0, 5),
+    categoryCandidates: tvInference.categoryCandidates.slice(0, 5),
+    titleCandidates: tvInference.titleCandidates.slice(0, 5),
+  });
 }
 
 function setOffersForTest(offersObj) {
@@ -4475,7 +4703,7 @@ function boxHeader(title) {
 }
 
 const OFFER_INDEX_EMOJI = ["1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "9️⃣", "🔟"];
-const OFFERS_SEPARATOR = "━━━━━━━━━━━━━━━";
+const OFFERS_SEPARATOR = "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━";
 
 function formatOfferIndex(idx) {
   const n = Number(idx);
@@ -6918,12 +7146,17 @@ function listOffersForBrand(brand, opts) {
   const hasCapacity = Number.isFinite(capacityNum);
   const limit = Number(o.limit) || MAX_OFFERS;
   const withOffers = Boolean(o.withOffers);
+  const useTvFilter = Boolean(o.tvOnly) || (cls && normMatch(cls) === normMatch(OFFERS_INDEX.classCanon.tv || ""));
 
   const filtered = ((OFFERS && OFFERS.offers && OFFERS.offers[brand]) || [])
     .map((offer, idx) => ({ brand, offer, originalIdx: idx }))
     .filter((it) => {
       const o1 = it.offer || {};
-      if (cls && normMatch(o1.class || "") !== normMatch(cls)) return false;
+      if (useTvFilter) {
+        if (!isTvOffer(o1)) return false;
+      } else if (cls && normMatch(o1.class || "") !== normMatch(cls)) {
+        return false;
+      }
       if (category && normMatch(o1.category || "") !== normMatch(category)) return false;
       if (hasSize && Number(o1.size) !== sizeNum) return false;
       return true;
@@ -6983,7 +7216,6 @@ function listOffersForSizeAcrossBrands(size, opts) {
 
 function collectTvOffers({ brand, size, budget }) {
   const tvCanon = OFFERS_INDEX.classCanon.tv;
-  const tvNorm = normMatch(tvCanon || "");
   if (!tvCanon) return [];
 
   const brands = brand ? [brand] : OFFERS_INDEX.brands || [];
@@ -6993,7 +7225,7 @@ function collectTvOffers({ brand, size, budget }) {
     const arr = ((OFFERS && OFFERS.offers && OFFERS.offers[b]) || []).filter((o) => Number((o && o.stock) || 0) > 0);
     for (let j = 0; j < arr.length; j += 1) {
       const o = arr[j];
-      if (normMatch(o.class || "") !== tvNorm) continue;
+      if (!isTvOffer(o)) continue;
       if (Number(o.size) !== Number(size)) continue;
       const priceNum = Number(o.price);
       if (!Number.isFinite(priceNum)) continue;
@@ -7039,7 +7271,6 @@ function detectTvOs(offer, brand) {
 
 function collectTvKnowledge({ size } = {}) {
   const tvCanon = OFFERS_INDEX.classCanon.tv;
-  const tvNorm = normMatch(tvCanon || "");
   if (!tvCanon) return { types: [], brands: [] };
 
   const offersObj = (OFFERS && OFFERS.offers) || {};
@@ -7051,7 +7282,7 @@ function collectTvKnowledge({ size } = {}) {
 
   const considerOffer = (brand, offer) => {
     if (Number((offer && offer.stock) || 0) <= 0) return false;
-    if (normMatch((offer && offer.class) || "") !== tvNorm) return false;
+    if (!isTvOffer(offer)) return false;
     if (hasSize && Number(offer.size) !== sizeNum) return false;
     const typeName = normalizeTvTypeName((offer && offer.type) || "");
     if (typeName) typeCounts.set(typeName, (typeCounts.get(typeName) || 0) + 1);
@@ -7072,12 +7303,12 @@ function collectTvKnowledge({ size } = {}) {
     for (let i = 0; i < brands.length; i += 1) {
       const b = brands[i];
       const arr = Array.isArray(offersObj[b]) ? offersObj[b] : [];
-      for (let j = 0; j < arr.length; j += 1) {
-        const offer = arr[j];
-        if (Number((offer && offer.stock) || 0) <= 0) continue;
-        if (normMatch((offer && offer.class) || "") !== tvNorm) continue;
-        const typeName = normalizeTvTypeName((offer && offer.type) || "");
-        if (typeName) typeCounts.set(typeName, (typeCounts.get(typeName) || 0) + 1);
+    for (let j = 0; j < arr.length; j += 1) {
+      const offer = arr[j];
+      if (Number((offer && offer.stock) || 0) <= 0) continue;
+      if (!isTvOffer(offer)) continue;
+      const typeName = normalizeTvTypeName((offer && offer.type) || "");
+      if (typeName) typeCounts.set(typeName, (typeCounts.get(typeName) || 0) + 1);
         brandSeen.add(b);
       }
     }
@@ -8857,7 +9088,7 @@ function handleTvSizePriceFlow(parsed, lang, key) {
     for (let i = 0; i < brandsPool.length; i += 1) {
       const b = brandsPool[i];
       const arr = ((OFFERS && OFFERS.offers && OFFERS.offers[b]) || [])
-        .filter((o) => Number((o && o.stock) || 0) > 0 && normMatch(o.class || "") === normMatch(tvCanon || ""));
+        .filter((o) => Number((o && o.stock) || 0) > 0 && isTvOffer(o));
       for (let j = 0; j < arr.length; j += 1) fallbackItems.push({ brand: b, offer: arr[j] });
     }
 
@@ -8916,6 +9147,14 @@ function handleTvSizePriceFlow(parsed, lang, key) {
   return ensureNoQuestion(parts.filter(Boolean).join("\n\n"));
 }
 
+function brandOnlyNoTvIntro(lang, brand) {
+  const L = lang || "dzl";
+  const safeBrand = String(brand || "").trim();
+  if (L === "fr") return `Aucune TV trouvée pour ${safeBrand}, voici d’autres options:`;
+  if (L === "ar") return `لم نجد تلفازًا من ${safeBrand}، إليك خيارات أخرى:`;
+  return `Ma l9ina 7tta TV dyal ${safeBrand}, hadi chi options okhra:`;
+}
+
 function tryDirectOfferAnswer(userText, historyMsgs, lang, key, opts = {}) {
   const text = String(userText || "").trim();
   if (!text) return null;
@@ -8956,12 +9195,11 @@ function tryDirectOfferAnswer(userText, historyMsgs, lang, key, opts = {}) {
     const tvItems = [];
     const offersObj = (OFFERS && OFFERS.offers) || {};
     const tvCanon = OFFERS_INDEX.classCanon.tv || "Tv";
-    const tvNorm = normMatch(tvCanon);
     for (const [brandKey, arr] of Object.entries(offersObj)) {
       for (let j = 0; j < arr.length; j += 1) {
         const offer = arr[j];
         if (!offer || Number((offer && offer.stock) || 0) <= 0) continue;
-        if (normMatch(offer.class || "") !== tvNorm) continue;
+        if (!isTvOffer(offer)) continue;
         tvItems.push({ brand: brandKey, offer });
       }
     }
@@ -9062,6 +9300,48 @@ function tryDirectOfferAnswer(userText, historyMsgs, lang, key, opts = {}) {
     capacityVal && (category2 || isNonTvSignal || (ctx.lastCategory && normMatch(ctx.lastCategory) !== tvCanonNorm))
       ? capacityVal
       : ctx.lastCapacity || null;
+
+  const brandOnly = Boolean(brand && isBrandOnlyQuery(text, brand));
+  if (brandOnly) {
+    const packTv = listOffersForBrand(brand, { cls: tvCanon, limit: MAX_OFFERS, withOffers: true, tvOnly: true });
+    const tvCount = packTv.offers ? packTv.offers.length : 0;
+    logger.info({ msg: "brand_only_tv_first", brand, tvClassCanon: tvCanon, tvOfferCount: tvCount });
+
+    if (packTv.offers && packTv.offers.length) {
+      const entries = packTv.offers.map((offer) => ({ brand, offer }));
+      const offerCtx = buildOfferContextEntries(entries);
+      setCtx(key, {
+        lastBrand: brand,
+        lastClass: tvCanon || undefined,
+        lastCategory: undefined,
+        lastSize: undefined,
+        lastOffersShown: offerCtx.lastOffersShown,
+        lastOfferPicks: offerCtx.lastOfferPicks,
+        lastOfferItems: offerCtx.lastOfferItems,
+      });
+      const title = titleFromHeader(offersHeader(lang, { brand, cls: tvCanon }));
+      return buildPremiumOffersReply({ title, entries, lang, maxChars: CFG.maxReplyChars });
+    }
+
+    const pack = listOffersForBrand(brand, { limit: MAX_OFFERS, withOffers: true, capacityLiters: capacityHint });
+    if (pack.offers && pack.offers.length) {
+      const entries = pack.offers.map((offer) => ({ brand, offer }));
+      const offerCtx = buildOfferContextEntries(entries);
+      setCtx(key, {
+        lastBrand: brand,
+        lastClass: undefined,
+        lastCategory: undefined,
+        lastSize: undefined,
+        lastCapacity: capacityHint || undefined,
+        lastOffersShown: offerCtx.lastOffersShown,
+        lastOfferPicks: offerCtx.lastOfferPicks,
+        lastOfferItems: offerCtx.lastOfferItems,
+      });
+      const title = titleFromHeader(offersHeader(lang, { brand }));
+      const offerBlock = buildPremiumOffersReply({ title, entries, lang, maxChars: CFG.maxReplyChars });
+      return ensureNoQuestion([brandOnlyNoTvIntro(lang, brand), offerBlock].filter(Boolean).join("\n\n"));
+    }
+  }
 
   if (brand && Number.isFinite(sizeVal)) {
     const pack = listOffersForBrand(brand, { cls: tvCanon, size: sizeVal, limit: MAX_OFFERS, withOffers: true });
