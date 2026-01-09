@@ -898,8 +898,48 @@ test("deriveMediaText handles base64 images", async () => {
   assert.ok(result.text.includes("Samsung"));
 });
 
+test("deriveMediaText rejects invalid audio payloads before transcription", async () => {
+  const htmlPayload = `<html>${"Forbidden ".repeat(200)}</html>`;
+  const htmlDataUrl = `data:text/html;base64,${Buffer.from(htmlPayload).toString("base64")}`;
+  let called = false;
+
+  setAudioTranscriberForTest(() => {
+    called = true;
+    throw new Error("should_not_transcribe");
+  });
+
+  try {
+    const result = await deriveMediaText({ kind: "audio", url: htmlDataUrl, mime: "" }, "fr", "req-audio-html");
+    assert.ok(!result.ok);
+    assert.strictEqual(result.reason, "invalid_audio_payload");
+    assert.equal(called, false);
+  } finally {
+    setAudioTranscriberForTest(null);
+  }
+});
+
+test("deriveMediaText rejects tiny audio files", async () => {
+  const tinyPayload = Buffer.from("OggS");
+  const tinyDataUrl = `data:audio/ogg;base64,${tinyPayload.toString("base64")}`;
+  let called = false;
+
+  setAudioTranscriberForTest(() => {
+    called = true;
+    throw new Error("should_not_transcribe");
+  });
+
+  try {
+    const result = await deriveMediaText({ kind: "audio", url: tinyDataUrl, mime: "audio/ogg" }, "fr", "req-audio-tiny");
+    assert.ok(!result.ok);
+    assert.strictEqual(result.reason, "invalid_audio_payload");
+    assert.equal(called, false);
+  } finally {
+    setAudioTranscriberForTest(null);
+  }
+});
+
 test("deriveMediaText converts ogg audio before transcription", async () => {
-  const oggPayload = Buffer.from("OggS");
+  const oggPayload = Buffer.concat([Buffer.from("OggS"), Buffer.alloc(2048)]);
   const oggDataUrl = `data:audio/ogg;base64,${oggPayload.toString("base64")}`;
   let seenPath = null;
   let seenMime = null;
@@ -912,7 +952,7 @@ test("deriveMediaText converts ogg audio before transcription", async () => {
   setAudioTranscriberForTest((filePath, mimeType) => {
     seenPath = filePath;
     seenMime = mimeType;
-    assert.ok(filePath.endsWith(".mp3"));
+    assert.ok(filePath.endsWith(".wav"));
     return "voice ok";
   });
 
@@ -921,7 +961,39 @@ test("deriveMediaText converts ogg audio before transcription", async () => {
   assert.strictEqual(result.path, "audio");
   assert.ok(result.text.includes("voice ok"));
   assert.ok(seenPath);
-  assert.strictEqual(seenMime, "audio/mpeg");
+  assert.strictEqual(seenMime, "audio/wav");
+});
+
+test("deriveMediaText keeps mp3 inputs without conversion", async () => {
+  const mp3Payload = Buffer.concat([Buffer.from("ID3"), Buffer.alloc(2048)]);
+  const mp3DataUrl = `data:audio/mpeg;base64,${mp3Payload.toString("base64")}`;
+  let converterCalls = 0;
+  let seenMime = null;
+
+  setAudioConverterForTest(() => {
+    converterCalls += 1;
+    return { ok: true };
+  });
+  setAudioTranscriberForTest((_filePath, mimeType) => {
+    seenMime = mimeType;
+    return "mp3 ok";
+  });
+
+  try {
+    const result = await deriveMediaText(
+      { kind: "audio", url: mp3DataUrl, mime: "audio/mpeg", filename: "voice.mp3" },
+      "fr",
+      "req-audio-mp3"
+    );
+    assert.ok(result.ok);
+    assert.strictEqual(result.path, "audio");
+    assert.ok(result.text.includes("mp3 ok"));
+    assert.strictEqual(seenMime, "audio/mpeg");
+    assert.strictEqual(converterCalls, 0);
+  } finally {
+    setAudioConverterForTest(null);
+    setAudioTranscriberForTest(null);
+  }
 });
 
 test("audio mime helpers map extensions", () => {
@@ -1012,11 +1084,12 @@ test("vision routing uses offers and analyzer", async () => {
 test("audio media converts ogg before transcription", async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "audio-convert-test-"));
   const tmpFile = path.join(dir, "audio.ogg");
-  fs.writeFileSync(tmpFile, "dummy");
+  const oggPayload = Buffer.concat([Buffer.from("OggS"), Buffer.alloc(2048)]);
+  fs.writeFileSync(tmpFile, oggPayload);
   let seenPath = null;
   let seenMime = null;
 
-  setAudioDownloaderForTest(() => ({ filePath: tmpFile, mimeType: "audio/ogg", tmpDir: dir, sizeBytes: 5 }));
+  setAudioDownloaderForTest(() => ({ filePath: tmpFile, mimeType: "audio/ogg", tmpDir: dir, sizeBytes: oggPayload.length }));
   setAudioConverterForTest((inputPath, outputPath) => {
     fs.writeFileSync(outputPath, fs.readFileSync(inputPath));
     return { ok: true };
@@ -1037,16 +1110,17 @@ test("audio media converts ogg before transcription", async () => {
 
   assert.strictEqual(res.path, "audio");
   assert.strictEqual(res.userText, "ثلاجة");
-  assert.ok(seenPath && seenPath.endsWith(".mp3"));
-  assert.strictEqual(seenMime, "audio/mpeg");
+  assert.ok(seenPath && seenPath.endsWith(".wav"));
+  assert.strictEqual(seenMime, "audio/wav");
 });
 
 test("audio media routes through transcription flow", async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "audio-test-"));
   const tmpFile = path.join(dir, "audio.ogg");
-  fs.writeFileSync(tmpFile, "dummy");
+  const oggPayload = Buffer.concat([Buffer.from("OggS"), Buffer.alloc(2048)]);
+  fs.writeFileSync(tmpFile, oggPayload);
 
-  setAudioDownloaderForTest(() => ({ filePath: tmpFile, mimeType: "", tmpDir: dir, sizeBytes: 5 }));
+  setAudioDownloaderForTest(() => ({ filePath: tmpFile, mimeType: "", tmpDir: dir, sizeBytes: oggPayload.length }));
   setAudioConverterForTest((inputPath, outputPath) => {
     fs.writeFileSync(outputPath, fs.readFileSync(inputPath));
     return { ok: true };
@@ -1319,7 +1393,7 @@ test("media-only audio wanotifier transcribes and replies", async () => {
   setOffersForTest({
     OTHER: [{ model: "TV55", class: "Tv", category: "Tv", size: 55, price: 4200, stock: 4 }],
   });
-  const fakeMp3 = Buffer.from([0, 1, 2, 3]);
+  const fakeMp3 = Buffer.concat([Buffer.from("ID3"), Buffer.alloc(2048)]);
   const fetchImpl = async () => ({
     ok: true,
     status: 200,
@@ -1348,7 +1422,7 @@ test("media-only audio wanotifier transcribes and replies", async () => {
 });
 
 test("media-only audio wanotifier rejects empty transcript", async () => {
-  const fakeMp3 = Buffer.from([0, 1, 2, 3]);
+  const fakeMp3 = Buffer.concat([Buffer.from("ID3"), Buffer.alloc(2048)]);
   const fetchImpl = async () => ({
     ok: true,
     status: 200,
@@ -1374,7 +1448,7 @@ test("media-only audio wanotifier rejects empty transcript", async () => {
 });
 
 test("media-only audio wanotifier rejects filler transcript", async () => {
-  const fakeMp3 = Buffer.from([0, 1, 2, 3]);
+  const fakeMp3 = Buffer.concat([Buffer.from("ID3"), Buffer.alloc(2048)]);
   const fetchImpl = async () => ({
     ok: true,
     status: 200,

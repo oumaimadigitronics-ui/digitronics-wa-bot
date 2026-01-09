@@ -52,6 +52,8 @@ async function preprocessAudio({ filePath, mimeType, maxBytes, allowFfmpeg = tru
 
   const ffmpegAvailable = allowFfmpeg ? await commandExists("ffmpeg") : false;
   const ffprobeAvailable = allowFfmpeg ? await commandExists("ffprobe") : false;
+  const mime = String(mimeType || "").toLowerCase();
+  const useWav = !mime || !mime.startsWith("audio/") || mime === "audio/wav" || mime.includes("audio/ogg") || mime.includes("audio/opus");
 
   const result = {
     processedPath: filePath,
@@ -66,10 +68,10 @@ async function preprocessAudio({ filePath, mimeType, maxBytes, allowFfmpeg = tru
   if (!ffmpegAvailable) return result;
 
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "digibot-audio-pre-"));
-  const outPath = path.join(tmpDir, "audio-preprocess.mp3");
+  const outPath = path.join(tmpDir, useWav ? "audio-preprocess.wav" : "audio-preprocess.mp3");
 
   try {
-    await execFilePromise("ffmpeg", [
+    const args = [
       "-y",
       "-i",
       filePath,
@@ -79,16 +81,20 @@ async function preprocessAudio({ filePath, mimeType, maxBytes, allowFfmpeg = tru
       "16000",
       "-af",
       "loudnorm,aresample=16000,silenceremove=start_periods=1:start_duration=0.2:start_threshold=-45dB:stop_periods=1:stop_duration=0.4:stop_threshold=-45dB",
-      "-b:a",
-      "64k",
-      outPath,
-    ]);
+    ];
+    if (useWav) {
+      args.push("-c:a", "pcm_s16le", outPath);
+    } else {
+      args.push("-b:a", "64k", outPath);
+    }
+    await execFilePromise("ffmpeg", args);
     const processedStats = fs.statSync(outPath);
     result.processedPath = outPath;
     result.sizeBytes = processedStats.size;
-    result.format = "mp3";
+    result.format = useWav ? "wav" : "mp3";
     result.preprocessApplied = true;
     result.tmpDir = tmpDir;
+    result.mimeType = useWav ? "audio/wav" : "audio/mpeg";
     result.durationSec = await getDurationSec(outPath, ffprobeAvailable) || result.durationSec;
     return result;
   } catch (_err) {
