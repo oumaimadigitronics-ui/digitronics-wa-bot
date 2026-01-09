@@ -7498,9 +7498,16 @@ function isTvContext(text) {
   return false;
 }
 
-function isTvOriginIntent(text) {
+function isTvOriginIntent(text, ctx) {
   const s = normMatch(text || "");
   if (!s) return false;
+  const tvCanonNorm = normMatch(OFFERS_INDEX.classCanon.tv || "tv");
+  const ctxClassNorm = normMatch((ctx && ctx.lastClass) || "");
+  const ctxCategoryNorm = normMatch((ctx && ctx.lastCategory) || "");
+  const hasTvContext =
+    hasTvIntentTokens(s) || ctxClassNorm === tvCanonNorm || ctxCategoryNorm === tvCanonNorm || ctxClassNorm === "tv" || ctxCategoryNorm === "tv";
+  if (!hasTvContext) return false;
+
   const tokens = [
     "origine",
     "origin",
@@ -7508,14 +7515,23 @@ function isTvOriginIntent(text) {
     "fabrique",
     "fabriqué",
     "fabrication",
-    "china",
-    "chine",
     "europe",
     "europe edition",
     "edition europe",
     "europ",
   ];
-  return tokens.some((token) => s.includes(normMatch(token)));
+  const hasOriginToken = tokens.some((token) => includesToken(s, token));
+  if (hasOriginToken) return true;
+
+  const chinaTokens = ["china", "chine"];
+  for (let i = 0; i < chinaTokens.length; i += 1) {
+    const t0 = normMatch(chinaTokens[i]);
+    if (!t0) continue;
+    const escaped = escapeRegExp(t0);
+    const re = new RegExp(`(^|[^a-z0-9])${escaped}(?=($|[^a-z0-9]|\\d))`, "i");
+    if (re.test(s)) return true;
+  }
+  return false;
 }
 
 function detectApplianceCategory(text) {
@@ -8592,7 +8608,7 @@ function tryDirectOfferAnswer(userText, historyMsgs, lang, key) {
     return reply;
   }
 
-  if (isTvOriginIntent(text)) {
+  if (isTvOriginIntent(text, ctx)) {
     const tvItems = [];
     const offersObj = (OFFERS && OFFERS.offers) || {};
     const tvCanon = OFFERS_INDEX.classCanon.tv || "Tv";
@@ -10514,6 +10530,7 @@ export {
   formatOfferLine,
   stripQuestions,
   ensureNoQuestion,
+  isTvOriginIntent,
   detectContactInfo,
   hasProductInquirySignal,
   extractCapacityLiters,
