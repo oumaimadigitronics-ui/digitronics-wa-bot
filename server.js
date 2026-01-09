@@ -43,6 +43,7 @@ const FEATURE_STRICT_CATEGORY_SWITCH = String(process.env.FEATURE_STRICT_CATEGOR
 const FEATURE_OFFER_TAIL_COMPACT = String(process.env.FEATURE_OFFER_TAIL_COMPACT || "0") === "1";
 const FEATURE_STRICT_STOCK_FILTER = String(process.env.FEATURE_STRICT_STOCK_FILTER || "0") === "1";
 const FEATURE_SHOW_SKU_IN_OFFERS = String(process.env.FEATURE_SHOW_SKU_IN_OFFERS || "0") === "1";
+const FEATURE_OFFER_ITEM_EMOJI_FORMAT = String(process.env.FEATURE_OFFER_ITEM_EMOJI_FORMAT || "0") === "1";
 const IS_TEST = String(process.env.NODE_ENV || "").toLowerCase() === "test";
 const ENTRY_FILE = fileURLToPath(import.meta.url);
 const __filename = ENTRY_FILE;
@@ -4464,11 +4465,39 @@ function formatOfferIndex(idx) {
   return `${n}️⃣`;
 }
 
+function formatOfferBlockIndex(idx) {
+  const n = Number(idx);
+  if (Number.isFinite(n) && n >= 1 && n <= OFFER_INDEX_EMOJI.length) return OFFER_INDEX_EMOJI[n - 1];
+  if (Number.isFinite(n)) return `${n}.`;
+  return "";
+}
+
 function formatOfferItem({ idx, name, price }) {
   const numEmoji = formatOfferIndex(idx);
   const safeName = String(name || "").trim() || "Produit";
   const safePrice = String(price || "").trim() || "Prix sur demande";
   return `${numEmoji} *${safeName}*\n💰 ${safePrice}`;
+}
+
+function formatOfferBlock({ index, brand, offer }) {
+  const safeBrand = String(brand || "").trim();
+  const nameRaw = String((offer && offer.name) || "").trim();
+  const modelRaw = String((offer && offer.model) || "").trim();
+  const skuRaw = String((offer && offer.sku) || "").trim();
+  let displayName = nameRaw;
+  if (!displayName) {
+    displayName = [safeBrand, modelRaw || skuRaw].filter(Boolean).join(" ").trim();
+  }
+  if (!displayName) displayName = safeBrand || modelRaw || skuRaw || "Produit";
+  const priceBase = offerPriceText(offer || {});
+  let pricePart = String(priceBase || "").trim() || "Prix sur demande";
+  if (!/\bdh\b/i.test(pricePart)) {
+    pricePart = `${pricePart} dh`.trim();
+  }
+  const lines = [`${formatOfferBlockIndex(index)} *${displayName}*`];
+  if (skuRaw) lines.push(`  🧾 ${skuRaw}`);
+  lines.push(`  💰 ${pricePart}`);
+  return lines.join("\n").trim();
 }
 
 function purchaseBlock(lang) {
@@ -4573,6 +4602,13 @@ function defaultOfferSubtitles() {
 
 function buildOfferItemsFromEntries(entries, lang) {
   const list = Array.isArray(entries) ? entries : [];
+  if (FEATURE_OFFER_ITEM_EMOJI_FORMAT) {
+    return list.map((entry, idx) => {
+      const offer = entry && entry.offer ? entry.offer : entry;
+      const brand = (entry && entry.brand) || (offer && offer.brand) || "";
+      return formatOfferBlock({ index: idx + 1, brand, offer: offer || {} });
+    });
+  }
   return list.map((entry, idx) => {
     const offer = entry && entry.offer ? entry.offer : entry;
     const brand = (entry && entry.brand) || (offer && offer.brand) || "";
