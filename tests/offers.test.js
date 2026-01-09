@@ -65,6 +65,7 @@ import {
   wantsProductDetails,
   parseSelectedOptionNumber,
   transcribeAudioFile,
+  parseUserQuery,
 } from "../server.js";
 import { setDepsForTests } from "../src/deps.js";
 
@@ -211,6 +212,69 @@ test("formatOfferLine handles missing values", () => {
 test("formatOfferLine includes sanitized URL", () => {
   const line = formatOfferLine("BrandX", { model: "ModelY", price: 10, url: "http://example.com/p" });
   assert.ok(!line.includes("example.com"));
+});
+
+test("brand-only queries return TV offers first for any brand", () => {
+  setOffersForTest({
+    TCL: [
+      { model: "TCL-TV-55", name: "TCL Smart TV 55", class: "Television", category: "Tv", size: 55, price: 3200, stock: 1 },
+      { model: "TCL-FR-1", name: "TCL Fridge 300L", class: "Refrigerateur", category: "Refrigerateur", price: 2000, stock: 1 },
+    ],
+    SAMSUNG: [
+      { model: "SAM-TV-50", name: "Samsung TV 50", class: "Television", category: "Tv", size: 50, price: 4200, stock: 1 },
+      { model: "SAM-DEH-1", name: "Samsung Dehumidifier", class: "Deshumidificateur", category: "Deshumidificateur", price: 1500, stock: 1 },
+    ],
+    SONY: [
+      { model: "SONY-TV-65", name: "Sony OLED 65", class: "Television", category: "Tv", size: 65, price: 7200, stock: 1 },
+    ],
+  });
+
+  const replyTcl = tryDirectOfferAnswer("tcl", [], "fr", "brand_only_tcl");
+  assert.ok(replyTcl.includes("TCL Smart TV 55"));
+  assert.ok(!replyTcl.includes("TCL Fridge 300L"));
+
+  const replySamsung = tryDirectOfferAnswer("samsung prix", [], "fr", "brand_only_samsung");
+  assert.ok(replySamsung.includes("Samsung TV 50"));
+  assert.ok(!replySamsung.includes("Samsung Dehumidifier"));
+
+  const replySony = tryDirectOfferAnswer("sony", [], "fr", "brand_only_sony");
+  assert.ok(replySony.includes("Sony OLED 65"));
+});
+
+test("brand-only queries fall back to other offers when no TV exists", () => {
+  setOffersForTest({
+    WHIRLPOOL: [
+      { model: "WH-FR-1", name: "Whirlpool Fridge", class: "Refrigerateur", category: "Refrigerateur", price: 1800, stock: 1 },
+    ],
+  });
+
+  const reply = tryDirectOfferAnswer("whirlpool", [], "fr", "brand_only_no_tv");
+  assert.ok(reply.includes("Aucune TV trouvée pour WHIRLPOOL"));
+  assert.ok(reply.includes("Whirlpool Fridge"));
+});
+
+test("brand-only detection respects explicit category overrides", () => {
+  setOffersForTest({
+    TCL: [
+      { model: "TCL-TV-55", name: "TCL Smart TV 55", class: "Television", category: "Tv", size: 55, price: 3200, stock: 1 },
+      { model: "TCL-FR-1", name: "TCL Fridge 300L", class: "Refrigerateur", category: "Refrigerateur", price: 2000, stock: 1 },
+    ],
+  });
+
+  const reply = tryDirectOfferAnswer("tcl frigo", [], "fr", "brand_only_frigo");
+  assert.ok(reply.includes("TCL Fridge 300L"));
+  assert.ok(!reply.includes("TCL Smart TV 55"));
+});
+
+test("TV class canon is inferred from offers data", () => {
+  setOffersForTest({
+    TCL: [
+      { model: "TCL-TV-55", name: "TCL Smart TV 55", class: "Television", category: "Tv", size: 55, price: 3200, stock: 1 },
+    ],
+  });
+
+  const parsed = parseUserQuery("tv 55", {});
+  assert.strictEqual(parsed.cls, "Television");
 });
 
 test("premium offers reply includes purchase block and no product links", () => {
