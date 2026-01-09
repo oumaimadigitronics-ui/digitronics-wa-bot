@@ -4348,6 +4348,7 @@ function resetCtxForCategoryChange(key, category, cls) {
     lastClass: undefined,
     lastSize: undefined,
     lastOffersShown: undefined,
+    lastOfferPicks: undefined,
     lastOfferItems: undefined,
   });
 }
@@ -4406,10 +4407,16 @@ function buildOfferDisplayName(brand, offer, lang = "dzl") {
 
 function boxHeader(title) {
   const safeTitle = String(title || "").trim() || "Offres Premium";
-  return ["╭───────────────╮", `│   ${safeTitle}   │`, "╰───────────────╯"].join("\n");
+  const inner = `   ${safeTitle}   `;
+  const width = Math.max(30, inner.length);
+  const top = `╭${"─".repeat(width)}╮`;
+  const mid = `│${inner}${" ".repeat(width - inner.length)}│`;
+  const bottom = `╰${"─".repeat(width)}╯`;
+  return [top, mid, bottom].join("\n");
 }
 
 const OFFER_INDEX_EMOJI = ["1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "9️⃣", "🔟"];
+const OFFERS_SEPARATOR = "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━";
 
 function formatOfferIndex(idx) {
   const n = Number(idx);
@@ -4417,36 +4424,36 @@ function formatOfferIndex(idx) {
   return `${n}️⃣`;
 }
 
-function formatOfferItem({ idx, name, priceText }) {
+function formatOfferItem({ idx, name, price }) {
   const numEmoji = formatOfferIndex(idx);
   const safeName = String(name || "").trim() || "Produit";
-  const safePrice = String(priceText || "").trim() || "Prix sur demande";
+  const safePrice = String(price || "").trim() || "Prix sur demande";
   return `${numEmoji} *${safeName}*\n💰 ${safePrice}`;
 }
 
-function purchaseBlockPremium(lang) {
+function purchaseBlock(lang) {
   const form = ORDER_FORM_URL_SAFE;
   if (lang === "fr") {
     return [
-      "━━━━━━━━━━━━━━",
-      "🌐 Site: https://digitronics.ma",
-      `📝 Formulaire direct: ${form}`,
-      "✅ Commandez via le site ou remplissez le formulaire pour une commande directe",
+      OFFERS_SEPARATOR,
+      "🌐 Website: https://digitronics.ma",
+      `📝 Direct order form: ${form}`,
+      "✅ Vous pouvez commander sur le site ou remplir le formulaire pour une commande directe",
     ];
   }
   if (lang === "ar") {
     return [
-      "━━━━━━━━━━━━━━",
-      "🌐 الموقع: https://digitronics.ma",
-      `📝 فورم الطلب المباشر: ${form}`,
+      OFFERS_SEPARATOR,
+      "🌐 Website: https://digitronics.ma",
+      `📝 Direct order form: ${form}`,
       "✅ تقدر تطلب من الموقع أو تعمر الفورم للطلب المباشر",
     ];
   }
   return [
-    "━━━━━━━━━━━━━━",
-    "🌐 Site: https://digitronics.ma",
-    `📝 Formulaire direct: ${form}`,
-    "✅ تقدر تطلب من الموقع ولا تعمر الفورم للطلب المباشر",
+    OFFERS_SEPARATOR,
+    "🌐 Website: https://digitronics.ma",
+    `📝 Direct order form: ${form}`,
+    "✅ تقدر تطلب من الويبسايت ولا تعمر الفورم للطلب المباشر",
   ];
 }
 
@@ -4454,36 +4461,36 @@ function shortenKeepingTail(base, tail, maxChars) {
   const limit = Number(maxChars) || CFG.maxReplyChars;
   const baseText = String(base || "").trim();
   const tailText = String(tail || "").trim();
-  if (!tailText) return shorten(baseText, limit);
+  if (!tailText) return shortenNoQuestion(baseText, limit);
   const separator = baseText ? "\n\n" : "";
   const combined = baseText + separator + tailText;
   if (combined.length <= limit) return combined;
   const allowedBase = Math.max(0, limit - tailText.length - separator.length);
-  const trimmedBase = allowedBase > 0 ? shorten(baseText, allowedBase) : "";
+  const trimmedBase = allowedBase > 0 ? shortenNoQuestion(baseText, allowedBase) : "";
   return (trimmedBase ? trimmedBase + separator : "") + tailText;
 }
 
-function offersTemplatePremium({ title, subtitleFR, subtitleAR, items, lang, maxChars }) {
+function offersTemplate({ title, subtitleFR, subtitleAR, lines, lang, maxChars }) {
   const headerLines = [boxHeader(title)];
   if (subtitleFR) headerLines.push(`🇫🇷 ${subtitleFR}`);
   if (subtitleAR) headerLines.push(`🇲🇦 ${subtitleAR}`);
-  headerLines.push("━━━━━━━━━━━━━━");
+  headerLines.push(OFFERS_SEPARATOR);
 
-  const itemLines = Array.isArray(items) ? items.map((item) => formatOfferItem(item)) : [];
-  const tailLines = purchaseBlockPremium(lang || "dzl");
+  const itemLines = Array.isArray(lines) ? lines : [];
+  const tailLines = purchaseBlock(lang || "dzl");
   const headerBlock = headerLines.join("\n");
   const tailBlock = tailLines.join("\n");
 
-  let currentItems = itemLines.slice();
+  let currentLines = itemLines.slice();
   const build = () => {
-    const itemBlock = currentItems.length ? currentItems.join("\n\n") : "";
+    const itemBlock = currentLines.length ? currentLines.join("\n\n") : "";
     const baseBlock = [headerBlock, itemBlock].filter(Boolean).join("\n\n");
     return shortenKeepingTail(baseBlock, tailBlock, maxChars || CFG.maxReplyChars);
   };
 
   let output = build();
-  while (output.length > (maxChars || CFG.maxReplyChars) && currentItems.length > 1) {
-    currentItems = currentItems.slice(0, -1);
+  while (output.length > (maxChars || CFG.maxReplyChars) && currentLines.length > 1) {
+    currentLines = currentLines.slice(0, -1);
     output = build();
   }
 
@@ -4513,11 +4520,11 @@ function buildOfferItemsFromEntries(entries, lang) {
     const offer = entry && entry.offer ? entry.offer : entry;
     const brand = (entry && entry.brand) || (offer && offer.brand) || "";
     const displayName = buildOfferDisplayName(brand, offer || {}, lang || "dzl");
-    return {
+    return formatOfferItem({
       idx: idx + 1,
       name: displayName,
-      priceText: offerPriceText(offer || {}),
-    };
+      price: offerPriceText(offer || {}),
+    });
   });
 }
 
@@ -4550,6 +4557,13 @@ function buildOfferContextEntries(entries) {
         model: (offer && (offer.model || offer.sku || offer.name)) || "",
       };
     }),
+    lastOfferPicks: list.map((entry) => {
+      const offer = entry && entry.offer ? entry.offer : entry;
+      return {
+        brand: (entry && entry.brand) || (offer && offer.brand) || "",
+        offer,
+      };
+    }),
     lastOfferItems: list
       .map((entry) => {
         const offer = entry && entry.offer ? entry.offer : entry;
@@ -4566,12 +4580,12 @@ function buildOfferContextEntries(entries) {
 
 function buildPremiumOffersReply({ title, entries, lang, maxChars }) {
   const subtitles = defaultOfferSubtitles();
-  const items = buildOfferItemsFromEntries(entries, lang);
-  return offersTemplatePremium({
+  const lines = buildOfferItemsFromEntries(entries, lang);
+  return offersTemplate({
     title,
     subtitleFR: subtitles.subtitleFR,
     subtitleAR: subtitles.subtitleAR,
-    items,
+    lines,
     lang,
     maxChars,
   });
@@ -5581,17 +5595,16 @@ async function handleVisionMedia(mediaInput, lang, key, opts = {}) {
     : String(offerReply.reply || "");
   const finalReply = shortenNoQuestion(finalReplyText, CFG.maxReplyChars);
   const ctxData = offerReply.ctx || {};
+  const visionEntries = Array.isArray(ctxData.offers && ctxData.offers.offers) ? ctxData.offers.offers : [];
+  const visionOfferCtx = visionEntries.length ? buildOfferContextEntries(visionEntries) : null;
   setCtx(key, {
     lastBrand: ctxData.brand || undefined,
     lastClass: ctxData.cls || undefined,
     lastCategory: ctxData.category || undefined,
     lastSize: ctxData.sizeNum || undefined,
-    lastOffersShown: Array.isArray(ctxData.offers && ctxData.offers.offers)
-      ? ctxData.offers.offers.map((o) => ({ brand: ctxData.brand || (o && o.brand) || "", model: (o && o.model) || "" }))
-      : undefined,
-    lastOfferItems: Array.isArray(ctxData.offers && ctxData.offers.offers)
-      ? buildOfferContextEntries(ctxData.offers.offers).lastOfferItems
-      : undefined,
+    lastOffersShown: visionOfferCtx ? visionOfferCtx.lastOffersShown : undefined,
+    lastOfferPicks: visionOfferCtx ? visionOfferCtx.lastOfferPicks : undefined,
+    lastOfferItems: visionOfferCtx ? visionOfferCtx.lastOfferItems : undefined,
   });
 
   return { reply: finalReply, confidence: offerReply.confidence || 0 };
@@ -6303,6 +6316,7 @@ async function tryWebsiteCatalogAnswer(userText, lang, key) {
     lastClass: isTvContext ? OFFERS_INDEX.classCanon.tv || detectedClass || undefined : detectedClass || undefined,
     lastSize: Number.isFinite(sizeVal) ? sizeVal : undefined,
     lastOffersShown: undefined,
+    lastOfferPicks: undefined,
     lastOfferItems: undefined,
   });
 
@@ -6644,8 +6658,14 @@ function xiaomiAlternativeReply(lang, ctx, key) {
       lastCategory: categoryHint || undefined,
       lastSize: sizeVal || undefined,
     };
-    if (offersShown.length) ctxUpdate.lastOffersShown = offersShown;
-    if (entries.length) ctxUpdate.lastOfferItems = buildOfferContextEntries(entries).lastOfferItems;
+    if (entries.length) {
+      const offerCtx = buildOfferContextEntries(entries);
+      ctxUpdate.lastOffersShown = offerCtx.lastOffersShown;
+      ctxUpdate.lastOfferPicks = offerCtx.lastOfferPicks;
+      ctxUpdate.lastOfferItems = offerCtx.lastOfferItems;
+    } else if (offersShown.length) {
+      ctxUpdate.lastOffersShown = offersShown;
+    }
     setCtx(key, ctxUpdate);
   }
 
@@ -7159,10 +7179,10 @@ function isMoreOptionsIntent(text) {
   return hasAnyPhrase(raw, tokens);
 }
 
-function wantsProductDetails(text) {
+function wantsProductDetails(text, lang) {
   if (isMoreOptionsIntent(text)) return false;
   const raw = String(text || "");
-  const phrases = [
+  const basePhrases = [
     "more info",
     "more information",
     "more details",
@@ -7203,11 +7223,32 @@ function wantsProductDetails(text) {
     "send photos",
     "send images",
   ];
+  const frPhrases = [
+    "plus d'infos",
+    "plus d info",
+    "plus d’informations",
+    "plus d'informations",
+    "plus sur",
+    "plus de détails",
+    "détails",
+    "lien",
+    "url",
+    "fiche produit",
+    "fiche technique",
+  ];
+  const arPhrases = ["معلومات", "تفاصيل", "مواصفات", "رابط", "لينك", "صفحة المنتج", "صور", "صورة", "تصاور"];
+  const dzlPhrases = ["infos", "info", "details", "detail", "lien", "link", "lien produit", "photo", "image"];
+  const phrases = basePhrases.concat(frPhrases, arPhrases, dzlPhrases);
+  const langHint = String(lang || "").toLowerCase();
+  if (langHint === "fr") return hasAnyPhrase(raw, basePhrases.concat(frPhrases));
+  if (langHint === "ar") return hasAnyPhrase(raw, basePhrases.concat(arPhrases));
   return hasAnyPhrase(raw, phrases);
 }
 
 function parseSelectedOptionNumber(text) {
   const raw = arabicIndicToAsciiDigits(String(text || ""));
+  const optionMatch = raw.match(/(?:option|opt|choix|choice|numero|num|رقم|اختيار|الخيار)\s*([1-9]|10)\b/i);
+  if (optionMatch && optionMatch[1]) return Number(optionMatch[1]);
   const digitMatch = raw.match(/\b(10|[1-9])\b/);
   if (digitMatch && digitMatch[1]) return Number(digitMatch[1]);
 
@@ -7325,7 +7366,7 @@ function buildProductDetailsReply({ brand, offer }, lang, wantsImage) {
   const header = boxHeader(buildDetailsHeader(safeLang));
   const lines = [
     header,
-    "━━━━━━━━━━━━━━",
+    OFFERS_SEPARATOR,
     `*${displayName}*`,
     `💰 ${priceText}`,
     ...specs,
@@ -7577,13 +7618,15 @@ function routeApplianceCategoryOffers(applianceKey, lang, key) {
   const picks = pickCheapestPerBrand(ranked).slice(0, MAX_OFFERS);
   if (!picks.length) return ensureNoQuestion(t(lang, "categoryUnavailable", { category }));
 
+  const offerCtx = buildOfferContextEntries(picks);
   setCtx(key, {
     lastBrand: undefined,
     lastCategory: category || undefined,
     lastClass: undefined,
     lastSize: undefined,
-    lastOffersShown: picks.map((it) => ({ brand: it.brand, model: (it.offer && it.offer.model) || "" })),
-    lastOfferItems: buildOfferContextEntries(picks).lastOfferItems,
+    lastOffersShown: offerCtx.lastOffersShown,
+    lastOfferPicks: offerCtx.lastOfferPicks,
+    lastOfferItems: offerCtx.lastOfferItems,
   });
 
   const header = offersHeader(lang, { category });
@@ -8526,13 +8569,15 @@ function handleTvSizePriceFlow(parsed, lang, key) {
     const ranked = rankOffers(fallbackItems, { size: sizeVal, className: tvCanon, limit: null });
     const limited = pickCheapestPerBrand(ranked).slice(0, MAX_OFFERS);
     if (limited.length) {
+      const offerCtx = buildOfferContextEntries(limited);
       setCtx(key, {
         lastBrand: brand || undefined,
         lastClass: tvCanon || undefined,
         lastCategory: undefined,
         lastSize: sizeVal,
-        lastOffersShown: limited.map((it) => ({ brand: it.brand, model: (it.offer && it.offer.model) || "" })),
-        lastOfferItems: buildOfferContextEntries(limited).lastOfferItems,
+        lastOffersShown: offerCtx.lastOffersShown,
+        lastOfferPicks: offerCtx.lastOfferPicks,
+        lastOfferItems: offerCtx.lastOfferItems,
       });
       const header = offersHeader(lang, { brand: brand || undefined, size: sizeVal, cls: tvCanon || undefined });
       const title = titleFromHeader(header);
@@ -8554,13 +8599,15 @@ function handleTvSizePriceFlow(parsed, lang, key) {
   );
   const wantPrice = priceIntent || cheapIntent || Number.isFinite(budget);
 
+  const orderedOfferCtx = buildOfferContextEntries(orderedTop);
   setCtx(key, {
     lastBrand: brand || undefined,
     lastClass: tvCanon || undefined,
     lastCategory: undefined,
     lastSize: sizeVal,
-    lastOffersShown: orderedTop.map((it) => ({ brand: it.brand, model: (it.offer && it.offer.model) || "" })),
-    lastOfferItems: buildOfferContextEntries(orderedTop).lastOfferItems,
+    lastOffersShown: orderedOfferCtx.lastOffersShown,
+    lastOfferPicks: orderedOfferCtx.lastOfferPicks,
+    lastOfferItems: orderedOfferCtx.lastOfferItems,
   });
 
   const parts = [];
@@ -8590,13 +8637,15 @@ function tryDirectOfferAnswer(userText, historyMsgs, lang, key) {
   const modelOffer =
     parsed.modelHit && parsed.modelHit.model ? findOfferByBrandModel(parsed.modelHit.brand, parsed.modelHit.model) : null;
   if (modelOffer && Number(((modelOffer || {}).stock) || 0) > 0) {
+    const offerCtx = buildOfferContextEntries([{ brand: parsed.modelHit.brand, offer: modelOffer }]);
     setCtx(key, {
       lastBrand: parsed.modelHit.brand,
       lastClass: (modelOffer && modelOffer.class) || undefined,
       lastCategory: (modelOffer && modelOffer.category) || undefined,
       lastSize: (modelOffer && modelOffer.size) || undefined,
-      lastOffersShown: [{ brand: parsed.modelHit.brand, model: modelOffer.model || "" }],
-      lastOfferItems: buildOfferContextEntries([{ brand: parsed.modelHit.brand, offer: modelOffer }]).lastOfferItems,
+      lastOffersShown: offerCtx.lastOffersShown,
+      lastOfferPicks: offerCtx.lastOfferPicks,
+      lastOfferItems: offerCtx.lastOfferItems,
     });
     const title = titleFromHeader(offersHeader(lang, { brand: parsed.modelHit.brand }));
     const reply = buildPremiumOffersReply({
@@ -8647,13 +8696,15 @@ function tryDirectOfferAnswer(userText, historyMsgs, lang, key) {
             ? "Kaynin موديلات Europe Edition."
             : 'Ma kayn 7tta موديل فيه "Europe" daba.';
     if (picked.length) {
+      const offerCtx = buildOfferContextEntries(entries);
       setCtx(key, {
         lastBrand: undefined,
         lastClass: tvCanon || undefined,
         lastCategory: undefined,
         lastSize: undefined,
-        lastOffersShown: picked.map((it) => ({ brand: it.brand, model: (it.offer && it.offer.model) || "" })),
-        lastOfferItems: buildOfferContextEntries(entries).lastOfferItems,
+        lastOffersShown: offerCtx.lastOffersShown,
+        lastOfferPicks: offerCtx.lastOfferPicks,
+        lastOfferItems: offerCtx.lastOfferItems,
       });
     }
     const title = titleFromHeader(offersHeader(lang, { cls: tvCanon }));
@@ -8721,13 +8772,15 @@ function tryDirectOfferAnswer(userText, historyMsgs, lang, key) {
     const pack = listOffersForBrand(brand, { cls: tvCanon, size: sizeVal, limit: MAX_OFFERS, withOffers: true });
     if (pack.offers && pack.offers.length) {
       const entries = pack.offers.map((offer) => ({ brand, offer }));
+      const offerCtx = buildOfferContextEntries(entries);
       setCtx(key, {
         lastBrand: brand,
         lastClass: tvCanon || undefined,
         lastCategory: undefined,
         lastSize: sizeVal,
-        lastOffersShown: (pack.offers || []).map((o) => ({ brand, model: o.model })),
-        lastOfferItems: buildOfferContextEntries(entries).lastOfferItems,
+        lastOffersShown: offerCtx.lastOffersShown,
+        lastOfferPicks: offerCtx.lastOfferPicks,
+        lastOfferItems: offerCtx.lastOfferItems,
       });
       const title = titleFromHeader(offersHeader(lang, { brand, size: sizeVal, cls: tvCanon }));
       return buildPremiumOffersReply({ title, entries, lang, maxChars: CFG.maxReplyChars });
@@ -8738,13 +8791,15 @@ function tryDirectOfferAnswer(userText, historyMsgs, lang, key) {
   if (!brand && Number.isFinite(sizeVal)) {
     const picks = listOffersForSizeAcrossBrands(sizeVal, { cls: tvCanon, limit: MAX_OFFERS }) || [];
     if (picks.length) {
+      const offerCtx = buildOfferContextEntries(picks);
       setCtx(key, {
         lastBrand: undefined,
         lastClass: tvCanon || undefined,
         lastCategory: undefined,
         lastSize: sizeVal,
-        lastOffersShown: picks.map((it) => ({ brand: it.brand, model: (it.offer && it.offer.model) || "" })),
-        lastOfferItems: buildOfferContextEntries(picks).lastOfferItems,
+        lastOffersShown: offerCtx.lastOffersShown,
+        lastOfferPicks: offerCtx.lastOfferPicks,
+        lastOfferItems: offerCtx.lastOfferItems,
       });
       const intro = salesIntro(lang, { size: sizeVal, cls: tvCanon });
       const title = titleFromHeader(offersHeader(lang, { size: sizeVal, cls: tvCanon }));
@@ -8758,14 +8813,16 @@ function tryDirectOfferAnswer(userText, historyMsgs, lang, key) {
     const pack = listOffersForBrand(brand, { category: category2, limit: MAX_OFFERS, withOffers: true, capacityLiters: capacityHint });
     if (pack.offers && pack.offers.length) {
       const entries = pack.offers.map((offer) => ({ brand, offer }));
+      const offerCtx = buildOfferContextEntries(entries);
       setCtx(key, {
         lastBrand: brand,
         lastCategory: category2 || undefined,
         lastClass: undefined,
         lastSize: undefined,
         lastCapacity: capacityHint || undefined,
-        lastOffersShown: (pack.offers || []).map((o) => ({ brand, model: o.model })),
-        lastOfferItems: buildOfferContextEntries(entries).lastOfferItems,
+        lastOffersShown: offerCtx.lastOffersShown,
+        lastOfferPicks: offerCtx.lastOfferPicks,
+        lastOfferItems: offerCtx.lastOfferItems,
       });
       const title = titleFromHeader(offersHeader(lang, { brand, category: category2 }));
       return buildPremiumOffersReply({ title, entries, lang, maxChars: CFG.maxReplyChars });
@@ -8777,13 +8834,15 @@ function tryDirectOfferAnswer(userText, historyMsgs, lang, key) {
     const pack = listOffersForBrand(brand, { cls: cls2, limit: MAX_OFFERS, withOffers: true });
     if (pack.offers && pack.offers.length) {
       const entries = pack.offers.map((offer) => ({ brand, offer }));
+      const offerCtx = buildOfferContextEntries(entries);
       setCtx(key, {
         lastBrand: brand,
         lastClass: cls2 || undefined,
         lastCategory: undefined,
         lastSize: undefined,
-        lastOffersShown: (pack.offers || []).map((o) => ({ brand, model: o.model })),
-        lastOfferItems: buildOfferContextEntries(entries).lastOfferItems,
+        lastOffersShown: offerCtx.lastOffersShown,
+        lastOfferPicks: offerCtx.lastOfferPicks,
+        lastOfferItems: offerCtx.lastOfferItems,
       });
       const title = titleFromHeader(offersHeader(lang, { brand, cls: cls2 }));
       return buildPremiumOffersReply({ title, entries, lang, maxChars: CFG.maxReplyChars });
@@ -8871,14 +8930,16 @@ function tryDirectOfferAnswer(userText, historyMsgs, lang, key) {
 
     if (sorted.length) {
       const entries = sorted.map((it) => ({ brand: it.brand, offer: it.offer }));
+      const offerCtx = buildOfferContextEntries(entries);
       setCtx(key, {
         lastBrand: undefined,
         lastCategory: category2 || undefined,
         lastClass: undefined,
         lastSize: undefined,
         lastCapacity: capacityHint || undefined,
-        lastOffersShown: sorted.map((it) => ({ brand: it.brand, model: (it.offer && it.offer.model) || "" })),
-        lastOfferItems: buildOfferContextEntries(entries).lastOfferItems,
+        lastOffersShown: offerCtx.lastOffersShown,
+        lastOfferPicks: offerCtx.lastOfferPicks,
+        lastOfferItems: offerCtx.lastOfferItems,
       });
       const title = titleFromHeader(offersHeader(lang, { category: category2 }));
       return buildPremiumOffersReply({ title, entries, lang, maxChars: CFG.maxReplyChars });
@@ -8915,14 +8976,16 @@ function tryDirectOfferAnswer(userText, historyMsgs, lang, key) {
 
     if (sorted.length) {
       const entries = sorted.map((it) => ({ brand: it.brand, offer: it.offer }));
+      const offerCtx = buildOfferContextEntries(entries);
       setCtx(key, {
         lastBrand: undefined,
         lastClass: cls2 || undefined,
         lastCategory: undefined,
         lastSize: undefined,
         lastCapacity: capacityHint || undefined,
-        lastOffersShown: sorted.map((it) => ({ brand: it.brand, model: (it.offer && it.offer.model) || "" })),
-        lastOfferItems: buildOfferContextEntries(entries).lastOfferItems,
+        lastOffersShown: offerCtx.lastOffersShown,
+        lastOfferPicks: offerCtx.lastOfferPicks,
+        lastOfferItems: offerCtx.lastOfferItems,
       });
       const title = titleFromHeader(offersHeader(lang, { cls: cls2 }));
       return buildPremiumOffersReply({ title, entries, lang, maxChars: CFG.maxReplyChars });
@@ -8938,14 +9001,16 @@ function tryDirectOfferAnswer(userText, historyMsgs, lang, key) {
         : listOffersForBrand(brand, { cls: cls || null, limit: MAX_OFFERS, withOffers: true, capacityLiters: capacityHint });
     if (pack.lines && pack.lines.length) {
       const entries = (pack.offers || []).map((offer) => ({ brand, offer }));
+      const offerCtx = buildOfferContextEntries(entries);
       setCtx(key, {
         lastBrand: brand,
         lastClass: tvHint ? tvCanon : cls || undefined,
         lastCategory: tvHint ? undefined : category || undefined,
         lastSize: undefined,
         lastCapacity: capacityHint || undefined,
-        lastOffersShown: (pack.offers || []).map((o) => ({ brand, model: o.model })),
-        lastOfferItems: buildOfferContextEntries(entries).lastOfferItems,
+        lastOffersShown: offerCtx.lastOffersShown,
+        lastOfferPicks: offerCtx.lastOfferPicks,
+        lastOfferItems: offerCtx.lastOfferItems,
       });
       const title = titleFromHeader(offersHeader(lang, { brand, cls: tvHint ? tvCanon : cls || undefined }));
       return buildPremiumOffersReply({ title, entries, lang, maxChars: CFG.maxReplyChars });
@@ -8962,14 +9027,16 @@ function tryDirectOfferAnswer(userText, historyMsgs, lang, key) {
     const picked = pickCheapestPerBrand(ranked).slice(0, MAX_OFFERS);
     if (picked.length) {
       const entries = picked.map((it) => ({ brand: it.brand, offer: it.offer }));
+      const offerCtx = buildOfferContextEntries(entries);
       setCtx(key, {
         lastBrand: undefined,
         lastCategory: ctx.lastCategory,
         lastClass: ctx.lastClass || undefined,
         lastSize: undefined,
         lastCapacity: capacityHint,
-        lastOffersShown: picked.map((it) => ({ brand: it.brand, model: (it.offer && it.offer.model) || "" })),
-        lastOfferItems: buildOfferContextEntries(entries).lastOfferItems,
+        lastOffersShown: offerCtx.lastOffersShown,
+        lastOfferPicks: offerCtx.lastOfferPicks,
+        lastOfferItems: offerCtx.lastOfferItems,
       });
       const title = titleFromHeader(offersHeader(lang, { category: ctx.lastCategory }));
       return buildPremiumOffersReply({ title, entries, lang, maxChars: CFG.maxReplyChars });
@@ -8999,13 +9066,15 @@ function bestGuessOffers(lang, key, limit = MAX_OFFERS) {
       const pack = listOffersForBrand(ctx.lastBrand, { cls, size: sizeVal, limit: max, withOffers: true });
       if (pack.lines.length) {
         const entries = (pack.offers || []).map((offer) => ({ brand: ctx.lastBrand, offer }));
+        const offerCtx = buildOfferContextEntries(entries);
         setCtx(key, {
           lastBrand: ctx.lastBrand,
           lastClass: cls || undefined,
           lastCategory: undefined,
           lastSize: sizeVal,
-          lastOffersShown: (pack.offers || []).map((o) => ({ brand: ctx.lastBrand, model: (o && o.model) || "" })),
-          lastOfferItems: buildOfferContextEntries(entries).lastOfferItems,
+          lastOffersShown: offerCtx.lastOffersShown,
+          lastOfferPicks: offerCtx.lastOfferPicks,
+          lastOfferItems: offerCtx.lastOfferItems,
         });
         const title = titleFromHeader(offersHeader(L, { brand: ctx.lastBrand, size: sizeVal, cls }));
         return buildPremiumOffersReply({ title, entries, lang: L, maxChars: CFG.maxReplyChars });
@@ -9014,13 +9083,15 @@ function bestGuessOffers(lang, key, limit = MAX_OFFERS) {
     const picks = listOffersForSizeAcrossBrands(sizeVal, { cls, limit: max }) || [];
     if (picks.length) {
       const entries = picks.map((it) => ({ brand: it.brand, offer: it.offer }));
+      const offerCtx = buildOfferContextEntries(entries);
       setCtx(key, {
         lastBrand: undefined,
         lastClass: cls || undefined,
         lastCategory: undefined,
         lastSize: sizeVal,
-        lastOffersShown: picks.map((it) => ({ brand: it.brand, model: (it.offer && it.offer.model) || "" })),
-        lastOfferItems: buildOfferContextEntries(entries).lastOfferItems,
+        lastOffersShown: offerCtx.lastOffersShown,
+        lastOfferPicks: offerCtx.lastOfferPicks,
+        lastOfferItems: offerCtx.lastOfferItems,
       });
       const intro = salesIntro(L, { size: sizeVal, cls });
       const title = titleFromHeader(offersHeader(L, { size: sizeVal, cls }));
@@ -9045,14 +9116,16 @@ function bestGuessOffers(lang, key, limit = MAX_OFFERS) {
     const picked = pickCheapestPerBrand(ranked).slice(0, max);
     if (picked.length) {
       const entries = picked.map((it) => ({ brand: it.brand, offer: it.offer }));
+      const offerCtx = buildOfferContextEntries(entries);
       setCtx(key, {
         lastBrand: undefined,
         lastCategory: ctx.lastCategory,
         lastClass: ctx.lastClass || undefined,
         lastSize: undefined,
         lastCapacity: ctx.lastCapacity || undefined,
-        lastOffersShown: picked.map((it) => ({ brand: it.brand, model: (it.offer && it.offer.model) || "" })),
-        lastOfferItems: buildOfferContextEntries(entries).lastOfferItems,
+        lastOffersShown: offerCtx.lastOffersShown,
+        lastOfferPicks: offerCtx.lastOfferPicks,
+        lastOfferItems: offerCtx.lastOfferItems,
       });
       const title = titleFromHeader(offersHeader(L, { category: ctx.lastCategory }));
       return buildPremiumOffersReply({ title, entries, lang: L, maxChars: CFG.maxReplyChars });
@@ -9070,13 +9143,15 @@ function bestGuessOffers(lang, key, limit = MAX_OFFERS) {
     const picked = pickCheapestPerBrand(ranked).slice(0, max);
     if (picked.length) {
       const entries = picked.map((it) => ({ brand: it.brand, offer: it.offer }));
+      const offerCtx = buildOfferContextEntries(entries);
       setCtx(key, {
         lastBrand: undefined,
         lastClass: ctx.lastClass,
         lastCategory: undefined,
         lastSize: undefined,
-        lastOffersShown: picked.map((it) => ({ brand: it.brand, model: (it.offer && it.offer.model) || "" })),
-        lastOfferItems: buildOfferContextEntries(entries).lastOfferItems,
+        lastOffersShown: offerCtx.lastOffersShown,
+        lastOfferPicks: offerCtx.lastOfferPicks,
+        lastOfferItems: offerCtx.lastOfferItems,
       });
       const title = titleFromHeader(offersHeader(L, { cls: ctx.lastClass }));
       return buildPremiumOffersReply({ title, entries, lang: L, maxChars: CFG.maxReplyChars });
@@ -9087,13 +9162,15 @@ function bestGuessOffers(lang, key, limit = MAX_OFFERS) {
     const pack = listOffersForBrand(ctx.lastBrand, { cls: ctx.lastClass || null, limit: max, withOffers: true });
     if (pack.lines.length) {
       const entries = (pack.offers || []).map((offer) => ({ brand: ctx.lastBrand, offer }));
+      const offerCtx = buildOfferContextEntries(entries);
       setCtx(key, {
         lastBrand: ctx.lastBrand,
         lastClass: ctx.lastClass || undefined,
         lastCategory: undefined,
         lastSize: undefined,
-        lastOffersShown: (pack.offers || []).map((o) => ({ brand: ctx.lastBrand, model: (o && o.model) || "" })),
-        lastOfferItems: buildOfferContextEntries(entries).lastOfferItems,
+        lastOffersShown: offerCtx.lastOffersShown,
+        lastOfferPicks: offerCtx.lastOfferPicks,
+        lastOfferItems: offerCtx.lastOfferItems,
       });
       const title = titleFromHeader(offersHeader(L, { brand: ctx.lastBrand, cls: ctx.lastClass || undefined }));
       return buildPremiumOffersReply({ title, entries, lang: L, maxChars: CFG.maxReplyChars });
@@ -9117,13 +9194,15 @@ function bestGuessOffers(lang, key, limit = MAX_OFFERS) {
   const picked = pickCheapestPerBrand(ranked).slice(0, max);
   if (picked.length) {
     const entries = picked.map((it) => ({ brand: it.brand, offer: it.offer }));
+    const offerCtx = buildOfferContextEntries(entries);
     setCtx(key, {
       lastBrand: undefined,
       lastClass: undefined,
       lastCategory: undefined,
       lastSize: undefined,
-      lastOffersShown: picked.map((it) => ({ brand: it.brand, model: (it.offer && it.offer.model) || "" })),
-      lastOfferItems: buildOfferContextEntries(entries).lastOfferItems,
+      lastOffersShown: offerCtx.lastOffersShown,
+      lastOfferPicks: offerCtx.lastOfferPicks,
+      lastOfferItems: offerCtx.lastOfferItems,
     });
     const title = titleFromHeader(offersHeader(L, {}));
     return buildPremiumOffersReply({ title, entries, lang: L, maxChars: CFG.maxReplyChars });
@@ -9150,13 +9229,15 @@ function defaultTvOffersForReceiver(lang, key) {
   const picked = pickCheapestPerBrand(ranked).slice(0, MAX_OFFERS);
   if (!picked.length) return null;
 
+  const offerCtx = buildOfferContextEntries(picked);
   setCtx(key, {
     lastBrand: undefined,
     lastCategory: undefined,
     lastClass: tvCanon || undefined,
     lastSize: undefined,
-    lastOffersShown: picked.map((it) => ({ brand: it.brand, model: (it.offer && it.offer.model) || "" })),
-    lastOfferItems: buildOfferContextEntries(picked).lastOfferItems,
+    lastOffersShown: offerCtx.lastOffersShown,
+    lastOfferPicks: offerCtx.lastOfferPicks,
+    lastOfferItems: offerCtx.lastOfferItems,
   });
 
   const title = titleFromHeader(offersHeader(lang, { cls: tvCanon }));
@@ -10149,25 +10230,28 @@ app.post("/wanotifier", express.raw({ type: "*/*", limit: "2mb" }), parseWanotif
         520
       );
       const sizeVal = Number(linkMatch.offer.size);
+      const offerCtx = buildOfferContextEntries(entries);
       setCtx(key, {
         lastBrand: linkMatch.brand,
         lastCategory: linkMatch.offer.category || undefined,
         lastClass: linkMatch.offer.class || undefined,
         lastSize: Number.isFinite(sizeVal) ? sizeVal : undefined,
-        lastOffersShown: [{ brand: linkMatch.brand, model: linkMatch.offer.model || "" }],
-        lastOfferItems: buildOfferContextEntries(entries).lastOfferItems,
+        lastOffersShown: offerCtx.lastOffersShown,
+        lastOfferPicks: offerCtx.lastOfferPicks,
+        lastOfferItems: offerCtx.lastOfferItems,
       });
       memory.push(key, "assistant", reply);
       resetStrikes(key);
       return res.json({ ok: true, reply });
     }
 
-    if (wantsProductDetails(userTextRaw)) {
+    if (wantsProductDetails(userTextRaw, lang)) {
       const optionNumber = parseSelectedOptionNumber(userTextRaw);
       const ctx = getCtx(key);
+      const lastPicks = Array.isArray(ctx.lastOfferPicks) ? ctx.lastOfferPicks : [];
       const lastItems = Array.isArray(ctx.lastOfferItems) ? ctx.lastOfferItems : [];
       if (optionNumber) {
-        const selected = lastItems[optionNumber - 1] || null;
+        const selected = lastPicks[optionNumber - 1] || lastItems[optionNumber - 1] || null;
         if (!selected) {
           const reply = finalizeReply(detailsNoContextReply(lang), 420);
           memory.push(key, "assistant", reply);
@@ -10180,7 +10264,8 @@ app.post("/wanotifier", express.raw({ type: "*/*", limit: "2mb" }), parseWanotif
         resetStrikes(key);
         return res.json({ ok: true, reply });
       }
-      const reply = finalizeReply(detailsNeedOptionReply(lang), 420);
+      const hasContext = lastPicks.length || lastItems.length;
+      const reply = finalizeReply(hasContext ? detailsNeedOptionReply(lang) : detailsNoContextReply(lang), 420);
       memory.push(key, "assistant", reply);
       resetStrikes(key);
       return res.json({ ok: true, reply });
@@ -10201,26 +10286,6 @@ app.post("/wanotifier", express.raw({ type: "*/*", limit: "2mb" }), parseWanotif
       !hasCategoryMatch
     ) {
       return res.json({ ok: true, reply: offersFallbackMessage(lang) });
-    }
-
-    if (isPhotoRequestIntent(userTextRaw) && !supportModeStore.has(key)) {
-      const resolved = resolveOfferForPhoto(userTextRaw, history, key);
-
-      if (!resolved) {
-        const reply = finalizeReply(fallbackWithAgent(lang), 420);
-        memory.push(key, "assistant", reply);
-        resetStrikes(key);
-        return res.json({ ok: true, reply });
-      }
-
-      const displayName = buildOfferDisplayName(resolved.brand, resolved.offer, lang);
-      const linkRaw = buildProductLink(resolved.offer || {}, displayName);
-      const safeLink = sanitizeUrlNoQuestion(linkRaw);
-      const msgKey = resolved.closest ? "photoClosest" : "photoLink";
-      const reply = finalizeReply(t(lang, msgKey, { link: safeLink, name: displayName }), 520);
-      memory.push(key, "assistant", reply);
-      resetStrikes(key);
-      return res.json({ ok: true, reply });
     }
 
     if (isBankTransferIntent(userTextRaw)) {
@@ -10528,13 +10593,17 @@ export {
   trimOffersForPrompt,
   limitOffersForPromptPayload,
   formatOfferLine,
+  buildPremiumOffersReply,
+  buildProductDetailsReply,
   stripQuestions,
   ensureNoQuestion,
   isTvOriginIntent,
   detectContactInfo,
   hasProductInquirySignal,
+  wantsProductDetails,
   extractCapacityLiters,
   resolveCategoryIntent,
+  parseSelectedOptionNumber,
   buildConversationKey,
   normalizeIncoming,
   maybeSendInitialGreeting,

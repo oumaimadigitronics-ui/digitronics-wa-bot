@@ -58,6 +58,10 @@ import {
   ORDER_FORM_URL,
   checkProductAvailability,
   voiceNotUnderstoodTemplate,
+  buildPremiumOffersReply,
+  buildProductDetailsReply,
+  wantsProductDetails,
+  parseSelectedOptionNumber,
 } from "../server.js";
 import { setDepsForTests } from "../src/deps.js";
 
@@ -198,6 +202,38 @@ test("formatOfferLine handles missing values", () => {
 test("formatOfferLine includes sanitized URL", () => {
   const line = formatOfferLine("BrandX", { model: "ModelY", price: 10, url: "http://example.com/p" });
   assert.ok(!line.includes("example.com"));
+});
+
+test("premium offers reply includes purchase block and no product links", () => {
+  const entries = [
+    {
+      brand: "TCL",
+      offer: { name: "TCL Test TV", price: 1999, link: "https://digitronics.ma/produit/tcl-test" },
+    },
+  ];
+
+  const reply = buildPremiumOffersReply({ title: "Offres premium", entries, lang: "fr", maxChars: 2000 });
+
+  assert.ok(reply.includes("╭──────────────────────────────╮"));
+  assert.ok(reply.includes("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"));
+  assert.ok(reply.includes("🌐 Website: https://digitronics.ma"));
+  assert.ok(reply.includes(ORDER_FORM_URL_SAFE));
+  assert.ok(!reply.includes("/produit/"));
+});
+
+test("details reply includes product link when intent and option are provided", () => {
+  const text = "photo option 2";
+  assert.ok(wantsProductDetails(text, "fr"));
+  const option = parseSelectedOptionNumber(text);
+  assert.strictEqual(option, 2);
+
+  const entries = [
+    { brand: "TCL", offer: { name: "TCL A", price: 1500, link: "https://digitronics.ma/produit/tcl-a" } },
+    { brand: "LG", offer: { name: "LG B", price: 2100, link: "https://digitronics.ma/produit/lg-b" } },
+  ];
+
+  const reply = buildProductDetailsReply(entries[option - 1], "fr", true);
+  assert.ok(reply.includes("https://digitronics.ma/produit/lg-b"));
 });
 
 test("isContactTemplateIntent detects contact intents", () => {
@@ -613,8 +649,8 @@ test("default offers use premium template without product links", () => {
   });
 
   const reply = tryDirectOfferAnswer("tv", [], "fr", "k-premium-offers");
-  assert.ok(reply.includes("╭───────────────╮"));
-  assert.ok(reply.includes("━━━━━━━━━━━━━━"));
+  assert.ok(reply.includes("╭──────────────────────────────╮"));
+  assert.ok(reply.includes("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"));
   assert.ok(reply.includes("https://digitronics.ma"));
   assert.ok(reply.includes(ORDER_FORM_URL_SAFE));
   assert.ok(!reply.includes("/produit/"));
@@ -1050,7 +1086,7 @@ test("details reply includes product link when option is selected", async () => 
     });
     const listJson = await listResp.json();
     assert.ok(listJson.ok);
-    assert.ok(listJson.reply.includes("╭───────────────╮"));
+    assert.ok(listJson.reply.includes("╭──────────────────────────────╮"));
 
     const detailsResp = await fetch(`${urlBase}/wanotifier`, {
       method: "POST",
