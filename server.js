@@ -213,22 +213,16 @@ const VOICE_NOT_UNDERSTOOD_TEMPLATE = `╭────────────�
 ✅ Envoyez-le مرة أخرى بصوت واضح أو كتب ليا الرسالة.
 🔒 Service pro — réponse rapide.`;
 
-const OFFERS_FALLBACK_MESSAGE = `🔥 *NOUVELLES OFFRES* 🔥
-(Stock limité – jusqu’à épuisement)
+const OFFERS_FALLBACK_ITEMS = [
+  { brand: "SAMSUNG", offer: { name: 'Samsung Smart TV HD 32" One UI Tizen (32H5000F)', price: 1499 } },
+  { brand: "DAIKO", offer: { name: 'Daiko Google TV 32" Smart Silver Frameless FHD (GLED32AI93DK)', price: 1199 } },
+  { brand: "TCL", offer: { name: 'TCL GoogleTV QLED 32" Full HD (32S5K)', price: 1499 } },
+];
 
-1) *Samsung Smart TV HD 32" One UI Tizen (32H5000F)*
-✅ HD • Tizen • 32 pouces
-💰 Prix : *1499 DH*
-
-2) *Daiko Google TV 32" Smart Silver Frameless FHD (GLED32AI93DK)*
-✅ Google TV • FHD • Frameless
-💰 Prix : *1199 DH*
-
-3) *TCL GoogleTV QLED 32" Full HD (32S5K)*
-✅ QLED • Google TV • Full HD (1920×1080)
-💰 Prix : *1499 DH*
-
-📌 Prix affichés – stock limité (jusqu’à épuisement).`;
+function offersFallbackMessage(lang) {
+  const title = "🔥 Offres premium";
+  return buildPremiumOffersReply({ title, entries: OFFERS_FALLBACK_ITEMS, lang, maxChars: CFG.maxReplyChars });
+}
 
 const BRAND_KNOWLEDGE_PATH = path.join(process.cwd(), "data", "brand_knowledge.json");
 let BRAND_KNOWLEDGE = { topics: {} };
@@ -612,6 +606,19 @@ function stripUrlQueriesInText(text) {
 }
 
 const ORDER_FORM_URL_SAFE = sanitizeUrlNoQuestion(ORDER_FORM_URL);
+
+function stripNonPurchaseUrls(text) {
+  const s = String(text || "");
+  return s
+    .replace(/https?:\/\/\S+/g, (m) => {
+      const safe = sanitizeUrlNoQuestion(m);
+      if (safe.startsWith("https://digitronics.ma") || safe === ORDER_FORM_URL_SAFE) return m;
+      return "";
+    })
+    .replace(/[ \t]{2,}/g, " ")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
 
 function looksLikeFallback(reply) {
   const r = normMatch(reply);
@@ -1182,7 +1189,9 @@ function extractMessageType(body) {
 
 function normalizePhone(raw) {
   const s = arabicIndicToAsciiDigits(String(raw || "")).trim();
-  return s.replace(/[^\d]/g, "").replace(/^00/, "");
+  const digits = s.replace(/[^\d]/g, "").replace(/^00/, "");
+  if (digits.length < 6) return "";
+  return digits;
 }
 
 function extractConversationId(body) {
@@ -1731,14 +1740,14 @@ const INITIAL_GREETING_TTL_MS = 2 * 60 * 60 * 1000;
 
 const GREETING_TEMPLATE = [
   "╭───────────────╮",
-  "│   👋 *Digitronics.ma* 🤖   │",
+  "│   👋 *Digitronics AI Bot* 🤖   │",
   "╰───────────────╯",
   "",
   "🇫🇷 Bonjour ! Dites-moi ce que vous cherchez 👇",
   "🇲🇦 مرحباً! قل لي ماذا تريد وسأساعدك فوراً 👇",
   "",
   "━━━━━━━━━━━━━━━",
-  "💰 Prix  •  ✅ Disponibilité  •  🚚 Livraison  •  🛡️ Garantie",
+  "Prix • Disponibilité • Livraison • Garantie",
   "الأسعار • التوفر • التوصيل • الضمان",
   "━━━━━━━━━━━━━━━",
   "",
@@ -4339,6 +4348,7 @@ function resetCtxForCategoryChange(key, category, cls) {
     lastClass: undefined,
     lastSize: undefined,
     lastOffersShown: undefined,
+    lastOfferItems: undefined,
   });
 }
 
@@ -4366,7 +4376,7 @@ function extractCapacityLiters(text) {
   return null;
 }
 
-// RULE #4 always add links
+// RULE: build product link only when explicitly requested
 function buildProductLink(product, fallbackName) {
   const url = sanitizeUrlNoQuestion(String((product && (product.url || product.link)) || "").trim());
   if (url) return url;
@@ -4394,16 +4404,190 @@ function buildOfferDisplayName(brand, offer, lang = "dzl") {
   return baseName;
 }
 
+function boxHeader(title) {
+  const safeTitle = String(title || "").trim() || "Offres Premium";
+  return ["╭───────────────╮", `│   ${safeTitle}   │`, "╰───────────────╯"].join("\n");
+}
+
+const OFFER_INDEX_EMOJI = ["1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "9️⃣", "🔟"];
+
+function formatOfferIndex(idx) {
+  const n = Number(idx);
+  if (Number.isFinite(n) && n >= 1 && n <= OFFER_INDEX_EMOJI.length) return OFFER_INDEX_EMOJI[n - 1];
+  return `${n}️⃣`;
+}
+
+function formatOfferItem({ idx, name, priceText }) {
+  const numEmoji = formatOfferIndex(idx);
+  const safeName = String(name || "").trim() || "Produit";
+  const safePrice = String(priceText || "").trim() || "Prix sur demande";
+  return `${numEmoji} *${safeName}*\n💰 ${safePrice}`;
+}
+
+function purchaseBlockPremium(lang) {
+  const form = ORDER_FORM_URL_SAFE;
+  if (lang === "fr") {
+    return [
+      "━━━━━━━━━━━━━━",
+      "🌐 Site: https://digitronics.ma",
+      `📝 Formulaire direct: ${form}`,
+      "✅ Commandez via le site ou remplissez le formulaire pour une commande directe",
+    ];
+  }
+  if (lang === "ar") {
+    return [
+      "━━━━━━━━━━━━━━",
+      "🌐 الموقع: https://digitronics.ma",
+      `📝 فورم الطلب المباشر: ${form}`,
+      "✅ تقدر تطلب من الموقع أو تعمر الفورم للطلب المباشر",
+    ];
+  }
+  return [
+    "━━━━━━━━━━━━━━",
+    "🌐 Site: https://digitronics.ma",
+    `📝 Formulaire direct: ${form}`,
+    "✅ تقدر تطلب من الموقع ولا تعمر الفورم للطلب المباشر",
+  ];
+}
+
+function shortenKeepingTail(base, tail, maxChars) {
+  const limit = Number(maxChars) || CFG.maxReplyChars;
+  const baseText = String(base || "").trim();
+  const tailText = String(tail || "").trim();
+  if (!tailText) return shorten(baseText, limit);
+  const separator = baseText ? "\n\n" : "";
+  const combined = baseText + separator + tailText;
+  if (combined.length <= limit) return combined;
+  const allowedBase = Math.max(0, limit - tailText.length - separator.length);
+  const trimmedBase = allowedBase > 0 ? shorten(baseText, allowedBase) : "";
+  return (trimmedBase ? trimmedBase + separator : "") + tailText;
+}
+
+function offersTemplatePremium({ title, subtitleFR, subtitleAR, items, lang, maxChars }) {
+  const headerLines = [boxHeader(title)];
+  if (subtitleFR) headerLines.push(`🇫🇷 ${subtitleFR}`);
+  if (subtitleAR) headerLines.push(`🇲🇦 ${subtitleAR}`);
+  headerLines.push("━━━━━━━━━━━━━━");
+
+  const itemLines = Array.isArray(items) ? items.map((item) => formatOfferItem(item)) : [];
+  const tailLines = purchaseBlockPremium(lang || "dzl");
+  const headerBlock = headerLines.join("\n");
+  const tailBlock = tailLines.join("\n");
+
+  let currentItems = itemLines.slice();
+  const build = () => {
+    const itemBlock = currentItems.length ? currentItems.join("\n\n") : "";
+    const baseBlock = [headerBlock, itemBlock].filter(Boolean).join("\n\n");
+    return shortenKeepingTail(baseBlock, tailBlock, maxChars || CFG.maxReplyChars);
+  };
+
+  let output = build();
+  while (output.length > (maxChars || CFG.maxReplyChars) && currentItems.length > 1) {
+    currentItems = currentItems.slice(0, -1);
+    output = build();
+  }
+
+  const cleaned = ensureNoQuestion(stripUrlQueriesInText(output));
+  return cleaned;
+}
+
+function offerPriceText(offer) {
+  const priceNum = Number((offer && offer.price) || NaN);
+  return Number.isFinite(priceNum) ? `${priceNum} dh` : "Prix sur demande";
+}
+
+function titleFromHeader(header) {
+  return String(header || "").replace(/[：:]\s*$/, "").trim();
+}
+
+function defaultOfferSubtitles() {
+  return {
+    subtitleFR: "Sélection premium disponible",
+    subtitleAR: "اختيارات بريميوم متوفرة",
+  };
+}
+
+function buildOfferItemsFromEntries(entries, lang) {
+  const list = Array.isArray(entries) ? entries : [];
+  return list.map((entry, idx) => {
+    const offer = entry && entry.offer ? entry.offer : entry;
+    const brand = (entry && entry.brand) || (offer && offer.brand) || "";
+    const displayName = buildOfferDisplayName(brand, offer || {}, lang || "dzl");
+    return {
+      idx: idx + 1,
+      name: displayName,
+      priceText: offerPriceText(offer || {}),
+    };
+  });
+}
+
+function normalizeOfferForContext(offer) {
+  if (!offer || typeof offer !== "object") return null;
+  return {
+    name: offer.name || null,
+    model: offer.model || offer.sku || offer.name || null,
+    sku: offer.sku || null,
+    price: Number.isFinite(Number(offer.price)) ? Number(offer.price) : offer.price || null,
+    size: offer.size || null,
+    type: offer.type || null,
+    class: offer.class || offer.className || null,
+    category: offer.category || offer.categoryName || null,
+    capacity_l: offer.capacity_l || null,
+    link: offer.link || offer.url || null,
+    image: offer.image || offer.image_url || null,
+    images: Array.isArray(offer.images) ? offer.images : null,
+    warranty: offer.warranty || null,
+  };
+}
+
+function buildOfferContextEntries(entries) {
+  const list = Array.isArray(entries) ? entries : [];
+  return {
+    lastOffersShown: list.map((entry) => {
+      const offer = entry && entry.offer ? entry.offer : entry;
+      return {
+        brand: (entry && entry.brand) || (offer && offer.brand) || "",
+        model: (offer && (offer.model || offer.sku || offer.name)) || "",
+      };
+    }),
+    lastOfferItems: list
+      .map((entry) => {
+        const offer = entry && entry.offer ? entry.offer : entry;
+        const normalized = normalizeOfferForContext(offer || {});
+        if (!normalized) return null;
+        return {
+          brand: (entry && entry.brand) || (offer && offer.brand) || "",
+          offer: normalized,
+        };
+      })
+      .filter(Boolean),
+  };
+}
+
+function buildPremiumOffersReply({ title, entries, lang, maxChars }) {
+  const subtitles = defaultOfferSubtitles();
+  const items = buildOfferItemsFromEntries(entries, lang);
+  return offersTemplatePremium({
+    title,
+    subtitleFR: subtitles.subtitleFR,
+    subtitleAR: subtitles.subtitleAR,
+    items,
+    lang,
+    maxChars,
+  });
+}
+
 // RULE #1 no questions
-// Offer message format: clickable name + "name - price"
+// Offer message format: simple name + price
 function formatOfferLine(brand, o, opts = {}) {
   let displayName = buildOfferDisplayName(brand, o, opts.lang || "dzl");
+  const typeName = String((o && o.type) || "").trim();
+  if (typeName && !normMatch(displayName).includes(normMatch(typeName))) {
+    displayName = `${displayName} ${typeName}`.trim();
+  }
   displayName = displayName.replace(/\s+simple\s+/gi, " ").replace(/\s+simple$/i, "").trim();
-  const priceNum = Number((o && o.price) || NaN);
-  const pricePart = Number.isFinite(priceNum) ? `${priceNum} dh` : "Prix sur demande";
-  const url = buildProductLink(o || {}, displayName);
-  const linkPart = url ? " - " + url : "";
-  return `• ${displayName} - **${pricePart}**${linkPart}`.trim();
+  const pricePart = offerPriceText(o || {});
+  return `• ${displayName} - **${pricePart}**`.trim();
 }
 
 function priceSummaryText(lang, min, max) {
@@ -5219,7 +5403,9 @@ function selectOffersFromVision(hints) {
       limit: MAX_OFFERS,
       withOffers: true,
     });
-    if (res && Array.isArray(res.offers) && res.offers.length) return res;
+    if (res && Array.isArray(res.offers) && res.offers.length) {
+      return { offers: res.offers.map((offer) => ({ brand, offer })) };
+    }
   }
 
   const items = [];
@@ -5246,7 +5432,7 @@ function selectOffersFromVision(hints) {
 
   const picked = pickCheapestPerBrand(ranked).slice(0, MAX_OFFERS);
 
-  return { offers: picked.map((r) => r.offer), lines: picked.map((r) => formatOfferLine(r.brand, r.offer)) };
+  return { offers: picked.map((r) => ({ brand: r.brand, offer: r.offer })) };
 }
 
 async function handleVisionMedia(mediaInput, lang, key, opts = {}) {
@@ -5349,13 +5535,15 @@ async function handleVisionMedia(mediaInput, lang, key, opts = {}) {
       category: category || undefined,
       size: sizeNum || undefined,
     });
-    const linesRaw = Array.isArray(offers.lines) ? offers.lines : [];
-    const lines = linesRaw.map((ln) => (stripUrls ? ln.replace(/https?:\/\/\S+/g, "").trim() : ln));
-    const body = lines.length ? header + "\n" + lines.join("\n") : fallbackWithAgent(lang);
+    const entries = Array.isArray(offers.offers) ? offers.offers : [];
+    const title = titleFromHeader(header);
+    const body = entries.length
+      ? buildPremiumOffersReply({ title, entries, lang, maxChars: CFG.maxReplyChars })
+      : fallbackWithAgent(lang);
     offerReply = {
       reply: shortenNoQuestion(body, CFG.maxReplyChars),
       confidence: vision.confidence || 0,
-      ctx: { brand, cls, category, sizeNum, offers },
+      ctx: { brand, cls, category, sizeNum, offers: { offers: entries } },
     };
   }
 
@@ -5388,7 +5576,9 @@ async function handleVisionMedia(mediaInput, lang, key, opts = {}) {
     return { reply: ask, confidence: 0 };
   }
 
-  const finalReplyText = stripUrls ? String(offerReply.reply || "").replace(/https?:\/\/\S+/g, "").trim() : String(offerReply.reply || "");
+  const finalReplyText = stripUrls
+    ? stripNonPurchaseUrls(String(offerReply.reply || ""))
+    : String(offerReply.reply || "");
   const finalReply = shortenNoQuestion(finalReplyText, CFG.maxReplyChars);
   const ctxData = offerReply.ctx || {};
   setCtx(key, {
@@ -5398,6 +5588,9 @@ async function handleVisionMedia(mediaInput, lang, key, opts = {}) {
     lastSize: ctxData.sizeNum || undefined,
     lastOffersShown: Array.isArray(ctxData.offers && ctxData.offers.offers)
       ? ctxData.offers.offers.map((o) => ({ brand: ctxData.brand || (o && o.brand) || "", model: (o && o.model) || "" }))
+      : undefined,
+    lastOfferItems: Array.isArray(ctxData.offers && ctxData.offers.offers)
+      ? buildOfferContextEntries(ctxData.offers.offers).lastOfferItems
       : undefined,
   });
 
@@ -6110,6 +6303,7 @@ async function tryWebsiteCatalogAnswer(userText, lang, key) {
     lastClass: isTvContext ? OFFERS_INDEX.classCanon.tv || detectedClass || undefined : detectedClass || undefined,
     lastSize: Number.isFinite(sizeVal) ? sizeVal : undefined,
     lastOffersShown: undefined,
+    lastOfferItems: undefined,
   });
 
   const header = catalogHeader(lang, {
@@ -6119,10 +6313,26 @@ async function tryWebsiteCatalogAnswer(userText, lang, key) {
     size: isTvContext && Number.isFinite(sizeVal) ? sizeVal : undefined,
   });
 
-  const lines = picks.map((it) => formatOfferLine(it.brand, it, { lang }));
+  const entries = picks.map((it) => ({
+    brand: it.brand,
+    offer: {
+      name: it.model,
+      model: it.model,
+      price: it.price,
+      size: it.size,
+      type: it.type,
+      class: it.className,
+      category: it.categoryName,
+      link: it.url,
+    },
+  }));
 
-  const reply = ensureNoQuestion([header, ...lines].filter(Boolean).join("\n"));
-  return shortenNoQuestion(reply, CFG.maxReplyChars);
+  const ctxUpdate = buildOfferContextEntries(entries);
+  setCtx(key, ctxUpdate);
+
+  const title = titleFromHeader(header);
+  const reply = buildPremiumOffersReply({ title, entries, lang, maxChars: CFG.maxReplyChars });
+  return reply;
 }
 
 function checkProductAvailability(lookupResult) {
@@ -6180,7 +6390,13 @@ function checkProductAvailability(lookupResult) {
   return { status: "available", reason: "default_available" };
 }
 
-function outOfStockTemplate(model, brand, size, alternativesText) {
+function alternativesTitle(lang) {
+  if (lang === "fr") return "Alternatives disponibles";
+  if (lang === "ar") return "بدائل متوفرة";
+  return "Alternatives disponibles";
+}
+
+function outOfStockTemplate(model, brand, size, alternativesEntries, lang) {
   const modelSafe = String(model || "").trim() || "ce modèle";
   const sizeTxt = Number.isFinite(size) ? ` ${size}"` : "";
   const brandTxt = String(brand || "").trim();
@@ -6191,11 +6407,13 @@ function outOfStockTemplate(model, brand, size, alternativesText) {
   lines.push(`🇫🇷 Le modèle ${modelSafe}${sizeTxt}${brandTxt ? " (" + brandTxt + ")" : ""} est actuellement indisponible (rupture de stock).`);
   lines.push(`🇲🇦 الموديل ${modelSafe}${sizeTxt} ما متوفرش دابا (غير متوفر / نفاذ المخزون).`);
   lines.push("");
-  lines.push("✅ Alternatives disponibles :");
-  if (alternativesText) lines.push(alternativesText);
-  lines.push("");
+  lines.push("✅ Alternatives disponibles");
   lines.push("🔒 Produits originaux, service fiable, livraison rapide.");
-  return lines.join("\n");
+  const altTitle = alternativesTitle(lang || "dzl");
+  const offerBlock = alternativesEntries && alternativesEntries.length
+    ? buildPremiumOffersReply({ title: altTitle, entries: alternativesEntries, lang: lang || "dzl", maxChars: CFG.maxReplyChars })
+    : "";
+  return [lines.join("\n"), offerBlock].filter(Boolean).join("\n\n");
 }
 
 function filterItemsBySizePreference(items, size) {
@@ -6245,7 +6463,7 @@ function collectOutOfStockAlternatives({ status, brand, size, category, cls }) {
   const tvCanon = OFFERS_INDEX.classCanon.tv || "Tv";
   const clsHint = cls || (Number.isFinite(Number(size)) ? tvCanon : null);
   const categoryHint = category || (clsHint && normMatch(clsHint) === normMatch(tvCanon) ? tvCanon : null);
-  const lines = [];
+  const entries = [];
   const offers = [];
   const seen = new Set();
 
@@ -6263,22 +6481,22 @@ function collectOutOfStockAlternatives({ status, brand, size, category, cls }) {
           { brand: null, category: null, cls: clsHint },
         ];
 
-  for (let i = 0; i < scopes.length && lines.length < limit; i += 1) {
+  for (let i = 0; i < scopes.length && entries.length < limit; i += 1) {
     const scope = scopes[i];
     if (scope.brand === null && scope.category === null && scope.cls === null) continue;
     const items = collectScopeItems(scope);
     const picked = pickAlternativesFromItems(items, { size, cls: scope.cls || null, limit });
-    for (let j = 0; j < picked.length && lines.length < limit; j += 1) {
+    for (let j = 0; j < picked.length && entries.length < limit; j += 1) {
       const it = picked[j];
       const key = `${normMatch(it.brand || "")}|${normMatch((it.offer && it.offer.model) || (it.offer && it.offer.name) || "")}`;
       if (seen.has(key)) continue;
       seen.add(key);
-      lines.push(formatOfferLine(it.brand, it.offer));
+      entries.push({ brand: it.brand, offer: it.offer });
       offers.push({ brand: it.brand, model: (it.offer && it.offer.model) || "" });
     }
   }
 
-  return { lines, offers };
+  return { entries, offers };
 }
 
 async function lookupWebsiteModel(textModel, brandHint) {
@@ -6384,7 +6602,7 @@ function xiaomiAlternativeReply(lang, ctx, key) {
 
   const preferred = ["TCL", "HAIER", "SAMSUNG"];
   const brandsAvailable = [];
-  const lines = [];
+  const entries = [];
   const offersShown = [];
 
   for (let i = 0; i < preferred.length; i += 1) {
@@ -6400,19 +6618,24 @@ function xiaomiAlternativeReply(lang, ctx, key) {
       limit: 1,
       withOffers: true,
     });
-    if (pack.lines.length) {
-      lines.push(
-        offersHeader(L, { brand, cls: clsHint || undefined, category: categoryHint || undefined, size: sizeVal || undefined }) +
-          "\n" +
-          pack.lines.join("\n\n")
-      );
-      offersShown.push(...(pack.offers || []).map((o) => ({ brand, model: o.model || "" })));
+    if (pack.offers && pack.offers.length) {
+      const offer = pack.offers[0];
+      entries.push({ brand, offer });
+      offersShown.push({ brand, model: offer.model || "" });
     }
   }
 
   const brandsTxt = (brandsAvailable.length ? brandsAvailable : preferred).join(", ");
   const intro = t(L, "xiaomiRedirect", { brands: brandsTxt });
-  const reply = ensureNoQuestion([intro, lines.join("\n\n")].filter(Boolean).join("\n\n"));
+  const title = titleFromHeader(
+    offersHeader(L, {
+      cls: clsHint || undefined,
+      category: categoryHint || undefined,
+      size: sizeVal || undefined,
+    })
+  );
+  const offerBlock = entries.length ? buildPremiumOffersReply({ title, entries, lang: L, maxChars: CFG.maxReplyChars }) : "";
+  const reply = ensureNoQuestion([intro, offerBlock].filter(Boolean).join("\n\n"));
 
   if (key) {
     const ctxUpdate = {
@@ -6422,6 +6645,7 @@ function xiaomiAlternativeReply(lang, ctx, key) {
       lastSize: sizeVal || undefined,
     };
     if (offersShown.length) ctxUpdate.lastOffersShown = offersShown;
+    if (entries.length) ctxUpdate.lastOfferItems = buildOfferContextEntries(entries).lastOfferItems;
     setCtx(key, ctxUpdate);
   }
 
@@ -6917,6 +7141,205 @@ function hasProductInquirySignal(text) {
   );
 }
 
+function isMoreOptionsIntent(text) {
+  const raw = String(text || "");
+  const tokens = [
+    "plus d'options",
+    "plus options",
+    "more options",
+    "other options",
+    "autres options",
+    "option de plus",
+    "options autres",
+    "خيارات اخرى",
+    "خيارات أخرى",
+    "اختيارات اخرى",
+    "اختيارات أخرى",
+  ];
+  return hasAnyPhrase(raw, tokens);
+}
+
+function wantsProductDetails(text) {
+  if (isMoreOptionsIntent(text)) return false;
+  const raw = String(text || "");
+  const phrases = [
+    "more info",
+    "more information",
+    "more details",
+    "more about",
+    "more about option",
+    "details",
+    "detail",
+    "specs",
+    "specifications",
+    "product page",
+    "page produit",
+    "fiche technique",
+    "fiche produit",
+    "lien",
+    "link",
+    "send link",
+    "send me the link",
+    "send photo",
+    "send image",
+    "photo",
+    "image",
+    "picture",
+    "détails",
+    "plus d'infos",
+    "plus d info",
+    "plus d’informations",
+    "plus sur",
+    "infos",
+    "معلومات",
+    "تفاصيل",
+    "مواصفات",
+    "رابط",
+    "لينك",
+    "صفحة المنتج",
+    "صور",
+    "صورة",
+    "تصاور",
+    "send photos",
+    "send images",
+  ];
+  return hasAnyPhrase(raw, phrases);
+}
+
+function parseSelectedOptionNumber(text) {
+  const raw = arabicIndicToAsciiDigits(String(text || ""));
+  const digitMatch = raw.match(/\b(10|[1-9])\b/);
+  if (digitMatch && digitMatch[1]) return Number(digitMatch[1]);
+
+  const s = normMatch(raw);
+  const wordMap = new Map([
+    ["first", 1],
+    ["premier", 1],
+    ["premiere", 1],
+    ["première", 1],
+    ["1er", 1],
+    ["1ere", 1],
+    ["one", 1],
+    ["awal", 1],
+    ["lwal", 1],
+    ["الأول", 1],
+    ["الاول", 1],
+    ["second", 2],
+    ["deuxieme", 2],
+    ["deuxième", 2],
+    ["2eme", 2],
+    ["2ème", 2],
+    ["two", 2],
+    ["tani", 2],
+    ["thani", 2],
+    ["الثاني", 2],
+    ["الثانية", 2],
+    ["third", 3],
+    ["troisieme", 3],
+    ["troisième", 3],
+    ["3eme", 3],
+    ["3ème", 3],
+    ["three", 3],
+    ["talt", 3],
+    ["الثالث", 3],
+    ["fourth", 4],
+    ["quatrieme", 4],
+    ["quatrième", 4],
+    ["4eme", 4],
+    ["4ème", 4],
+    ["four", 4],
+    ["الرابع", 4],
+    ["fifth", 5],
+    ["cinquieme", 5],
+    ["cinquième", 5],
+    ["5eme", 5],
+    ["5ème", 5],
+    ["five", 5],
+    ["الخامس", 5],
+  ]);
+
+  for (const [token, value] of wordMap.entries()) {
+    if (includesToken(s, token)) return value;
+  }
+
+  return null;
+}
+
+function getOfferImageUrl(offer) {
+  if (!offer || typeof offer !== "object") return null;
+  const direct = offer.image || offer.image_url || offer.imageUrl || null;
+  if (direct) return String(direct);
+  if (Array.isArray(offer.images) && offer.images.length) {
+    const first = offer.images[0];
+    if (typeof first === "string") return first;
+    if (first && typeof first === "object" && first.url) return String(first.url);
+  }
+  return null;
+}
+
+function buildDetailsHeader(lang) {
+  if (lang === "fr") return "ℹ️ Détails produit";
+  if (lang === "ar") return "ℹ️ تفاصيل المنتج";
+  return "ℹ️ Product details";
+}
+
+function detailsNeedOptionReply(lang) {
+  if (lang === "fr") return "Envoyez le numéro de l’option 1 2 3 pour recevoir les détails et le lien";
+  if (lang === "ar") return "صيفط رقم الاختيار 1 2 3 باش توصلك التفاصيل والرابط";
+  return "Sift رقم الاختيار 1 2 3 باش توصلك التفاصيل والرابط";
+}
+
+function detailsNoContextReply(lang) {
+  if (lang === "fr") return "Aucune liste récente disponible, demandez une liste d’options d’abord";
+  if (lang === "ar") return "ما كايناش لائحة قريبة، طلب لائحة الاختيارات أولا";
+  return "Ma kaynach l-lay7a qريبة، طلب لائحة الاختيارات أولا";
+}
+
+function formatSpecLine(lang, labelFr, labelAr, value) {
+  const safeValue = String(value || "").trim();
+  if (!safeValue) return null;
+  if (lang === "ar") return `✅ ${labelAr}: ${safeValue}`;
+  if (lang === "fr") return `✅ ${labelFr}: ${safeValue}`;
+  return `✅ ${labelFr}: ${safeValue}`;
+}
+
+function buildProductDetailsReply({ brand, offer }, lang, wantsImage) {
+  const safeLang = lang || "dzl";
+  const displayName = buildOfferDisplayName(brand, offer, safeLang);
+  const priceText = offerPriceText(offer || {});
+  const linkRaw = buildProductLink(offer || {}, displayName);
+  const safeLink = sanitizeUrlNoQuestion(linkRaw);
+  const sizeText = Number.isFinite(Number(offer && offer.size)) ? formatSize(safeLang, offer.size) : "";
+  const warrantyText = brand ? warrantyTextForBrand(safeLang, brand, offer && offer.class) : "";
+  const typeText = String((offer && offer.type) || "").trim();
+  const modelText = String((offer && (offer.model || offer.sku)) || "").trim();
+
+  const specs = [
+    formatSpecLine(safeLang, "Marque", "الماركة", brand),
+    formatSpecLine(safeLang, "Modèle", "الموديل", modelText),
+    formatSpecLine(safeLang, "Taille", "الحجم", sizeText),
+    formatSpecLine(safeLang, "Type", "النوع", typeText),
+    warrantyText ? `✅ ${warrantyText}` : null,
+  ].filter(Boolean);
+
+  const header = boxHeader(buildDetailsHeader(safeLang));
+  const lines = [
+    header,
+    "━━━━━━━━━━━━━━",
+    `*${displayName}*`,
+    `💰 ${priceText}`,
+    ...specs,
+    `🔗 ${safeLink}`,
+  ];
+
+  if (wantsImage) {
+    const imageUrl = getOfferImageUrl(offer || {});
+    if (imageUrl) lines.push(`🖼️ ${sanitizeUrlNoQuestion(imageUrl)}`);
+  }
+
+  return ensureNoQuestion(stripUrlQueriesInText(lines.join("\n")));
+}
+
 function isAcknowledgementMessage(text) {
   const raw = normMatch(text || "");
   if (!raw) return false;
@@ -6941,6 +7364,17 @@ function isAcknowledgementMessage(text) {
     if (includesToken(raw, ackTokens[i])) return true;
   }
   return false;
+}
+
+function isShortFollowUp(text) {
+  const raw = String(text || "").trim();
+  if (!raw) return false;
+  if (isOnlyEmojiOrPunct(raw)) return true;
+  const normalized = normMatch(raw);
+  if (!normalized) return false;
+  const tokens = normalized.split(/\s+/).filter(Boolean);
+  if (tokens.length > 1) return false;
+  return normalized.length <= 4;
 }
 
 function isThankYouMessage(text) {
@@ -7064,6 +7498,26 @@ function isTvContext(text) {
   return false;
 }
 
+function isTvOriginIntent(text) {
+  const s = normMatch(text || "");
+  if (!s) return false;
+  const tokens = [
+    "origine",
+    "origin",
+    "made in",
+    "fabrique",
+    "fabriqué",
+    "fabrication",
+    "china",
+    "chine",
+    "europe",
+    "europe edition",
+    "edition europe",
+    "europ",
+  ];
+  return tokens.some((token) => s.includes(normMatch(token)));
+}
+
 function detectApplianceCategory(text) {
   const s = normMatch(text || "");
   if (!s) return null;
@@ -7113,11 +7567,12 @@ function routeApplianceCategoryOffers(applianceKey, lang, key) {
     lastClass: undefined,
     lastSize: undefined,
     lastOffersShown: picks.map((it) => ({ brand: it.brand, model: (it.offer && it.offer.model) || "" })),
+    lastOfferItems: buildOfferContextEntries(picks).lastOfferItems,
   });
 
   const header = offersHeader(lang, { category });
-  const lines = picks.map((it) => formatOfferLine(it.brand, it.offer));
-  return ensureNoQuestion([header, lines.join("\n\n")].filter(Boolean).join("\n"));
+  const title = titleFromHeader(header);
+  return buildPremiumOffersReply({ title, entries: picks, lang, maxChars: CFG.maxReplyChars });
 }
 
 function handleCmDimensionRouting(text, lang, key, sizeInfo) {
@@ -7627,6 +8082,16 @@ function isNegotiationIntent(text) {
   ];
   if (priceOnlyPatterns.some((re) => re.test(normalized))) return false;
 
+  const hasPriceSignal =
+    detectPriceIntent(raw) || normalized.includes("thaman") || normalized.includes("taman") || normalized.includes("prix");
+  const sizeTokens = ["taille", "size", "pouce", "pouces", "inch", "inches", "cm", "dimension", "حجم", "قياس", "بوصة"];
+  const hasSizeIntent = sizeTokens.some((token) => normalized.includes(normMatch(token)));
+  if (hasSizeIntent && !hasPriceSignal) return false;
+
+  if (hasPriceSignal && (/\bn9ass\b/.test(normalized) || /\bn9es\b/.test(normalized) || /\bn9is\b/.test(normalized))) {
+    return true;
+  }
+
   const tokens = [
     "discount",
     "reduce",
@@ -7663,6 +8128,8 @@ function isNegotiationIntent(text) {
     "prix negociable",
     "vous pouvez faire",
     "vous pouvez baisser",
+    "negocier",
+    "négocier",
     "un geste",
     "petit geste",
     "petit prix",
@@ -7672,8 +8139,13 @@ function isNegotiationIntent(text) {
     "تخفيض",
     "خصم",
     "نقص",
+    "نقصان",
     "تنقص",
+    "نقّص",
     "تقدر تنقص",
+    "ن9ass",
+    "n9es",
+    "n9is",
     "أرخص",
     "رخيص",
     "السعر النهائي",
@@ -7976,7 +8448,7 @@ function isLocationIntent(text) {
 }
 
 function isContactTemplateIntent(text) {
-  return isContactIntent(text);
+  return isContactIntent(text) || isOpeningHoursIntent(text);
 }
 
 function contactTemplate() {
@@ -8044,10 +8516,12 @@ function handleTvSizePriceFlow(parsed, lang, key) {
         lastCategory: undefined,
         lastSize: sizeVal,
         lastOffersShown: limited.map((it) => ({ brand: it.brand, model: (it.offer && it.offer.model) || "" })),
+        lastOfferItems: buildOfferContextEntries(limited).lastOfferItems,
       });
       const header = offersHeader(lang, { brand: brand || undefined, size: sizeVal, cls: tvCanon || undefined });
-      const lines = limited.map((it) => formatOfferLine(it.brand, it.offer, { lang }));
-      return ensureNoQuestion([header, ...lines, knowledge].filter(Boolean).join("\n"));
+      const title = titleFromHeader(header);
+      const offerBlock = buildPremiumOffersReply({ title, entries: limited, lang, maxChars: CFG.maxReplyChars });
+      return ensureNoQuestion([knowledge, offerBlock].filter(Boolean).join("\n\n"));
     }
 
     const fallback = fallbackWithAgent(lang);
@@ -8062,7 +8536,6 @@ function handleTvSizePriceFlow(parsed, lang, key) {
   const orderedTop = [...top].sort(
     (a, b) => brandRank(a.brand, TV_BRAND_PRIORITY) - brandRank(b.brand, TV_BRAND_PRIORITY) || Number(a.offer.price) - Number(b.offer.price)
   );
-  const lines = orderedTop.map((it) => formatOfferLine(it.brand, it.offer, { lang }));
   const wantPrice = priceIntent || cheapIntent || Number.isFinite(budget);
 
   setCtx(key, {
@@ -8071,16 +8544,18 @@ function handleTvSizePriceFlow(parsed, lang, key) {
     lastCategory: undefined,
     lastSize: sizeVal,
     lastOffersShown: orderedTop.map((it) => ({ brand: it.brand, model: (it.offer && it.offer.model) || "" })),
+    lastOfferItems: buildOfferContextEntries(orderedTop).lastOfferItems,
   });
 
   const parts = [];
   if (wantPrice && Number.isFinite(minPrice)) parts.push(priceSummaryText(lang, minPrice, Number.isFinite(maxPrice) ? maxPrice : minPrice));
-  parts.push(offersHeader(lang, { brand: brand || undefined, size: sizeVal, cls: tvCanon || undefined }));
-  if (lines.length) parts.push(lines.join("\n\n"));
+  const header = offersHeader(lang, { brand: brand || undefined, size: sizeVal, cls: tvCanon || undefined });
+  const title = titleFromHeader(header);
+  const offerBlock = buildPremiumOffersReply({ title, entries: orderedTop, lang, maxChars: CFG.maxReplyChars });
   if (knowledge) parts.push(knowledge);
+  parts.push(offerBlock);
 
-  const reply = ensureNoQuestion(parts.filter(Boolean).join("\n"));
-  return reply;
+  return ensureNoQuestion(parts.filter(Boolean).join("\n\n"));
 }
 
 function tryDirectOfferAnswer(userText, historyMsgs, lang, key) {
@@ -8105,9 +8580,69 @@ function tryDirectOfferAnswer(userText, historyMsgs, lang, key) {
       lastCategory: (modelOffer && modelOffer.category) || undefined,
       lastSize: (modelOffer && modelOffer.size) || undefined,
       lastOffersShown: [{ brand: parsed.modelHit.brand, model: modelOffer.model || "" }],
+      lastOfferItems: buildOfferContextEntries([{ brand: parsed.modelHit.brand, offer: modelOffer }]).lastOfferItems,
     });
-    const reply = offersHeader(lang, { brand: parsed.modelHit.brand }) + "\n" + formatOfferLine(parsed.modelHit.brand, modelOffer);
-    return ensureNoQuestion(reply);
+    const title = titleFromHeader(offersHeader(lang, { brand: parsed.modelHit.brand }));
+    const reply = buildPremiumOffersReply({
+      title,
+      entries: [{ brand: parsed.modelHit.brand, offer: modelOffer }],
+      lang,
+      maxChars: CFG.maxReplyChars,
+    });
+    return reply;
+  }
+
+  if (isTvOriginIntent(text)) {
+    const tvItems = [];
+    const offersObj = (OFFERS && OFFERS.offers) || {};
+    const tvCanon = OFFERS_INDEX.classCanon.tv || "Tv";
+    const tvNorm = normMatch(tvCanon);
+    for (const [brandKey, arr] of Object.entries(offersObj)) {
+      for (let j = 0; j < arr.length; j += 1) {
+        const offer = arr[j];
+        if (!offer || Number((offer && offer.stock) || 0) <= 0) continue;
+        if (normMatch(offer.class || "") !== tvNorm) continue;
+        tvItems.push({ brand: brandKey, offer });
+      }
+    }
+    const ranked = rankOffers(tvItems, { className: tvCanon, tvClassCanon: tvCanon, limit: null });
+    const picked = pickCheapestPerBrand(ranked).slice(0, MAX_OFFERS);
+    const entries = picked.map((it) => ({ brand: it.brand, offer: it.offer }));
+    const hasEurope = picked.some((it) => {
+      const name = normMatch((it.offer && (it.offer.name || it.offer.model)) || "");
+      return name.includes("europe");
+    });
+    const intro =
+      lang === "fr"
+        ? "Toutes nos TV sont fabriquées en Chine."
+        : lang === "ar"
+          ? "جميع التلفازات مصنوعة في الصين."
+          : "Koulchi TV kaytssn3 f Chin.";
+    const europeLine =
+      lang === "fr"
+        ? hasEurope
+          ? "Modèles Europe Edition disponibles."
+          : 'Aucun modèle avec "Europe" pour le moment.'
+        : lang === "ar"
+          ? hasEurope
+            ? "كاينين موديلات Europe Edition."
+            : "ما كاين حتى موديل فيه Europe دابا."
+          : hasEurope
+            ? "Kaynin موديلات Europe Edition."
+            : 'Ma kayn 7tta موديل فيه "Europe" daba.';
+    if (picked.length) {
+      setCtx(key, {
+        lastBrand: undefined,
+        lastClass: tvCanon || undefined,
+        lastCategory: undefined,
+        lastSize: undefined,
+        lastOffersShown: picked.map((it) => ({ brand: it.brand, model: (it.offer && it.offer.model) || "" })),
+        lastOfferItems: buildOfferContextEntries(entries).lastOfferItems,
+      });
+    }
+    const title = titleFromHeader(offersHeader(lang, { cls: tvCanon }));
+    const offerBlock = picked.length ? buildPremiumOffersReply({ title, entries, lang, maxChars: CFG.maxReplyChars }) : "";
+    return ensureNoQuestion([intro, europeLine, offerBlock].filter(Boolean).join("\n\n"));
   }
 
   const tivoliIntent = isTivoliOvenIntent(text);
@@ -8168,16 +8703,18 @@ function tryDirectOfferAnswer(userText, historyMsgs, lang, key) {
 
   if (brand && Number.isFinite(sizeVal)) {
     const pack = listOffersForBrand(brand, { cls: tvCanon, size: sizeVal, limit: MAX_OFFERS, withOffers: true });
-    if (pack.lines.length) {
+    if (pack.offers && pack.offers.length) {
+      const entries = pack.offers.map((offer) => ({ brand, offer }));
       setCtx(key, {
         lastBrand: brand,
         lastClass: tvCanon || undefined,
         lastCategory: undefined,
         lastSize: sizeVal,
         lastOffersShown: (pack.offers || []).map((o) => ({ brand, model: o.model })),
+        lastOfferItems: buildOfferContextEntries(entries).lastOfferItems,
       });
-      const base = offersHeader(lang, { brand, size: sizeVal, cls: tvCanon }) + "\n" + pack.lines.join("\n\n");
-      return ensureNoQuestion(base);
+      const title = titleFromHeader(offersHeader(lang, { brand, size: sizeVal, cls: tvCanon }));
+      return buildPremiumOffersReply({ title, entries, lang, maxChars: CFG.maxReplyChars });
     }
     return ensureNoQuestion(t(lang, "notAvailableSize", { brand, size: sizeVal }));
   }
@@ -8185,23 +8722,26 @@ function tryDirectOfferAnswer(userText, historyMsgs, lang, key) {
   if (!brand && Number.isFinite(sizeVal)) {
     const picks = listOffersForSizeAcrossBrands(sizeVal, { cls: tvCanon, limit: MAX_OFFERS }) || [];
     if (picks.length) {
-      const lines = picks.map((it) => formatOfferLine(it.brand, it.offer)).join("\n\n");
       setCtx(key, {
         lastBrand: undefined,
         lastClass: tvCanon || undefined,
         lastCategory: undefined,
         lastSize: sizeVal,
         lastOffersShown: picks.map((it) => ({ brand: it.brand, model: (it.offer && it.offer.model) || "" })),
+        lastOfferItems: buildOfferContextEntries(picks).lastOfferItems,
       });
-      const base = salesIntro(lang, { size: sizeVal, cls: tvCanon }) + "\n\n" + lines;
-      return ensureNoQuestion(base);
+      const intro = salesIntro(lang, { size: sizeVal, cls: tvCanon });
+      const title = titleFromHeader(offersHeader(lang, { size: sizeVal, cls: tvCanon }));
+      const offerBlock = buildPremiumOffersReply({ title, entries: picks, lang, maxChars: CFG.maxReplyChars });
+      return ensureNoQuestion([intro, offerBlock].filter(Boolean).join("\n\n"));
     }
     return ensureNoQuestion(t(lang, "askBrandForSize", { size: sizeVal }));
   }
 
   if (brand && category2) {
     const pack = listOffersForBrand(brand, { category: category2, limit: MAX_OFFERS, withOffers: true, capacityLiters: capacityHint });
-    if (pack.lines.length) {
+    if (pack.offers && pack.offers.length) {
+      const entries = pack.offers.map((offer) => ({ brand, offer }));
       setCtx(key, {
         lastBrand: brand,
         lastCategory: category2 || undefined,
@@ -8209,25 +8749,28 @@ function tryDirectOfferAnswer(userText, historyMsgs, lang, key) {
         lastSize: undefined,
         lastCapacity: capacityHint || undefined,
         lastOffersShown: (pack.offers || []).map((o) => ({ brand, model: o.model })),
+        lastOfferItems: buildOfferContextEntries(entries).lastOfferItems,
       });
-      const base = offersHeader(lang, { brand, category: category2 }) + "\n" + pack.lines.join("\n\n");
-      return ensureNoQuestion(base);
+      const title = titleFromHeader(offersHeader(lang, { brand, category: category2 }));
+      return buildPremiumOffersReply({ title, entries, lang, maxChars: CFG.maxReplyChars });
     }
     return ensureNoQuestion(t(lang, "categoryUnavailable", { category: category2 }));
   }
 
   if (brand && cls2) {
     const pack = listOffersForBrand(brand, { cls: cls2, limit: MAX_OFFERS, withOffers: true });
-    if (pack.lines.length) {
+    if (pack.offers && pack.offers.length) {
+      const entries = pack.offers.map((offer) => ({ brand, offer }));
       setCtx(key, {
         lastBrand: brand,
         lastClass: cls2 || undefined,
         lastCategory: undefined,
         lastSize: undefined,
         lastOffersShown: (pack.offers || []).map((o) => ({ brand, model: o.model })),
+        lastOfferItems: buildOfferContextEntries(entries).lastOfferItems,
       });
-      const base = offersHeader(lang, { brand, cls: cls2 }) + "\n" + pack.lines.join("\n\n");
-      return ensureNoQuestion(base);
+      const title = titleFromHeader(offersHeader(lang, { brand, cls: cls2 }));
+      return buildPremiumOffersReply({ title, entries, lang, maxChars: CFG.maxReplyChars });
     }
     if (hasForced && cls2) return ensureNoQuestion(t(lang, "categoryUnavailable", { category: cls2 }));
   }
@@ -8311,6 +8854,7 @@ function tryDirectOfferAnswer(userText, historyMsgs, lang, key) {
     }
 
     if (sorted.length) {
+      const entries = sorted.map((it) => ({ brand: it.brand, offer: it.offer }));
       setCtx(key, {
         lastBrand: undefined,
         lastCategory: category2 || undefined,
@@ -8318,10 +8862,10 @@ function tryDirectOfferAnswer(userText, historyMsgs, lang, key) {
         lastSize: undefined,
         lastCapacity: capacityHint || undefined,
         lastOffersShown: sorted.map((it) => ({ brand: it.brand, model: (it.offer && it.offer.model) || "" })),
+        lastOfferItems: buildOfferContextEntries(entries).lastOfferItems,
       });
-      const lines = sorted.map((it) => formatOfferLine(it.brand, it.offer)).join("\n\n");
-      const base = offersHeader(lang, { category: category2 }) + "\n" + lines;
-      return ensureNoQuestion(base);
+      const title = titleFromHeader(offersHeader(lang, { category: category2 }));
+      return buildPremiumOffersReply({ title, entries, lang, maxChars: CFG.maxReplyChars });
     }
     if (hasForced) return ensureNoQuestion(t(lang, "categoryUnavailable", { category: category2 }));
   }
@@ -8354,6 +8898,7 @@ function tryDirectOfferAnswer(userText, historyMsgs, lang, key) {
       : pickCheapestPerBrand(rankOffers(items, { limit: null, capacityLiters: capacityHint })).slice(0, MAX_OFFERS);
 
     if (sorted.length) {
+      const entries = sorted.map((it) => ({ brand: it.brand, offer: it.offer }));
       setCtx(key, {
         lastBrand: undefined,
         lastClass: cls2 || undefined,
@@ -8361,10 +8906,10 @@ function tryDirectOfferAnswer(userText, historyMsgs, lang, key) {
         lastSize: undefined,
         lastCapacity: capacityHint || undefined,
         lastOffersShown: sorted.map((it) => ({ brand: it.brand, model: (it.offer && it.offer.model) || "" })),
+        lastOfferItems: buildOfferContextEntries(entries).lastOfferItems,
       });
-      const lines = sorted.map((it) => formatOfferLine(it.brand, it.offer)).join("\n\n");
-      const base = offersHeader(lang, { cls: cls2 }) + "\n" + lines;
-      return ensureNoQuestion(base);
+      const title = titleFromHeader(offersHeader(lang, { cls: cls2 }));
+      return buildPremiumOffersReply({ title, entries, lang, maxChars: CFG.maxReplyChars });
     }
     if (hasForced && cls2) return ensureNoQuestion(t(lang, "categoryUnavailable", { category: cls2 }));
   }
@@ -8376,6 +8921,7 @@ function tryDirectOfferAnswer(userText, historyMsgs, lang, key) {
         ? packTv
         : listOffersForBrand(brand, { cls: cls || null, limit: MAX_OFFERS, withOffers: true, capacityLiters: capacityHint });
     if (pack.lines && pack.lines.length) {
+      const entries = (pack.offers || []).map((offer) => ({ brand, offer }));
       setCtx(key, {
         lastBrand: brand,
         lastClass: tvHint ? tvCanon : cls || undefined,
@@ -8383,9 +8929,10 @@ function tryDirectOfferAnswer(userText, historyMsgs, lang, key) {
         lastSize: undefined,
         lastCapacity: capacityHint || undefined,
         lastOffersShown: (pack.offers || []).map((o) => ({ brand, model: o.model })),
+        lastOfferItems: buildOfferContextEntries(entries).lastOfferItems,
       });
-      const base = offersHeader(lang, { brand, cls: tvHint ? tvCanon : cls || undefined }) + "\n" + pack.lines.join("\n\n");
-      return ensureNoQuestion(base);
+      const title = titleFromHeader(offersHeader(lang, { brand, cls: tvHint ? tvCanon : cls || undefined }));
+      return buildPremiumOffersReply({ title, entries, lang, maxChars: CFG.maxReplyChars });
     }
   }
 
@@ -8398,6 +8945,7 @@ function tryDirectOfferAnswer(userText, historyMsgs, lang, key) {
     const ranked = rankOffers(items, { limit: null, capacityLiters: capacityHint });
     const picked = pickCheapestPerBrand(ranked).slice(0, MAX_OFFERS);
     if (picked.length) {
+      const entries = picked.map((it) => ({ brand: it.brand, offer: it.offer }));
       setCtx(key, {
         lastBrand: undefined,
         lastCategory: ctx.lastCategory,
@@ -8405,10 +8953,10 @@ function tryDirectOfferAnswer(userText, historyMsgs, lang, key) {
         lastSize: undefined,
         lastCapacity: capacityHint,
         lastOffersShown: picked.map((it) => ({ brand: it.brand, model: (it.offer && it.offer.model) || "" })),
+        lastOfferItems: buildOfferContextEntries(entries).lastOfferItems,
       });
-      const lines = picked.map((it) => formatOfferLine(it.brand, it.offer)).join("\n\n");
-      const base = offersHeader(lang, { category: ctx.lastCategory });
-      return ensureNoQuestion(base + "\n" + lines);
+      const title = titleFromHeader(offersHeader(lang, { category: ctx.lastCategory }));
+      return buildPremiumOffersReply({ title, entries, lang, maxChars: CFG.maxReplyChars });
     }
   }
 
@@ -8434,29 +8982,34 @@ function bestGuessOffers(lang, key, limit = MAX_OFFERS) {
     if (ctx.lastBrand) {
       const pack = listOffersForBrand(ctx.lastBrand, { cls, size: sizeVal, limit: max, withOffers: true });
       if (pack.lines.length) {
+        const entries = (pack.offers || []).map((offer) => ({ brand: ctx.lastBrand, offer }));
         setCtx(key, {
           lastBrand: ctx.lastBrand,
           lastClass: cls || undefined,
           lastCategory: undefined,
           lastSize: sizeVal,
           lastOffersShown: (pack.offers || []).map((o) => ({ brand: ctx.lastBrand, model: (o && o.model) || "" })),
+          lastOfferItems: buildOfferContextEntries(entries).lastOfferItems,
         });
-        const header = offersHeader(L, { brand: ctx.lastBrand, size: sizeVal, cls });
-        return ensureNoQuestion([header, pack.lines.join("\n\n")].filter(Boolean).join("\n"));
+        const title = titleFromHeader(offersHeader(L, { brand: ctx.lastBrand, size: sizeVal, cls }));
+        return buildPremiumOffersReply({ title, entries, lang: L, maxChars: CFG.maxReplyChars });
       }
     }
     const picks = listOffersForSizeAcrossBrands(sizeVal, { cls, limit: max }) || [];
     if (picks.length) {
+      const entries = picks.map((it) => ({ brand: it.brand, offer: it.offer }));
       setCtx(key, {
         lastBrand: undefined,
         lastClass: cls || undefined,
         lastCategory: undefined,
         lastSize: sizeVal,
         lastOffersShown: picks.map((it) => ({ brand: it.brand, model: (it.offer && it.offer.model) || "" })),
+        lastOfferItems: buildOfferContextEntries(entries).lastOfferItems,
       });
       const intro = salesIntro(L, { size: sizeVal, cls });
-      const lines = picks.map((it) => formatOfferLine(it.brand, it.offer)).join("\n\n");
-      return ensureNoQuestion((intro ? intro + "\n\n" : "") + lines);
+      const title = titleFromHeader(offersHeader(L, { size: sizeVal, cls }));
+      const offerBlock = buildPremiumOffersReply({ title, entries, lang: L, maxChars: CFG.maxReplyChars });
+      return ensureNoQuestion([intro, offerBlock].filter(Boolean).join("\n\n"));
     }
   }
 
@@ -8475,6 +9028,7 @@ function bestGuessOffers(lang, key, limit = MAX_OFFERS) {
     });
     const picked = pickCheapestPerBrand(ranked).slice(0, max);
     if (picked.length) {
+      const entries = picked.map((it) => ({ brand: it.brand, offer: it.offer }));
       setCtx(key, {
         lastBrand: undefined,
         lastCategory: ctx.lastCategory,
@@ -8482,10 +9036,10 @@ function bestGuessOffers(lang, key, limit = MAX_OFFERS) {
         lastSize: undefined,
         lastCapacity: ctx.lastCapacity || undefined,
         lastOffersShown: picked.map((it) => ({ brand: it.brand, model: (it.offer && it.offer.model) || "" })),
+        lastOfferItems: buildOfferContextEntries(entries).lastOfferItems,
       });
-      const lines = picked.map((it) => formatOfferLine(it.brand, it.offer)).join("\n\n");
-      const base = offersHeader(L, { category: ctx.lastCategory });
-      return ensureNoQuestion(base + "\n" + lines);
+      const title = titleFromHeader(offersHeader(L, { category: ctx.lastCategory }));
+      return buildPremiumOffersReply({ title, entries, lang: L, maxChars: CFG.maxReplyChars });
     }
   }
 
@@ -8499,31 +9053,34 @@ function bestGuessOffers(lang, key, limit = MAX_OFFERS) {
     const ranked = rankOffers(items, { limit: null, className: ctx.lastClass, tvClassCanon: tvCanon });
     const picked = pickCheapestPerBrand(ranked).slice(0, max);
     if (picked.length) {
+      const entries = picked.map((it) => ({ brand: it.brand, offer: it.offer }));
       setCtx(key, {
         lastBrand: undefined,
         lastClass: ctx.lastClass,
         lastCategory: undefined,
         lastSize: undefined,
         lastOffersShown: picked.map((it) => ({ brand: it.brand, model: (it.offer && it.offer.model) || "" })),
+        lastOfferItems: buildOfferContextEntries(entries).lastOfferItems,
       });
-      const lines = picked.map((it) => formatOfferLine(it.brand, it.offer)).join("\n\n");
-      const base = offersHeader(L, { cls: ctx.lastClass });
-      return ensureNoQuestion(base + "\n" + lines);
+      const title = titleFromHeader(offersHeader(L, { cls: ctx.lastClass }));
+      return buildPremiumOffersReply({ title, entries, lang: L, maxChars: CFG.maxReplyChars });
     }
   }
 
   if (ctx.lastBrand) {
     const pack = listOffersForBrand(ctx.lastBrand, { cls: ctx.lastClass || null, limit: max, withOffers: true });
     if (pack.lines.length) {
+      const entries = (pack.offers || []).map((offer) => ({ brand: ctx.lastBrand, offer }));
       setCtx(key, {
         lastBrand: ctx.lastBrand,
         lastClass: ctx.lastClass || undefined,
         lastCategory: undefined,
         lastSize: undefined,
         lastOffersShown: (pack.offers || []).map((o) => ({ brand: ctx.lastBrand, model: (o && o.model) || "" })),
+        lastOfferItems: buildOfferContextEntries(entries).lastOfferItems,
       });
-      const base = offersHeader(L, { brand: ctx.lastBrand, cls: ctx.lastClass || undefined });
-      return ensureNoQuestion(base + "\n" + pack.lines.join("\n\n"));
+      const title = titleFromHeader(offersHeader(L, { brand: ctx.lastBrand, cls: ctx.lastClass || undefined }));
+      return buildPremiumOffersReply({ title, entries, lang: L, maxChars: CFG.maxReplyChars });
     }
   }
 
@@ -8543,16 +9100,17 @@ function bestGuessOffers(lang, key, limit = MAX_OFFERS) {
   const ranked = rankOffers(items, { limit: null, className: null, tvClassCanon: null });
   const picked = pickCheapestPerBrand(ranked).slice(0, max);
   if (picked.length) {
+    const entries = picked.map((it) => ({ brand: it.brand, offer: it.offer }));
     setCtx(key, {
       lastBrand: undefined,
       lastClass: undefined,
       lastCategory: undefined,
       lastSize: undefined,
       lastOffersShown: picked.map((it) => ({ brand: it.brand, model: (it.offer && it.offer.model) || "" })),
+      lastOfferItems: buildOfferContextEntries(entries).lastOfferItems,
     });
-    const lines = picked.map((it) => formatOfferLine(it.brand, it.offer)).join("\n\n");
-    const base = offersHeader(L, {});
-    return ensureNoQuestion(base + "\n" + lines);
+    const title = titleFromHeader(offersHeader(L, {}));
+    return buildPremiumOffersReply({ title, entries, lang: L, maxChars: CFG.maxReplyChars });
   }
 
   return null;
@@ -8582,11 +9140,11 @@ function defaultTvOffersForReceiver(lang, key) {
     lastClass: tvCanon || undefined,
     lastSize: undefined,
     lastOffersShown: picked.map((it) => ({ brand: it.brand, model: (it.offer && it.offer.model) || "" })),
+    lastOfferItems: buildOfferContextEntries(picked).lastOfferItems,
   });
 
-  const lines = picked.map((it) => formatOfferLine(it.brand, it.offer, { lang })).join("\n\n");
-  const header = offersHeader(lang, { cls: tvCanon });
-  return [header, lines].filter(Boolean).join("\n");
+  const title = titleFromHeader(offersHeader(lang, { cls: tvCanon }));
+  return buildPremiumOffersReply({ title, entries: picked, lang, maxChars: CFG.maxReplyChars });
 }
 
 const MAX_OFFERS_FOR_PROMPT = 20;
@@ -8799,9 +9357,10 @@ function buildSystemPrompt(offersSubset, lang, opts) {
     "- Do NOT mention stock quantity.\n" +
     "- Mention delivery/payment/warranty ONLY if the client asks.\n" +
     "- If client asks about products/prices/options, DO NOT invent or use OFFERS. Catalog replies are handled separately. Provide only short helpful text if needed.\n" +
-    "- If client asks for photo/picture/image: ONLY provide product link if present, else write ONE short instruction sentence without question marks.\n" +
+    "- Only output product links when the client explicitly asks for details/specs, product link/page, or photos.\n" +
+    "- If client asks for photo/picture/image and no link is available, write ONE short instruction sentence without question marks.\n" +
     "- ALWAYS recommend exactly 3 options, never more or less.\n" +
-    "- Do NOT output any URL in normal replies. Only output a product link in the photo flow handled outside.\n" +
+    "- Do NOT output URLs in default offers lists.\n" +
     "- Do NOT ask questions. Never output question marks.\n\n" +
     "TV OS RULES:\n" +
     "- Google TV only when the product name or specs explicitly mention \"Google TV\".\n" +
@@ -9436,7 +9995,7 @@ app.post("/wanotifier", express.raw({ type: "*/*", limit: "2mb" }), parseWanotif
 
     if (isOffersIntent(userTextRaw)) {
       if (!knowledgeBrand && !knowledgeCategory) {
-        const reply = finalizeReply(OFFERS_FALLBACK_MESSAGE, 520);
+        const reply = finalizeReply(offersFallbackMessage(lang), 520);
         memory.push(key, "assistant", reply);
         resetStrikes(key);
         return res.json({ ok: true, reply });
@@ -9448,7 +10007,7 @@ app.post("/wanotifier", express.raw({ type: "*/*", limit: "2mb" }), parseWanotif
         resolveCategoryIntent(userTextRaw) || detectCategory(userTextRaw) || knowledgeCategory || null;
 
       if (!brandHint && !classHint && !categoryHint) {
-        const reply = finalizeReply(OFFERS_FALLBACK_MESSAGE, 520);
+        const reply = finalizeReply(offersFallbackMessage(lang), 520);
         memory.push(key, "assistant", reply);
         resetStrikes(key);
         return res.json({ ok: true, reply });
@@ -9567,8 +10126,12 @@ app.post("/wanotifier", express.raw({ type: "*/*", limit: "2mb" }), parseWanotif
         cls: linkMatch.offer.class || undefined,
         category: linkMatch.offer.category || undefined,
       });
-      const line = formatOfferLine(linkMatch.brand, linkMatch.offer);
-      const reply = finalizeReply([header, line].filter(Boolean).join("\n"), 520);
+      const entries = [{ brand: linkMatch.brand, offer: linkMatch.offer }];
+      const title = titleFromHeader(header);
+      const reply = finalizeReply(
+        buildPremiumOffersReply({ title, entries, lang, maxChars: CFG.maxReplyChars }),
+        520
+      );
       const sizeVal = Number(linkMatch.offer.size);
       setCtx(key, {
         lastBrand: linkMatch.brand,
@@ -9576,7 +10139,32 @@ app.post("/wanotifier", express.raw({ type: "*/*", limit: "2mb" }), parseWanotif
         lastClass: linkMatch.offer.class || undefined,
         lastSize: Number.isFinite(sizeVal) ? sizeVal : undefined,
         lastOffersShown: [{ brand: linkMatch.brand, model: linkMatch.offer.model || "" }],
+        lastOfferItems: buildOfferContextEntries(entries).lastOfferItems,
       });
+      memory.push(key, "assistant", reply);
+      resetStrikes(key);
+      return res.json({ ok: true, reply });
+    }
+
+    if (wantsProductDetails(userTextRaw)) {
+      const optionNumber = parseSelectedOptionNumber(userTextRaw);
+      const ctx = getCtx(key);
+      const lastItems = Array.isArray(ctx.lastOfferItems) ? ctx.lastOfferItems : [];
+      if (optionNumber) {
+        const selected = lastItems[optionNumber - 1] || null;
+        if (!selected) {
+          const reply = finalizeReply(detailsNoContextReply(lang), 420);
+          memory.push(key, "assistant", reply);
+          resetStrikes(key);
+          return res.json({ ok: true, reply });
+        }
+        const wantsImage = isPhotoRequestIntent(userTextRaw);
+        const reply = finalizeReply(buildProductDetailsReply(selected, lang, wantsImage), 620);
+        memory.push(key, "assistant", reply);
+        resetStrikes(key);
+        return res.json({ ok: true, reply });
+      }
+      const reply = finalizeReply(detailsNeedOptionReply(lang), 420);
       memory.push(key, "assistant", reply);
       resetStrikes(key);
       return res.json({ ok: true, reply });
@@ -9596,7 +10184,7 @@ app.post("/wanotifier", express.raw({ type: "*/*", limit: "2mb" }), parseWanotif
       !hasProductMatch &&
       !hasCategoryMatch
     ) {
-      return res.json({ ok: true, reply: OFFERS_FALLBACK_MESSAGE });
+      return res.json({ ok: true, reply: offersFallbackMessage(lang) });
     }
 
     if (isPhotoRequestIntent(userTextRaw) && !supportModeStore.has(key)) {
@@ -9753,9 +10341,11 @@ app.post("/wanotifier", express.raw({ type: "*/*", limit: "2mb" }), parseWanotif
       const picked = pickFromLastShown(key, prefer);
 
       if (picked) {
-        const line = formatOfferLine(picked.brand, picked.offer);
+        const entries = [{ brand: picked.brand, offer: picked.offer }];
         const msg = prefer === "cheapest" ? t(lang, "preferCheapest") : t(lang, "preferBest");
-        const out = finalizeReply(msg + "\n" + line, 520);
+        const title = titleFromHeader(offersHeader(lang, { brand: picked.brand }));
+        const offerBlock = buildPremiumOffersReply({ title, entries, lang, maxChars: CFG.maxReplyChars });
+        const out = finalizeReply([msg, offerBlock].filter(Boolean).join("\n\n"), 520);
         memory.push(key, "assistant", out);
         resetStrikes(key);
         return res.json({ ok: true, reply: out });
@@ -9806,9 +10396,8 @@ app.post("/wanotifier", express.raw({ type: "*/*", limit: "2mb" }), parseWanotif
           category: parsed.category || parsed.cls || null,
           cls: parsed.cls || null,
         });
-        const alternativesText = alternatives.lines.slice(0, 3).join("\n");
         const reply = finalizeReply(
-          outOfStockTemplate(modelCode.model, requestedBrand, requestedSize, alternativesText),
+          outOfStockTemplate(modelCode.model, requestedBrand, requestedSize, alternatives.entries, lang),
           900
         );
         console.log(
@@ -9818,7 +10407,7 @@ app.post("/wanotifier", express.raw({ type: "*/*", limit: "2mb" }), parseWanotif
             requestedModel: modelCode.model,
             requestedBrand,
             requestedSize,
-            alternativesCount: alternatives.lines.length,
+            alternativesCount: alternatives.entries.length,
           })
         );
         memory.push(key, "assistant", reply);
@@ -9858,6 +10447,17 @@ app.post("/wanotifier", express.raw({ type: "*/*", limit: "2mb" }), parseWanotif
       const bestGuess = bestGuessOffers(lang, key);
       if (bestGuess) {
         const reply = finalizeReply(bestGuess + "\n\n" + agentWillFinalize(lang), 520);
+        memory.push(key, "assistant", reply);
+        resetStrikes(key);
+        return res.json({ ok: true, reply });
+      }
+    }
+
+    const shortFollowUp = isShortFollowUp(userTextRaw);
+    if (!hasShoppingIntent && shortFollowUp && (ctxData.lastOffersShown || ctxData.lastOfferItems)) {
+      const bestGuess = bestGuessOffers(lang, key);
+      if (bestGuess) {
+        const reply = finalizeReply(bestGuess, 520);
         memory.push(key, "assistant", reply);
         resetStrikes(key);
         return res.json({ ok: true, reply });
@@ -10273,7 +10873,7 @@ async function processIncomingMedia({ mediaInfo, mediaMeta, msgType, lang, key, 
         filePath: inputPath,
         mimeType: safeMime,
         sizeBytes,
-        languageHint: lang,
+        languageHint: normalizeLanguageHint(lang) || lang,
         maxBytes: CFG.mediaMaxBytesAudio,
         model: CFG.openaiTranscribeModel || "gpt-4o-mini-transcribe",
         minScore: CFG.audioMinScore,
