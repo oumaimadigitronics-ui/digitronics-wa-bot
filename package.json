@@ -5,7 +5,7 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "test": "NODE_ENV=test node --test tests/offers.test.js tests/audio-*.test.js"
+    "test": "NODE_ENV=test node --test tests/offers.test.js tests/category-switch.test.js tests/audio-*.test.js"
   },
   "author": "",
   "license": "ISC",
