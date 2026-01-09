@@ -2298,7 +2298,7 @@ function buildTechTopicAnswer(topicKey, lang) {
       `✅ Choisir B si: ${bFr.join(" · ")}`.trim(),
       `✅ اختار A إلا: ${aAr.join(" · ")}`.trim(),
       `✅ اختار B إلا: ${bAr.join(" · ")}`.trim(),
-      "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
+      "━━━━━━━━━━━━━━━",
       `📌 ${topic.recommendation_fr || ""}`,
       `📌 ${topic.recommendation_ar || ""}`,
       "",
@@ -4457,7 +4457,7 @@ function boxHeader(title) {
 }
 
 const OFFER_INDEX_EMOJI = ["1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "9️⃣", "🔟"];
-const OFFERS_SEPARATOR = "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━";
+const OFFERS_SEPARATOR = "━━━━━━━━━━━━━━━";
 
 function formatOfferIndex(idx) {
   const n = Number(idx);
