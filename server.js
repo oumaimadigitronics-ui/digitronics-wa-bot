@@ -17,6 +17,8 @@ import {
 } from "./src/knowledge/productKnowledge.js";
 import { toFile } from "openai/uploads";
 
+let toFileImpl = toFile;
+
 const app = express();
 app.set("trust proxy", true);
 
@@ -126,6 +128,7 @@ const {
   OPENAI_TRANSCRIBE_MODEL = "gpt-4o-mini-transcribe",
   AUDIO_MIN_SCORE = "0.45",
   FEATURE_AUDIO_SNIFF_MIME = "0",
+  FEATURE_AUDIO_CLEAN_MIME = "1",
 
   SYSTEM_PROMPT = "",
   SYSTEM_PROMPT_FILE = "",
@@ -170,6 +173,7 @@ const CFG = {
   openaiTranscribeModel: String(OPENAI_TRANSCRIBE_MODEL || "gpt-4o-mini-transcribe").trim(),
   audioMinScore: Math.max(0, Math.min(1, Number(AUDIO_MIN_SCORE) || 0.45)),
   featureAudioSniffMime: String(FEATURE_AUDIO_SNIFF_MIME || "0") === "1",
+  featureAudioCleanMime: String(FEATURE_AUDIO_CLEAN_MIME || "1") === "1",
 
   wcBase: String(WC_BASE_URL || "").replace(/\/$/g, ""),
   wcKey: String(WC_CONSUMER_KEY || ""),
@@ -4912,6 +4916,15 @@ function isAudioMime(mime) {
   return m.startsWith("audio/") || m === "application/ogg";
 }
 
+function cleanMimeType(input) {
+  if (!input) return "";
+  const normalized = String(input || "").trim().toLowerCase();
+  if (!normalized) return "";
+  const base = normalized.split(";")[0].trim();
+  if (base === "audio/opus" || base === "application/ogg") return "audio/ogg";
+  return base;
+}
+
 function isAudioMeta(meta) {
   const m = meta || {};
   const kind = String(m.kind || "").toLowerCase();
@@ -4984,7 +4997,8 @@ function inferMimeFromPath(filepath, fallbackMime) {
 }
 
 function shouldConvertAudioToMp3(filePath, mimeType) {
-  const mime = String(mimeType || "").toLowerCase();
+  const mimeRaw = String(mimeType || "");
+  const mime = CFG.featureAudioCleanMime ? cleanMimeType(mimeRaw) : mimeRaw.toLowerCase();
   const ext = path.extname(String(filePath || "")).toLowerCase();
   const oggLike =
     mime.includes("audio/ogg") ||
@@ -5053,10 +5067,12 @@ async function downloadToTemp(url, filepath) {
     allowHttp: CFG.mediaAllowHttp,
   });
   const sniffedMime = CFG.featureAudioSniffMime ? sniffAudioMime(fetched.buffer) : "";
+  const mimeTypeRaw = String((fetched && fetched.mimeType) || sniffedMime || "");
+  const mimeTypeClean = CFG.featureAudioCleanMime ? cleanMimeType(mimeTypeRaw) : mimeTypeRaw.trim().toLowerCase();
   fs.writeFileSync(target, fetched.buffer);
   return {
     filePath: target,
-    mimeType: String((fetched && fetched.mimeType) || sniffedMime || ""),
+    mimeType: mimeTypeClean,
     sizeBytes: fetched.sizeBytes || 0,
   };
 }
@@ -5082,8 +5098,9 @@ async function downloadAudioBuffer(mediaInput, reqId) {
     fs.writeFileSync(tmpFile, fetched.buffer);
     sizeBytes = fetched.sizeBytes || fetched.buffer.length || 0;
     const sniffedMime = CFG.featureAudioSniffMime ? sniffAudioMime(fetched.buffer) : "";
-    const mimeTypeResolved =
+    const mimeTypeResolvedRaw =
       m.mimeType || String((fetched && fetched.mimeType) || "").trim() || sniffedMime || "application/octet-stream";
+    const mimeTypeResolved = CFG.featureAudioCleanMime ? cleanMimeType(mimeTypeResolvedRaw) : mimeTypeResolvedRaw;
     const renameInfo = ensureAudioFileExtMatchesMime(tmpFile, mimeTypeResolved);
 
     console.log(
@@ -5124,9 +5141,12 @@ async function transcribeAudioOpenAI(
   const client = openaiClient || getOpenAIClient();
   const fileData = fs.readFileSync(filePath);
   const bufferSize = fileData.length;
+  const mimeTypeRaw = String(mimeType || "");
+  const mimeTypeClean = CFG.featureAudioCleanMime ? cleanMimeType(mimeTypeRaw) : mimeTypeRaw.trim().toLowerCase();
   const sniffedMime =
     CFG.featureAudioSniffMime && (!mimeType || mimeType === "application/octet-stream") ? sniffAudioMime(fileData) : "";
-  const inferredMime = sniffedMime || inferMimeFromPath(filePath, mimeType || "") || "audio/mpeg";
+  const inferredMimeRaw = sniffedMime || inferMimeFromPath(filePath, mimeTypeClean || "") || "audio/mpeg";
+  const inferredMime = CFG.featureAudioCleanMime ? cleanMimeType(inferredMimeRaw) : String(inferredMimeRaw || "").toLowerCase();
   const desiredExt = extFromAudioMime(inferredMime || "");
   let chosenFilename = filename || `voice${desiredExt || ".mp3"}`;
   if (desiredExt) {
@@ -5142,6 +5162,8 @@ async function transcribeAudioOpenAI(
       level: "info",
       msg: "audio_transcribe_request",
       mimeType: inferredMime,
+      mimeTypeRaw: mimeTypeRaw || null,
+      mimeTypeClean: inferredMime || null,
       bufferBytes: bufferSize,
       filename: chosenFilename,
       model: chosenModel,
@@ -5151,7 +5173,7 @@ async function transcribeAudioOpenAI(
   );
 
   try {
-    const file = await toFile(fileData, chosenFilename, { type: inferredMime });
+    const file = await toFileImpl(fileData, chosenFilename, { type: inferredMime });
     const resp = await client.audio.transcriptions.create({
       file,
       model: chosenModel,
@@ -5182,7 +5204,8 @@ async function transcribeAudioFile(filePath, mimeType, language) {
   const languageHint = normalizeLanguageHint(language);
   if (typeof audioTranscriberOverride === "function") return audioTranscriberOverride(filePath, mimeType, languageHint);
 
-  const mime = String(mimeType || "").toLowerCase();
+  const mimeRaw = String(mimeType || "");
+  const mime = CFG.featureAudioCleanMime ? cleanMimeType(mimeRaw) : mimeRaw.toLowerCase();
   const ext = path.extname(filePath) || extFromAudioMime(mime);
   const finalPath = filePath || path.join(os.tmpdir(), `audio-fallback${ext}`);
   return transcribeAudioOpenAI(
@@ -5713,6 +5736,10 @@ function setAudioConverterForTest(fn) {
   audioConverterOverride = fn;
 }
 
+function setToFileForTest(fn) {
+  toFileImpl = typeof fn === "function" ? fn : toFile;
+}
+
 function setFeatureAudioSniffMimeForTest(enabled) {
   CFG.featureAudioSniffMime = Boolean(enabled);
 }
@@ -5738,7 +5765,8 @@ async function deriveMediaText(mediaInput, lang, reqId) {
     let tmpFile = path.join(dir, `audio${ext || ".mp3"}`);
     let filename = normalized.filename || `voice${ext || ".mp3"}`;
     let sizeBytes = 0;
-    let mimeType = normalized.mime || "";
+    const mimeTypeRaw = normalized.mime || "";
+    let mimeType = CFG.featureAudioCleanMime ? cleanMimeType(mimeTypeRaw) : mimeTypeRaw;
     const downloadStart = Date.now();
     let pipelineTmpDirs = { preprocess: null, chunk: null };
     try {
@@ -5751,16 +5779,20 @@ async function deriveMediaText(mediaInput, lang, reqId) {
       } else if (normalized.url) {
         const dl = await downloadToTemp(normalized.url, tmpFile);
         sizeBytes = dl.sizeBytes || 0;
-        const downloadMime = String(dl.mimeType || "").trim();
+        const downloadMimeRaw = String(dl.mimeType || "").trim();
+        const downloadMime = CFG.featureAudioCleanMime ? cleanMimeType(downloadMimeRaw) : downloadMimeRaw;
         let sniffedMime = "";
         if (CFG.featureAudioSniffMime && (!downloadMime || !isAudioMime(downloadMime))) {
           sniffedMime = sniffAudioMime(fs.readFileSync(tmpFile));
         }
         const inferredMime = inferMimeFromPath(tmpFile, mimeType || "");
-        let actualMime = downloadMime || (sniffedMime && isAudioMime(sniffedMime) ? sniffedMime : "") || inferredMime || mimeType || "";
+        const actualMimeRaw =
+          downloadMime || (sniffedMime && isAudioMime(sniffedMime) ? sniffedMime : "") || inferredMime || mimeType || "";
+        let actualMime = CFG.featureAudioCleanMime ? cleanMimeType(actualMimeRaw) : actualMimeRaw;
         if (!actualMime || !isAudioMime(actualMime)) {
           const inferred = inferMimeFromPath(tmpFile, "");
-          actualMime = inferred && isAudioMime(inferred) ? inferred : "audio/ogg";
+          const fallbackMime = inferred && isAudioMime(inferred) ? inferred : "audio/ogg";
+          actualMime = CFG.featureAudioCleanMime ? cleanMimeType(fallbackMime) : fallbackMime;
         }
         const renameInfo = ensureAudioFileExtMatchesMime(tmpFile, actualMime);
         tmpFile = renameInfo.filePath;
@@ -5782,10 +5814,12 @@ async function deriveMediaText(mediaInput, lang, reqId) {
         throw new Error("audio_url_missing");
       }
       const downloadMs = Date.now() - downloadStart;
-      let chosenMime = mimeType;
+      const chosenMimeRaw = mimeType;
+      let chosenMime = CFG.featureAudioCleanMime ? cleanMimeType(chosenMimeRaw) : chosenMimeRaw;
       if (!chosenMime || !isAudioMime(chosenMime)) {
         const inferred = inferMimeFromPath(tmpFile, "");
-        chosenMime = inferred && isAudioMime(inferred) ? inferred : "audio/ogg";
+        const fallbackMime = inferred && isAudioMime(inferred) ? inferred : "audio/ogg";
+        chosenMime = CFG.featureAudioCleanMime ? cleanMimeType(fallbackMime) : fallbackMime;
       }
       if (shouldConvertAudioToMp3(tmpFile, chosenMime)) {
         const mp3Path = path.join(dir, "audio_converted.mp3");
@@ -5841,6 +5875,8 @@ async function deriveMediaText(mediaInput, lang, reqId) {
           reqId,
           tmpFile,
           mimeType: chosenMime,
+          mimeTypeRaw: mimeTypeRaw || null,
+          mimeTypeClean: chosenMime || null,
           filename,
           model: chosenModel,
         })
@@ -5917,7 +5953,16 @@ async function deriveMediaText(mediaInput, lang, reqId) {
         transcriptQualityScore: pipeline.transcriptQualityScore,
       };
     } catch (err) {
-      console.error(JSON.stringify({ level: "error", msg: "media_audio_derive_fail", reqId, error: (err && err.message) || String(err) }));
+      console.error(
+        JSON.stringify({
+          level: "error",
+          msg: "media_audio_derive_fail",
+          reqId,
+          mimeTypeRaw: mimeTypeRaw || null,
+          mimeTypeClean: mimeType || null,
+          error: (err && err.message) || String(err),
+        })
+      );
       return { ok: false, error: err };
     } finally {
       try {
@@ -10803,6 +10848,7 @@ export {
   setAudioTranscriberForTest,
   setAudioConverterForTest,
   setFeatureAudioSniffMimeForTest,
+  setToFileForTest,
   handleVisionMediaForTest,
   setSystemPromptForTest,
   isContactIntent,
@@ -10842,6 +10888,8 @@ export {
   getCtx as getCtxForTest,
   setCtx as setCtxForTest,
   normalizeMedia,
+  cleanMimeType,
+  transcribeAudioOpenAI,
   getSizeFromNameSku,
   formatSize,
   deriveMediaText,
@@ -11051,7 +11099,8 @@ async function processIncomingMedia({ mediaInfo, mediaMeta, msgType, lang, key, 
       const ext = path.extname(normalizedMedia.filename || normalizedMedia.url || "") || extFromAudioMime(normalizedMedia.mimeType || "");
       const tmpFile = path.join(dir, `audio${ext || ".ogg"}`);
       let sizeBytes = 0;
-      let mimeType = normalizedMedia.mimeType || "";
+      const mimeTypeRaw = normalizedMedia.mimeType || "";
+      let mimeType = CFG.featureAudioCleanMime ? cleanMimeType(mimeTypeRaw) : mimeTypeRaw;
       const downloadStart = Date.now();
 
       if (typeof audioDownloaderOverride === "function") {
@@ -11068,13 +11117,15 @@ async function processIncomingMedia({ mediaInfo, mediaMeta, msgType, lang, key, 
         audioDl = { filePath: tmpFile, mimeType, filename: normalizedMedia.filename || null };
       } else if (normalizedMedia.url) {
         audioDl = await downloadToTemp(normalizedMedia.url, tmpFile);
-        mimeType = mimeType || audioDl.mimeType || "";
+        const dlMime = audioDl.mimeType || "";
+        mimeType = mimeType || (CFG.featureAudioCleanMime ? cleanMimeType(dlMime) : dlMime) || "";
         sizeBytes = audioDl.sizeBytes || 0;
       } else {
         throw new Error("audio_url_missing");
       }
 
-      let safeMime = mimeType || inferMimeFromPath(normalizedMedia.filename || normalizedMedia.url || tmpFile, "audio/ogg");
+      const safeMimeRaw = mimeType || inferMimeFromPath(normalizedMedia.filename || normalizedMedia.url || tmpFile, "audio/ogg");
+      let safeMime = CFG.featureAudioCleanMime ? cleanMimeType(safeMimeRaw) : safeMimeRaw;
       const downloadMs = Date.now() - downloadStart;
       let inputPath = (audioDl && audioDl.filePath) || tmpFile;
       if (shouldConvertAudioToMp3(inputPath, safeMime)) {
