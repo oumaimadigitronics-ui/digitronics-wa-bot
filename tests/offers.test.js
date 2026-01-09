@@ -256,6 +256,30 @@ test("tryDirectOfferAnswer answers TV origin intent with no Europe models", () =
   assertNoQuestionMarks(reply);
 });
 
+test("tryDirectOfferAnswer avoids TV origin flow for washing machine", () => {
+  const tvCanon = "Tv";
+  setOffersForTest({
+    TCL: [{ model: "TCL-50", name: "TCL 50", category: tvCanon, class: tvCanon, size: 50, type: "LED", price: 2700, stock: 1, link: "http://example.com/tcl50" }],
+    WASH: [{ model: "WM-1", name: "WM-1", category: "Machine A Laver", class: "Machine A Laver", price: 2500, stock: 2, link: "http://example.com/wm1" }],
+  });
+
+  const reply = tryDirectOfferAnswer("Machine a laver", [], "fr", "no_tv_origin");
+  assert.ok(reply);
+  assert.ok(reply.includes("WM-1"));
+  assert.ok(!reply.includes("Toutes nos TV"));
+});
+
+test("tryDirectOfferAnswer routes soap machine to appliance offers", () => {
+  setOffersForTest({
+    WASH: [{ model: "WM-1", name: "WM-1", category: "Machine A Laver", class: "Machine A Laver", price: 2500, stock: 2, link: "http://example.com/wm1" }],
+  });
+
+  const reply = tryDirectOfferAnswer("ماكينة صابون", [], "ar", "soap_machine");
+  assert.ok(reply);
+  assert.ok(reply.includes("WM-1"));
+  assert.ok(!/types|أنواع/i.test(reply));
+});
+
 test("findOfferFromLinks matches sanitized permalink", () => {
   setOffersForTest({
     BRANDX: [

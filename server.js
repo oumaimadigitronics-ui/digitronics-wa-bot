@@ -4056,6 +4056,7 @@ const CATEGORY_ALIASES = Object.freeze({
     "lave linge",
     "lave-linge",
     "washing machine",
+    "ماكينة صابون",
     "غسالة",
     "غسالة ملابس",
     "ماكينة اوتوماتيك",
@@ -7499,13 +7500,16 @@ function isTvContext(text) {
 }
 
 function isTvOriginIntent(text, ctx) {
-  const s = normMatch(text || "");
+  const raw = String(text || "");
+  const s = normMatch(raw);
   if (!s) return false;
   const tvCanonNorm = normMatch(OFFERS_INDEX.classCanon.tv || "tv");
   const ctxClassNorm = normMatch((ctx && ctx.lastClass) || "");
   const ctxCategoryNorm = normMatch((ctx && ctx.lastCategory) || "");
-  const hasTvContext =
-    hasTvIntentTokens(s) || ctxClassNorm === tvCanonNorm || ctxCategoryNorm === tvCanonNorm || ctxClassNorm === "tv" || ctxCategoryNorm === "tv";
+  const hasTvText = hasTvIntentTokens(s) || isTvContext(s);
+  const ctxTvContext =
+    ctxClassNorm === tvCanonNorm || ctxCategoryNorm === tvCanonNorm || ctxClassNorm === "tv" || ctxCategoryNorm === "tv";
+  const hasTvContext = hasTvText || ctxTvContext;
   if (!hasTvContext) return false;
 
   const tokens = [
@@ -7521,17 +7525,46 @@ function isTvOriginIntent(text, ctx) {
     "europ",
   ];
   const hasOriginToken = tokens.some((token) => includesToken(s, token));
-  if (hasOriginToken) return true;
 
   const chinaTokens = ["china", "chine"];
-  for (let i = 0; i < chinaTokens.length; i += 1) {
-    const t0 = normMatch(chinaTokens[i]);
-    if (!t0) continue;
+  const hasChinaToken = chinaTokens.some((token) => {
+    const t0 = normMatch(token);
+    if (!t0) return false;
     const escaped = escapeRegExp(t0);
     const re = new RegExp(`(^|[^a-z0-9])${escaped}(?=($|[^a-z0-9]|\\d))`, "i");
-    if (re.test(s)) return true;
+    return re.test(s);
+  });
+
+  const hasOriginSignal = hasOriginToken || hasChinaToken;
+  if (!hasOriginSignal) return false;
+
+  if (!hasTvText && ctxTvContext) {
+    const applianceCategory = detectApplianceCategory(raw);
+    const detectedCategory = detectCategory(raw);
+    const detectedClass = detectClass(raw);
+    const isNonTvCategory =
+      Boolean(applianceCategory) ||
+      (detectedCategory && normMatch(detectedCategory) !== tvCanonNorm && normMatch(detectedCategory) !== "tv") ||
+      (detectedClass && normMatch(detectedClass) !== tvCanonNorm);
+    if (isNonTvCategory) return false;
   }
-  return false;
+
+  if (hasOriginToken) return true;
+
+  return hasChinaToken;
+}
+
+function shouldPreferCommerceRouting(text, ctx) {
+  const parsed = parseUserQuery(text, { ctx });
+  const applianceKey = detectApplianceCategory(text);
+  const explicitCategory = detectCategory(text);
+  const explicitClass = detectClass(text);
+  const hasCategoryIntent = Boolean(parsed.intentCategory || parsed.intentClass);
+  return {
+    shouldPrefer: Boolean(applianceKey || hasCategoryIntent || explicitCategory || explicitClass),
+    applianceKey,
+    parsed,
+  };
 }
 
 function detectApplianceCategory(text) {
@@ -10478,6 +10511,32 @@ app.post("/wanotifier", express.raw({ type: "*/*", limit: "2mb" }), parseWanotif
         resetStrikes(key);
         return res.json({ ok: true, reply });
       }
+    }
+
+    const commerceGate = shouldPreferCommerceRouting(userTextRaw, ctxData);
+    if (commerceGate.shouldPrefer) {
+      if (commerceGate.applianceKey) {
+        const categoryReply = routeApplianceCategoryOffers(commerceGate.applianceKey, lang, key);
+        if (categoryReply) {
+          const reply = finalizeReply(categoryReply, 520);
+          memory.push(key, "assistant", reply);
+          resetStrikes(key);
+          return res.json({ ok: true, reply });
+        }
+      }
+
+      const directCommerce = tryDirectOfferAnswer(userTextRaw, history, lang, key);
+      if (directCommerce) {
+        const reply = finalizeReply(directCommerce, 520);
+        memory.push(key, "assistant", reply);
+        resetStrikes(key);
+        return res.json({ ok: true, reply });
+      }
+
+      const reply = finalizeReply(offersFallbackMessage(lang), 520);
+      memory.push(key, "assistant", reply);
+      resetStrikes(key);
+      return res.json({ ok: true, reply });
     }
 
     let reply = isAudioMessage
