@@ -55,6 +55,7 @@ import {
   offerFromWooProduct,
   thankYouFollowUpMessage,
   DEFAULT_SYSTEM_PROMPT,
+  ORDER_FORM_URL,
   checkProductAvailability,
   voiceNotUnderstoodTemplate,
 } from "../server.js";
@@ -73,6 +74,13 @@ const TEST_OFFERS = {
 };
 
 const VOICE_NOT_UNDERSTOOD = voiceNotUnderstoodTemplate();
+let ORDER_FORM_URL_SAFE = ORDER_FORM_URL;
+try {
+  const parsed = new URL(ORDER_FORM_URL);
+  ORDER_FORM_URL_SAFE = `${parsed.origin}${parsed.pathname}`;
+} catch {
+  ORDER_FORM_URL_SAFE = ORDER_FORM_URL;
+}
 
 function assertNoQuestionMarks(text) {
   assert.ok(!/[؟?]/.test(String(text || "")));
@@ -189,7 +197,7 @@ test("formatOfferLine handles missing values", () => {
 
 test("formatOfferLine includes sanitized URL", () => {
   const line = formatOfferLine("BrandX", { model: "ModelY", price: 10, url: "http://example.com/p" });
-  assert.ok(line.includes("example.com"));
+  assert.ok(!line.includes("example.com"));
 });
 
 test("isContactTemplateIntent detects contact intents", () => {
@@ -594,7 +602,22 @@ test("direct offers respond with fridge products", () => {
   const reply = tryDirectOfferAnswer("ثلاجة", [], "dzl", "k-fridge");
   assert.ok(reply.includes("FR-1"));
   assert.ok(!reply.includes("TV-50"));
-  assert.ok(reply.includes("http://x/FR-1"));
+  assertNoQuestionMarks(reply);
+});
+
+test("default offers use premium template without product links", () => {
+  setOffersForTest({
+    TCL: [{ price: 3200, stock: 2, model: "T-50", class: "Tv", category: "Tv", size: 50, link: "https://digitronics.ma/produit/t-50" }],
+    LG: [{ price: 3100, stock: 2, model: "LG-50", class: "Tv", category: "Tv", size: 50, link: "https://digitronics.ma/produit/lg-50" }],
+    SAMSUNG: [{ price: 3300, stock: 2, model: "SM-50", class: "Tv", category: "Tv", size: 50, link: "https://digitronics.ma/produit/sm-50" }],
+  });
+
+  const reply = tryDirectOfferAnswer("tv", [], "fr", "k-premium-offers");
+  assert.ok(reply.includes("╭───────────────╮"));
+  assert.ok(reply.includes("━━━━━━━━━━━━━━"));
+  assert.ok(reply.includes("https://digitronics.ma"));
+  assert.ok(reply.includes(ORDER_FORM_URL_SAFE));
+  assert.ok(!reply.includes("/produit/"));
   assertNoQuestionMarks(reply);
 });
 
@@ -658,7 +681,6 @@ test("website catalog fridge filters out TVs", async () => {
   setWcFetchJsonForTest(mockWcFetch([[fridge, tv], []]));
   const reply = await tryWebsiteCatalogAnswer("ثلاجة refrigerateur", "fr", "k-fridge-site");
   assert.ok(reply.includes("FR-300"));
-  assert.ok(reply.includes("example.com"));
   assert.ok(!reply.toLowerCase().includes("tv 50"));
   assertNoQuestionMarks(reply);
 });
@@ -676,7 +698,6 @@ test("website catalog cuisiniere aliases are handled", async () => {
   setWcFetchJsonForTest(mockWcFetch([[cooker]]));
   const reply = await tryWebsiteCatalogAnswer("كوزينة", "dzl", "k-cooker-site");
   assert.ok(reply.includes("CK-4"));
-  assert.ok(reply.includes("example.com"));
   assertNoQuestionMarks(reply);
 });
 
@@ -838,7 +859,8 @@ test("vision routing uses offers and analyzer", async () => {
 
   const replyObj = await handleVisionMediaForTest({ url: "http://example.com/media" }, "dzl", "k-vision");
   assert.ok(replyObj.reply.includes("TV-50"));
-  assert.ok(replyObj.reply.includes("http://x/TV-50"));
+  assert.ok(!replyObj.reply.includes("http://x/TV-50"));
+  assert.ok(replyObj.reply.includes("https://digitronics.ma"));
   assertNoQuestionMarks(replyObj.reply);
 });
 
@@ -1012,6 +1034,38 @@ test("conversation key captures nested conversation/contact/thread ids", () => {
   assert.strictEqual(keyThread, "thread:thread-555");
 });
 
+test("details reply includes product link when option is selected", async () => {
+  setOffersForTest({
+    TCL: [{ price: 3200, stock: 2, model: "T-50", class: "Tv", category: "Tv", size: 50, link: "https://digitronics.ma/produit/t-50" }],
+    SAMSUNG: [{ price: 3300, stock: 2, model: "SM-50", class: "Tv", category: "Tv", size: 50, link: "https://digitronics.ma/produit/sm-50" }],
+    LG: [{ price: 3100, stock: 2, model: "LG-50", class: "Tv", category: "Tv", size: 50, link: "https://digitronics.ma/produit/lg-50" }],
+  });
+
+  const { urlBase, close } = await createServerForTests({});
+  try {
+    const listResp = await fetch(`${urlBase}/wanotifier`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ text: "tv 50", waId: "user-details" }),
+    });
+    const listJson = await listResp.json();
+    assert.ok(listJson.ok);
+    assert.ok(listJson.reply.includes("╭───────────────╮"));
+
+    const detailsResp = await fetch(`${urlBase}/wanotifier`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ text: "more info option 2", waId: "user-details" }),
+    });
+    const detailsJson = await detailsResp.json();
+    assert.ok(detailsJson.ok);
+    assert.ok(detailsJson.reply.includes("/produit/sm-50"));
+  } finally {
+    await close();
+    setOffersForTest(null);
+  }
+});
+
 test("offers do not bleed between chats", () => {
   setOffersForTest({
     TVBRAND: [{ model: "TV-1", class: "Tv", category: "Tv", size: 50, price: 1000, stock: 5 }],
@@ -1062,8 +1116,14 @@ test("website catalog TV ranking respects priority", async () => {
 
   setWcFetchJsonForTest(mockWcFetch([tvs]));
   const reply = await tryWebsiteCatalogAnswer('TV 50"', "fr", "k-tv-site");
-  const lines = reply.split(/\r?\n/).filter((l) => l.trim().startsWith("•"));
-  const brands = lines.map((l) => l.replace(/^•\s*/, "").split(" ")[0]);
+  const lines = reply.split(/\r?\n/).filter((l) => /^[0-9]️⃣/.test(l.trim()));
+  const brands = lines
+    .map((l) => {
+      const match = l.match(/\*(.+)\*/);
+      const name = match ? match[1] : "";
+      return name.split(/[-\s]/)[0];
+    })
+    .filter(Boolean);
   assert.deepStrictEqual(brands.slice(0, 3), ["TCL", "DAIKO", "LG"]);
   assertNoQuestionMarks(reply);
 });
@@ -1105,7 +1165,8 @@ test("media-only image wanotifier derives text and replies", async () => {
   assert.ok(json.reply);
   assert.notStrictEqual(json.reply, t("dzl", "askTextInsteadMedia"));
   assert.ok(!json.reply.includes("?"));
-  assert.ok(!json.reply.toLowerCase().includes("http"));
+  assert.ok(json.reply.includes("https://digitronics.ma"));
+  assert.ok(json.reply.includes(ORDER_FORM_URL_SAFE));
   await close();
 });
 
