@@ -2258,17 +2258,17 @@ function buildTechTopicAnswer(topicKey, lang) {
 
   const build = (frPoints, arPoints, aFr, bFr, aAr, bAr) => {
     const lines = [
-      "╭──────────────────────────────╮",
+      "╭───────────────╮",
       "│  🎓 *Tech Guide / دليل*      │",
-      "╰──────────────────────────────╯",
+      "╰───────────────╯",
       "",
       `🇫🇷 ${topic.title_fr || ""}`,
       `🇲🇦 ${topic.title_ar || ""}`,
       "",
-      "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
+      "━━━━━━━━━━━━━━━",
       ...frPoints.map((p) => `✅ ${p}`),
       ...arPoints.map((p) => `✅ ${p}`),
-      "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
+      "━━━━━━━━━━━━━━━",
       `✅ Choisir A si: ${aFr.join(" · ")}`.trim(),
       `✅ Choisir B si: ${bFr.join(" · ")}`.trim(),
       `✅ اختار A إلا: ${aAr.join(" · ")}`.trim(),
