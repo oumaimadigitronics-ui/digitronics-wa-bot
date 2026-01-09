@@ -3,8 +3,10 @@ import { test, afterEach } from "node:test";
 
 const prevStrictStock = process.env.FEATURE_STRICT_STOCK_FILTER;
 const prevShowSku = process.env.FEATURE_SHOW_SKU_IN_OFFERS;
+const prevLegacyOfferLine = process.env.FEATURE_LEGACY_OFFER_LINE;
 process.env.FEATURE_STRICT_STOCK_FILTER = "1";
 process.env.FEATURE_SHOW_SKU_IN_OFFERS = "1";
+process.env.FEATURE_LEGACY_OFFER_LINE = "1";
 const mod = await import(`../server.js?offerFlags=${Date.now()}`);
 if (prevStrictStock === undefined) {
   delete process.env.FEATURE_STRICT_STOCK_FILTER;
@@ -15,6 +17,11 @@ if (prevShowSku === undefined) {
   delete process.env.FEATURE_SHOW_SKU_IN_OFFERS;
 } else {
   process.env.FEATURE_SHOW_SKU_IN_OFFERS = prevShowSku;
+}
+if (prevLegacyOfferLine === undefined) {
+  delete process.env.FEATURE_LEGACY_OFFER_LINE;
+} else {
+  process.env.FEATURE_LEGACY_OFFER_LINE = prevLegacyOfferLine;
 }
 
 afterEach(() => {
