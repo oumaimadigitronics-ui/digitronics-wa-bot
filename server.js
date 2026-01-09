@@ -46,6 +46,7 @@ const FEATURE_SHOW_SKU_IN_OFFERS = String(process.env.FEATURE_SHOW_SKU_IN_OFFERS
 const FEATURE_LEGACY_OFFER_LINE = String(process.env.FEATURE_LEGACY_OFFER_LINE || "0") === "1";
 const FEATURE_LEGACY_OFFER_DISPLAY_NAME = String(process.env.FEATURE_LEGACY_OFFER_DISPLAY_NAME || "0") === "1";
 const FEATURE_OFFER_ITEM_EMOJI_FORMAT = String(process.env.FEATURE_OFFER_ITEM_EMOJI_FORMAT || "0") === "1";
+const FEATURE_OFFERS_BOX_HEADER = String(process.env.FEATURE_OFFERS_BOX_HEADER || "0") === "1";
 const IS_TEST = String(process.env.NODE_ENV || "").toLowerCase() === "test";
 const ENTRY_FILE = fileURLToPath(import.meta.url);
 const __filename = ENTRY_FILE;
@@ -4568,7 +4569,8 @@ function shortenKeepingTail(base, tail, maxChars) {
 }
 
 function offersTemplate({ title, subtitleFR, subtitleAR, lines, lang, maxChars }) {
-  const headerLines = [boxHeader(title)];
+  const safeTitle = String(title || "").trim() || "Offres Premium";
+  const headerLines = [FEATURE_OFFERS_BOX_HEADER ? boxHeader(title) : `*${safeTitle}*`];
   if (subtitleFR) headerLines.push(`🇫🇷 ${subtitleFR}`);
   if (subtitleAR) headerLines.push(`🇲🇦 ${subtitleAR}`);
   headerLines.push(OFFERS_SEPARATOR);
