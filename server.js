@@ -44,6 +44,7 @@ const FEATURE_OFFER_TAIL_COMPACT = String(process.env.FEATURE_OFFER_TAIL_COMPACT
 const FEATURE_STRICT_STOCK_FILTER = String(process.env.FEATURE_STRICT_STOCK_FILTER || "0") === "1";
 const FEATURE_SHOW_SKU_IN_OFFERS = String(process.env.FEATURE_SHOW_SKU_IN_OFFERS || "0") === "1";
 const FEATURE_LEGACY_OFFER_LINE = String(process.env.FEATURE_LEGACY_OFFER_LINE || "0") === "1";
+const FEATURE_LEGACY_OFFER_DISPLAY_NAME = String(process.env.FEATURE_LEGACY_OFFER_DISPLAY_NAME || "0") === "1";
 const FEATURE_OFFER_ITEM_EMOJI_FORMAT = String(process.env.FEATURE_OFFER_ITEM_EMOJI_FORMAT || "0") === "1";
 const IS_TEST = String(process.env.NODE_ENV || "").toLowerCase() === "test";
 const ENTRY_FILE = fileURLToPath(import.meta.url);
@@ -4441,10 +4442,25 @@ function buildOfferDisplayName(brand, offer, lang = "dzl") {
   const modelOrSku = model || sku;
   const sizeNum = Number((offer && offer.size) || NaN);
   const sizeText = Number.isFinite(sizeNum) && sizeNum > 0 ? formatSize(lang, sizeNum) : "";
+  if (FEATURE_LEGACY_OFFER_DISPLAY_NAME) {
+    const identity = [safeBrand, modelOrSku, sizeText].filter(Boolean).join(" ").trim();
+    if (identity) return ensureNoQuestion(identity);
+    if (name) return ensureNoQuestion([safeBrand, name].filter(Boolean).join(" ").trim());
+    return ensureNoQuestion(safeBrand || modelOrSku || "Produit");
+  }
+
+  if (name) {
+    let cleanedName = name;
+    if (safeBrand) {
+      const dupBrand = new RegExp(`^(${escapeRegExp(safeBrand)})\\s+\\1\\b`, "i");
+      cleanedName = cleanedName.replace(dupBrand, safeBrand);
+    }
+    return ensureNoQuestion(cleanedName.trim());
+  }
+
   const identity = [safeBrand, modelOrSku, sizeText].filter(Boolean).join(" ").trim();
-  if (identity) return identity;
-  if (name) return [safeBrand, name].filter(Boolean).join(" ").trim();
-  return safeBrand || modelOrSku || "Produit";
+  if (identity) return ensureNoQuestion(identity);
+  return ensureNoQuestion(safeBrand || modelOrSku || "Produit");
 }
 
 function boxHeader(title) {
@@ -4721,8 +4737,13 @@ function formatOfferLine(brand, o, opts = {}) {
   }
 
   const offer = o || {};
-  let displayName = String(offer.name || "").trim();
-  if (!displayName) {
+  let displayName = "";
+  if (FEATURE_LEGACY_OFFER_DISPLAY_NAME) {
+    displayName = String(offer.name || "").trim();
+    if (!displayName) {
+      displayName = buildOfferDisplayName(brand, offer, opts.lang || "dzl");
+    }
+  } else {
     displayName = buildOfferDisplayName(brand, offer, opts.lang || "dzl");
   }
   displayName = displayName.replace(/\s+simple\s+/gi, " ").replace(/\s+simple$/i, "").trim();
@@ -10902,6 +10923,7 @@ export {
   listOffersForBrand,
   buildPremiumOffersReply,
   buildProductDetailsReply,
+  buildOfferDisplayName,
   stripQuestions,
   ensureNoQuestion,
   isTvOriginIntent,
