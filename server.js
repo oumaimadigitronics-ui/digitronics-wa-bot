@@ -37,6 +37,8 @@ const {
 } = process.env;
 
 const LOG_DEBUG = String(process.env.LOG_DEBUG || "0") === "1";
+const FEATURE_STRICT_CATEGORY_SWITCH = String(process.env.FEATURE_STRICT_CATEGORY_SWITCH || "0") === "1";
+const FEATURE_OFFER_TAIL_COMPACT = String(process.env.FEATURE_OFFER_TAIL_COMPACT || "0") === "1";
 const IS_TEST = String(process.env.NODE_ENV || "").toLowerCase() === "test";
 const ENTRY_FILE = fileURLToPath(import.meta.url);
 const __filename = ENTRY_FILE;
@@ -1029,6 +1031,12 @@ function stableHash(input) {
   }
 }
 
+function redactLogId(value) {
+  const s = String(value || "").trim();
+  if (!s) return null;
+  return stableHash(s);
+}
+
 function safeGet(obj, pathArr) {
   let cur = obj;
   for (let i = 0; i < pathArr.length; i += 1) {
@@ -1474,6 +1482,14 @@ function normalizeIncoming(body, req) {
     safeGet(b, ["chat_id"]) || safeGet(b, ["chatId"]) || safeGet(b, ["data", "chat_id"]) || safeGet(b, ["data", "chatId"]);
   const waId =
     safeGet(b, ["wa_id"]) || safeGet(b, ["waId"]) || safeGet(b, ["data", "wa_id"]) || safeGet(b, ["data", "waId"]);
+  const senderIdRaw =
+    waId ||
+    phone ||
+    safeGet(b, ["sender"]) ||
+    safeGet(b, ["from"]) ||
+    safeGet(b, ["data", "sender"]) ||
+    safeGet(b, ["data", "from"]);
+  const senderId = senderIdRaw ? String(senderIdRaw).trim().slice(0, 120) : null;
 
   const key = buildConversationKey(
     {
@@ -1495,6 +1511,8 @@ function normalizeIncoming(body, req) {
     text: String(textRaw || "").trim(),
     media,
     type: extractMessageType(b),
+    conversationId: convId || null,
+    senderId,
   };
 }
 
@@ -4399,11 +4417,14 @@ function buildOfferDisplayName(brand, offer, lang = "dzl") {
   const safeBrand = String(brand || "").trim();
   const name = String((offer && offer.name) || "").trim();
   const model = String((offer && offer.model) || "").trim();
+  const sku = String((offer && offer.sku) || "").trim();
+  const modelOrSku = model || sku;
   const sizeNum = Number((offer && offer.size) || NaN);
   const sizeText = Number.isFinite(sizeNum) && sizeNum > 0 ? formatSize(lang, sizeNum) : "";
-  const fallbackName = [safeBrand, model, sizeText].filter(Boolean).join(" ").trim();
-  const baseName = name || fallbackName || model || safeBrand || "Produit";
-  return baseName;
+  const identity = [safeBrand, modelOrSku, sizeText].filter(Boolean).join(" ").trim();
+  if (identity) return identity;
+  if (name) return [safeBrand, name].filter(Boolean).join(" ").trim();
+  return safeBrand || modelOrSku || "Produit";
 }
 
 function boxHeader(title) {
@@ -4458,6 +4479,17 @@ function purchaseBlock(lang) {
   ];
 }
 
+function purchaseBlockCompact(lang) {
+  const form = ORDER_FORM_URL_SAFE;
+  if (lang === "fr") {
+    return [OFFERS_SEPARATOR, "🌐 digitronics.ma", `📝 Formulaire: ${form}`];
+  }
+  if (lang === "ar") {
+    return [OFFERS_SEPARATOR, "🌐 digitronics.ma", `📝 فورم الطلب: ${form}`];
+  }
+  return [OFFERS_SEPARATOR, "🌐 digitronics.ma", `📝 فورم الطلب: ${form}`];
+}
+
 function shortenKeepingTail(base, tail, maxChars) {
   const limit = Number(maxChars) || CFG.maxReplyChars;
   const baseText = String(base || "").trim();
@@ -4478,22 +4510,28 @@ function offersTemplate({ title, subtitleFR, subtitleAR, lines, lang, maxChars }
   headerLines.push(OFFERS_SEPARATOR);
 
   const itemLines = Array.isArray(lines) ? lines : [];
-  const tailLines = purchaseBlock(lang || "dzl");
+  const tailLines = FEATURE_OFFER_TAIL_COMPACT ? purchaseBlockCompact(lang || "dzl") : purchaseBlock(lang || "dzl");
   const headerBlock = headerLines.join("\n");
   const tailBlock = tailLines.join("\n");
+  const limit = Number(maxChars) || CFG.maxReplyChars;
 
-  let currentLines = itemLines.slice();
-  const build = () => {
-    const itemBlock = currentLines.length ? currentLines.join("\n\n") : "";
-    const baseBlock = [headerBlock, itemBlock].filter(Boolean).join("\n\n");
-    return shortenKeepingTail(baseBlock, tailBlock, maxChars || CFG.maxReplyChars);
+  const candidateLines = itemLines.slice(0, MAX_OFFERS);
+  const buildBlock = (count) => {
+    const items = count > 0 ? candidateLines.slice(0, count).join("\n\n") : "";
+    return [headerBlock, items].filter(Boolean).join("\n\n");
   };
 
-  let output = build();
-  while (output.length > (maxChars || CFG.maxReplyChars) && currentLines.length > 1) {
-    currentLines = currentLines.slice(0, -1);
-    output = build();
+  let chosenCount = candidateLines.length;
+  for (let count = candidateLines.length; count > 0; count -= 1) {
+    const combined = [buildBlock(count), tailBlock].filter(Boolean).join("\n\n");
+    if (combined.length <= limit) {
+      chosenCount = count;
+      break;
+    }
   }
+
+  const baseBlock = buildBlock(chosenCount);
+  const output = shortenKeepingTail(baseBlock, tailBlock, limit);
 
   const cleaned = ensureNoQuestion(stripUrlQueriesInText(output));
   return cleaned;
@@ -6191,7 +6229,7 @@ async function tryWebsiteCatalogAnswer(userText, lang, key) {
   const text = String(userText || "").trim();
   if (!text) return null;
 
-  const parsed = parseUserQuery(text, { ctx: getCtx(key) });
+  const parsed = parseUserQuery(text, { ctx: getCtx(key), key });
   const hasExplicitSignal = hasProductInquirySignal(text) || Boolean(detectModel(text));
   if (!hasExplicitSignal) return null;
   const detectedCategory = parsed.intentCategory || parsed.category || null;
@@ -7595,8 +7633,8 @@ function isTvOriginIntent(text, ctx) {
   return hasChinaToken;
 }
 
-function shouldPreferCommerceRouting(text, ctx) {
-  const parsed = parseUserQuery(text, { ctx });
+function shouldPreferCommerceRouting(text, ctx, opts = {}) {
+  const parsed = parseUserQuery(text, { ctx, key: opts.key || null, logContext: opts.logContext || null });
   const applianceKey = detectApplianceCategory(text);
   const explicitCategory = detectCategory(text);
   const explicitClass = detectClass(text);
@@ -7621,6 +7659,12 @@ function detectApplianceCategory(text) {
     }
   }
   return null;
+}
+
+function detectExplicitApplianceCategory(text) {
+  const key = detectApplianceCategory(text);
+  if (!key) return null;
+  return APPLIANCE_CATEGORY_CANON[key] || null;
 }
 
 function routeApplianceCategoryOffers(applianceKey, lang, key) {
@@ -7682,6 +7726,8 @@ function handleCmDimensionRouting(text, lang, key, sizeInfo) {
 function parseUserQuery(text, opts = {}) {
   const raw = String(text || "");
   const ctx = opts.ctx || {};
+  const key = opts.key || null;
+  const logContext = opts.logContext || null;
 
   const forcedIntent = resolveCategoryIntent(raw);
   const forcedCategory = (forcedIntent && forcedIntent.category) || null;
@@ -7694,6 +7740,21 @@ function parseUserQuery(text, opts = {}) {
   const tvCanonNorm = normMatch(OFFERS_INDEX.classCanon.tv || "tv");
   const ctxCategoryNorm = normMatch(ctx.lastCategory || "");
   const ctxClassNorm = normMatch(ctx.lastClass || "");
+  const strictCategory =
+    FEATURE_STRICT_CATEGORY_SWITCH && !forcedCategory ? detectExplicitApplianceCategory(raw) : null;
+  if (strictCategory && normMatch(strictCategory) !== tvCanonNorm && normMatch(strictCategory) !== "tv") {
+    resetCtxForCategoryChange(key, strictCategory, null);
+    if (LOG_DEBUG && ctx.lastCategory && normMatch(ctx.lastCategory) !== normMatch(strictCategory)) {
+      debugLog("category_switch_override", {
+        reqId: logContext && logContext.reqId ? logContext.reqId : null,
+        conversationId: redactLogId(logContext && logContext.conversationId ? logContext.conversationId : null),
+        senderId: redactLogId(logContext && logContext.senderId ? logContext.senderId : null),
+        mediaKind: logContext && logContext.mediaKind ? logContext.mediaKind : null,
+        fromCategory: ctx.lastCategory || null,
+        toCategory: strictCategory,
+      });
+    }
+  }
   const ctxTvContext =
     ctxCategoryNorm === tvCanonNorm ||
     ctxClassNorm === tvCanonNorm ||
@@ -7706,7 +7767,7 @@ function parseUserQuery(text, opts = {}) {
     externalTvContext: hasTvSizeContext(raw) || Boolean(explicitBrand) || ctxTvContext,
   });
   const detectedBrand = explicitBrand || (ctxBrandValid ? ctxBrand : null);
-  const detectedCategory = forcedCategory || detectCategory(raw) || ctx.lastCategory || null;
+  const detectedCategory = forcedCategory || strictCategory || detectCategory(raw) || ctx.lastCategory || null;
   const detectedClass = forcedClass || (!detectedCategory ? detectClass(raw) : null) || ctx.lastClass || null;
 
   const forcedNonTv =
@@ -8654,14 +8715,14 @@ function handleTvSizePriceFlow(parsed, lang, key) {
   return ensureNoQuestion(parts.filter(Boolean).join("\n\n"));
 }
 
-function tryDirectOfferAnswer(userText, historyMsgs, lang, key) {
+function tryDirectOfferAnswer(userText, historyMsgs, lang, key, opts = {}) {
   const text = String(userText || "").trim();
   if (!text) return null;
   if (isAcknowledgementMessage(text)) return null;
   if (!OFFERS || !OFFERS.offers || !Object.keys(OFFERS.offers).length) return null;
 
   const ctx = getCtx(key);
-  const parsed = parseUserQuery(text, { ctx });
+  const parsed = parseUserQuery(text, { ctx, key, logContext: opts.logContext || null });
   const tvCanon = OFFERS_INDEX.classCanon.tv || "Tv";
   const tvCanonNorm = normMatch(tvCanon || "tv");
   const hasForced = Boolean(parsed.intentCategory || parsed.intentClass);
@@ -9520,7 +9581,9 @@ function buildSystemPrompt(offersSubset, lang, opts) {
 }
 
 function buildAnswerPlan(userText, opts = {}) {
-  const parsed = opts.parsed || parseUserQuery(userText, { ctx: getCtx(opts.key || "") });
+  const ctxKey = opts.key || "";
+  const parsed =
+    opts.parsed || parseUserQuery(userText, { ctx: getCtx(ctxKey), key: ctxKey, logContext: opts.logContext || null });
   const memoryState = opts.memoryState || {};
   const intentFromParsed = parsed.category || parsed.cls || parsed.brand || parsed.model || null;
   const intentFromMemory = memoryState.category || memoryState.brand || (memoryState.specs && memoryState.specs.size ? memoryState.category : null);
@@ -9548,7 +9611,7 @@ function buildAnswerPlan(userText, opts = {}) {
 
 function buildIntentHintsForLLM(userText, historyMsgs, key) {
   const ctx = getCtx(key);
-  const parsed = parseUserQuery(userText, { ctx });
+  const parsed = parseUserQuery(userText, { ctx, key });
   const hints = [];
 
   if (parsed.brand) hints.push("brand: " + parsed.brand);
@@ -9957,6 +10020,12 @@ app.post("/wanotifier", express.raw({ type: "*/*", limit: "2mb" }), parseWanotif
     const msgType = String(incoming.type || "").toLowerCase();
     const lang = detectLang(userTextRaw || incoming.lang || "");
     const ip = String(req.ip || "");
+    const logContext = {
+      reqId,
+      conversationId: incoming.conversationId || null,
+      senderId: incoming.senderId || null,
+      mediaKind: msgType || null,
+    };
 
     let audioAnswerNoteText = null;
     const applyAudioNote = (text) => {
@@ -10474,7 +10543,7 @@ app.post("/wanotifier", express.raw({ type: "*/*", limit: "2mb" }), parseWanotif
     const modelCode = extractModelCode(userTextRaw);
     const hasPriceOrInfoIntent = detectPriceIntent(userTextRaw) || hasProductInquirySignal(userTextRaw);
     if (modelCode.model && hasPriceOrInfoIntent) {
-      const parsed = parseUserQuery(userTextRaw, { ctx: ctxData });
+      const parsed = parseUserQuery(userTextRaw, { ctx: ctxData, key, logContext });
       const requestedBrand = parsed.brand || (parsed.modelHit && parsed.modelHit.brand) || null;
       const requestedSize = Number.isFinite(modelCode.size) ? modelCode.size : parsed.size || null;
       const offerHit = findOfferByModelCode(modelCode.model, requestedBrand);
@@ -10541,7 +10610,7 @@ app.post("/wanotifier", express.raw({ type: "*/*", limit: "2mb" }), parseWanotif
       }
     }
 
-    const directReply = tryDirectOfferAnswer(userTextRaw, history, lang, key);
+    const directReply = tryDirectOfferAnswer(userTextRaw, history, lang, key, { logContext });
     if (directReply) {
       const reply = finalizeReply(directReply, 520);
       memory.push(key, "assistant", reply);
@@ -10578,7 +10647,7 @@ app.post("/wanotifier", express.raw({ type: "*/*", limit: "2mb" }), parseWanotif
       }
     }
 
-    const commerceGate = shouldPreferCommerceRouting(userTextRaw, ctxData);
+    const commerceGate = shouldPreferCommerceRouting(userTextRaw, ctxData, { key, logContext });
     if (commerceGate.shouldPrefer) {
       if (commerceGate.applianceKey) {
         const categoryReply = routeApplianceCategoryOffers(commerceGate.applianceKey, lang, key);
@@ -10734,6 +10803,7 @@ export {
   describeImage,
   checkProductAvailability,
   voiceNotUnderstoodTemplate,
+  parseUserQuery,
 };
 
 function runSelfTests() {

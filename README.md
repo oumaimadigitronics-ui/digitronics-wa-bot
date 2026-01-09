@@ -27,6 +27,10 @@ Audio pipeline:
 Debugging:
 - `LOG_DEBUG=1` enables debug logs and includes short transcript snippets (max 200 chars)
 
+Feature flags (set in Render environment variables when needed):
+- `FEATURE_STRICT_CATEGORY_SWITCH`: set to `1` to reset TV context when an explicit appliance category is detected
+- `FEATURE_OFFER_TAIL_COMPACT`: set to `1` to use a shorter offers footer for fitting more items
+
 ## Audio pipeline
 See `docs/audio-pipeline.md` for a detailed walkthrough of the audio processing flow, chunking, quality checks, and logging.
 

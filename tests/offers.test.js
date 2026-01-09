@@ -131,6 +131,11 @@ function countQuestions(text) {
   return matches ? matches.length : 0;
 }
 
+function countOfferItems(text) {
+  const matches = String(text || "").match(/💰/g);
+  return matches ? matches.length : 0;
+}
+
 beforeEach(() => {
   setOffersForTest(null);
 });
@@ -219,6 +224,42 @@ test("premium offers reply includes purchase block and no product links", () => 
   assert.ok(reply.includes("🌐 Website: https://digitronics.ma"));
   assert.ok(reply.includes(ORDER_FORM_URL_SAFE));
   assert.ok(!reply.includes("/produit/"));
+});
+
+test("premium offers reply fits multiple items without collapsing", () => {
+  const entries = [
+    { brand: "TCL", offer: { name: "TCL A", model: "A1", price: 1200, stock: 2 } },
+    { brand: "LG", offer: { name: "LG B", model: "B2", price: 1500, stock: 2 } },
+    { brand: "SAMSUNG", offer: { name: "Samsung C", model: "C3", price: 1800, stock: 2 } },
+  ];
+
+  const title = "Offres premium";
+  const replyFull = buildPremiumOffersReply({ title, entries, lang: "fr", maxChars: 2000 });
+  const replyTwo = buildPremiumOffersReply({ title, entries: entries.slice(0, 2), lang: "fr", maxChars: 2000 });
+  const maxChars = replyTwo.length + 1;
+  const limited = buildPremiumOffersReply({ title, entries, lang: "fr", maxChars });
+
+  assert.ok(replyFull.length > maxChars);
+  assert.ok(replyTwo.length <= maxChars);
+  assert.strictEqual(countOfferItems(replyFull), 3);
+  assert.strictEqual(countOfferItems(limited), 2);
+});
+
+test("premium offers reply avoids question marks and urls in offer lines", () => {
+  const entries = [
+    { brand: "TCL", offer: { name: "TCL A", model: "A1", price: 1200, link: "https://digitronics.ma/produit/tcl-a" } },
+    { brand: "LG", offer: { name: "LG B", model: "B2", price: 1500, link: "https://digitronics.ma/produit/lg-b" } },
+  ];
+
+  const reply = buildPremiumOffersReply({ title: "Offres premium", entries, lang: "fr", maxChars: 2000 });
+  assertNoQuestionMarks(reply);
+
+  const offerLines = reply
+    .split("\n")
+    .filter((line) => /[0-9]️⃣/.test(line) || line.includes("💰"));
+  for (const line of offerLines) {
+    assert.ok(!/https?:\/\//i.test(line));
+  }
 });
 
 test("details reply includes product link when intent and option are provided", () => {
