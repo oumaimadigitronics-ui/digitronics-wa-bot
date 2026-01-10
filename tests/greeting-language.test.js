@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import crypto from "node:crypto";
 import { test } from "node:test";
 
-import { createServerForTests, GREETING_TEMPLATE, maybeSendInitialGreeting } from "../server.js";
+import { buildConversationKey, createServerForTests, getCtxForTest, maybeSendInitialGreeting } from "../server.js";
 
 function signWanotifierBody(secret, body) {
   const raw = JSON.stringify(body);
@@ -60,15 +60,15 @@ test("greeting language derives from opener text when flags enabled", async () =
     assert.ok(arReply.ok);
     assert.ok(arReply.reply.includes("مرحبا بك في ديجيترو نيكس"));
 
-    const fallbackReply = await sendGreeting(urlBase, secret, {
+    const enReply = await sendGreeting(urlBase, secret, {
       text: "Hello",
       waId: "user-en",
       conversationId: "c-en",
       senderId: "s-en",
       type: "text",
     });
-    assert.ok(fallbackReply.ok);
-    assert.ok(fallbackReply.reply.includes("مرحبا بك في ديجيترو نيكس"));
+    assert.ok(enReply.ok);
+    assert.ok(enReply.reply.includes("Welcome to Digitronics"));
   } finally {
     await close();
   }
@@ -84,7 +84,42 @@ test("legacy greeting template stays unchanged when flags disabled", async () =>
 
   try {
     const reply = maybeSendInitialGreeting({ key: "legacy-greeting-1", lang: "fr" });
-    assert.strictEqual(reply, GREETING_TEMPLATE);
+    assert.ok(reply.includes("Bienvenue chez Digitronics"));
+  } finally {
+    await close();
+  }
+});
+
+test("french greeting avoids arabic-only menu and sticks until arabic script", async () => {
+  const secret = "greet-lang-sticky";
+  const { urlBase, close } = await createServerForTests({
+    env: {
+      WANOTIFIER_HMAC_SECRET: secret,
+      FEATURE_GREETING_LANG_FROM_TEXT: "0",
+      FEATURE_GREETING_I18N: "0",
+    },
+  });
+
+  try {
+    const body = {
+      text: "Bonjour",
+      waId: "user-fr-sticky",
+      conversationId: "c-fr-sticky",
+      senderId: "s-fr-sticky",
+      type: "text",
+    };
+
+    const frReply = await sendGreeting(urlBase, secret, body);
+    assert.ok(frReply.ok);
+    assert.ok(frReply.reply.includes("Bienvenue chez Digitronics"));
+    assert.ok(!frReply.reply.includes("اختر رقم من القائمة"));
+
+    await sendGreeting(urlBase, secret, { ...body, text: "prix tv" });
+    const key = buildConversationKey({}, null, body);
+    assert.strictEqual(getCtxForTest(key).preferredLang, "fr");
+
+    await sendGreeting(urlBase, secret, { ...body, text: "السلام عليكم" });
+    assert.strictEqual(getCtxForTest(key).preferredLang, "ar");
   } finally {
     await close();
   }
