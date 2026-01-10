@@ -1,8 +1,11 @@
 import { enforceReplyPolicy } from '../../domain/replyPolicy.js';
 import { applyGuardrails } from '../guardrails/guardrails.js';
 import { detectUserLanguage, hasArabicScript } from '../lang/detectUserLanguage.js';
+import { isGreeting } from '../lang/greeting.js';
 import { normalizeDarijaLatin } from '../lang/normalizeDarijaLatin.js';
+import { buildMainMenu } from '../menu/menuBuilder.js';
 import { transcribeAudio } from '../stt/sttService.js';
+import { STRONG_CATEGORY_KEYWORDS, WEAK_CATEGORY_KEYWORDS } from '../../knowledge/catalog.js';
 
 function getAudioPayload(body = {}) {
   const media = body.media || {};
@@ -33,6 +36,56 @@ function sttFallbackReply(preferredLang = 'dz') {
   return 'Ma9dertch nfhem l-audio, kteb liya soual wala 3awed sejel b woudouh 🙏';
 }
 
+function getUserText(body = {}) {
+  if (typeof body.userText === 'string') return body.userText.trim();
+  if (typeof body.text === 'string') return body.text.trim();
+  return '';
+}
+
+function isFrenchPreferred(text = '') {
+  return detectUserLanguage(text) === 'fr';
+}
+
+function resolvePreferredLang({ userText, existingLang }) {
+  if (!userText) return existingLang || 'dz';
+  if (hasArabicScript(userText)) return 'ar';
+  if (isFrenchPreferred(userText)) return 'fr';
+  return existingLang || 'dz';
+}
+
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function includesKeyword(text = '', keyword = '') {
+  if (!keyword) return false;
+  if (/[\u0600-\u06FF]/.test(keyword)) {
+    return text.includes(keyword);
+  }
+  if (keyword.length <= 2) {
+    return new RegExp(`\\b${escapeRegExp(keyword)}\\b`, 'i').test(text);
+  }
+  return text.toLowerCase().includes(keyword.toLowerCase());
+}
+
+function containsAnyKeyword(text = '', keywords = []) {
+  return keywords.some((keyword) => includesKeyword(text, keyword));
+}
+
+function looksLikeCategoryMenu(reply = '') {
+  if (!reply) return false;
+  if (/menu|cat[ée]gories|options/i.test(reply)) return true;
+  const bulletLines = reply.match(/(^|\n)\s*[-*•]\s+\S+/g) || [];
+  const numberedLines = reply.match(/(^|\n)\s*\d+\.\s+\S+/g) || [];
+  return bulletLines.length + numberedLines.length >= 2;
+}
+
+function isMenuHelpIntent(text = '') {
+  if (!text) return false;
+  const lower = text.toLowerCase();
+  return /\b(menu|help|aide|options|liste|categories|cat[ée]gories)\b/i.test(lower);
+}
+
 export class BotService {
   constructor({ memoryStore, offersIndex, cfg, sttService } = {}) {
     this.memoryStore = memoryStore;
@@ -45,7 +98,7 @@ export class BotService {
     const conversationId = body.conversationId || 'unknown';
     const ctx = this.memoryStore?.getContext?.(conversationId) || {};
     let preferredLang = ctx.preferredLang;
-    let userText = typeof body.userText === 'string' ? body.userText.trim() : '';
+    let userText = getUserText(body);
     let reply = body.reply || 'ok';
     let sttFailed = false;
 
@@ -68,11 +121,7 @@ export class BotService {
     }
 
     if (userText) {
-      if (hasArabicScript(userText)) {
-        preferredLang = 'ar';
-      } else if (!preferredLang) {
-        preferredLang = detectUserLanguage(userText);
-      }
+      preferredLang = resolvePreferredLang({ userText, existingLang: preferredLang });
     }
     if (preferredLang && preferredLang !== ctx.preferredLang) {
       this.memoryStore?.setContext?.(conversationId, { preferredLang });
@@ -82,13 +131,24 @@ export class BotService {
       reply = sttFallbackReply(preferredLang || 'dz');
     } else if (userText) {
       const { normalizedText } = normalizeDarijaLatin(userText);
-      reply = applyGuardrails({
-        userText,
-        normalizedText,
-        ctx: { ...ctx, preferredLang },
-        upstreamReply: reply,
-        offersIndex: this.offersIndex,
-      });
+      const greeting = isGreeting(userText);
+      const wantsMenu = isMenuHelpIntent(normalizedText || userText);
+      const isMenuReply = looksLikeCategoryMenu(reply);
+      const hasWeakCategories = containsAnyKeyword(reply, WEAK_CATEGORY_KEYWORDS);
+      const hasStrongCategories = containsAnyKeyword(reply, STRONG_CATEGORY_KEYWORDS);
+      const shouldOverrideMenu = greeting || wantsMenu || (isMenuReply && hasWeakCategories && !hasStrongCategories);
+
+      if (shouldOverrideMenu) {
+        reply = buildMainMenu({ preferredLang: preferredLang || 'dz' });
+      } else {
+        reply = applyGuardrails({
+          userText,
+          normalizedText,
+          ctx: { ...ctx, preferredLang },
+          upstreamReply: reply,
+          offersIndex: this.offersIndex,
+        });
+      }
     }
 
     const offersByModel = new Map(Object.entries(this.offersIndex?.modelLookup || {}));
