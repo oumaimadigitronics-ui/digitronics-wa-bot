@@ -3978,7 +3978,7 @@ function extractAllowedTvSizeFromString(str, opts = {}) {
   const tvUnitRe = /(pouce|pouces|inch|inches|in\b|\"|''|”|po\b|diagonale)/i;
   const moroccanSizeHintRe = /(النمرة|نمرة|رقم|num(?:ero)?|numero|taille)/i;
 
-  const re = /(\d{2,3})/g;
+  const re = /(?<!\d)(\d{2,3})(?!\d)/g;
   let m = null;
   while ((m = re.exec(s0))) {
     const num = Number(m[1]);
@@ -8568,7 +8568,7 @@ function parseBudget(text) {
   const budgetPatterns = [
     /(?:moins de|max(?:imum)?|budget|under|<=|⩽|inferieur a|jusqu'?a|upto|up to)\s*([\d\s.,]{2,})/i,
     /(?:<=|⩽)\s*([\d\s.,]{2,})/,
-    /([\d\s.,]{3,})\s*(?:dh|dhs|mad|dirhams?)/i,
+    /([\d\s.,]{3,})\s*(?:dh|dhs|mad|dirhams?|د\.?م|درهم)/i,
   ];
   for (let i = 0; i < budgetPatterns.length; i += 1) {
     const m = s.match(budgetPatterns[i]);
