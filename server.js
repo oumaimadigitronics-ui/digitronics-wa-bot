@@ -777,21 +777,63 @@ function warrantyTextForBrand(lang, brand, cls) {
   return rules.warranty;
 }
 
-function detectLang(text) {
-  const t0 = String(text || "").trim();
+function detectUserLanguage(text) {
+  const raw = String(text || "");
+  const t0 = raw.trim();
+  if (!t0) return "dzl";
+
+  if (hasArabicScript(raw)) return "ar";
+
   const s = normMatch(t0);
-
-  if (hasArabicScript(t0)) return "ar";
-
+  const hasLatin = /[A-Za-z]/.test(t0);
   let frScore = 0;
-  if (/[éèêàçùôî]/i.test(t0)) frScore += 2;
-  if (s.indexOf("merci") >= 0) frScore += 2;
-  if (s.indexOf("livraison") >= 0) frScore += 1;
-  if (s.indexOf("commande") >= 0 || s.indexOf("commander") >= 0) frScore += 1;
-  if (s.indexOf("prix") >= 0) frScore += 1;
+  let enScore = 0;
 
-  if (frScore >= 2) return "fr";
+  if (/[éèêàçùôî]/i.test(t0)) frScore += 2;
+
+  const frStrong = ["bonjour", "salut", "merci"];
+  const frTokens = ["merci", "livraison", "garantie", "prix", "commande", "commander", "svp", "s'il", "sil", "s’il"];
+  const enStrong = ["hello", "hi", "hey"];
+  const enTokens = ["thanks", "please", "delivery", "warranty", "price", "order", "buy", "purchase"];
+
+  for (const token of frStrong) {
+    if (includesToken(s, token)) frScore += 2;
+  }
+  for (const token of frTokens) {
+    if (includesToken(s, token)) frScore += 1;
+  }
+  for (const token of enStrong) {
+    if (includesToken(s, token)) enScore += 2;
+  }
+  for (const token of enTokens) {
+    if (includesToken(s, token)) enScore += 1;
+  }
+
+  if (frScore >= 2 && frScore >= enScore) return "fr";
+  if (enScore >= 2) return "en";
+  if (frScore >= 1 && hasLatin && enScore === 0) return "fr";
   return "dzl";
+}
+
+function detectLang(text) {
+  const detected = detectUserLanguage(text);
+  return detected === "en" ? "dzl" : detected;
+}
+
+function resolvePreferredLang({ key, text }) {
+  const k = String(key || "");
+  const detected = detectUserLanguage(text);
+  const ctx = getCtx(k);
+  const current = ctx.preferredLang;
+  let next = current;
+
+  if (!current) next = detected;
+  else if (detected === "ar") next = "ar";
+  else if (current !== "fr" && detected === "fr") next = "fr";
+  else if (current === "dzl" && detected === "en") next = "en";
+
+  if (next && next !== current) setCtx(k, { preferredLang: next });
+  return next || detected;
 }
 
 function normalizeLanguageHint(lang) {
@@ -1912,6 +1954,26 @@ const GREETING_TEMPLATES = {
     "https://docs.google.com/forms/d/e/1FAIpQLScmDNagYSpUPfslT2s2t35KH7U1OWSNkUCIWmcJJm1R_alTQQ/viewform",
     "",
     "✅ Vous pouvez commander sur le site ou remplir le formulaire pour une commande directe"
+  ].join("\n"),
+  en: [
+    "👋 *Welcome to Digitronics*",
+    "",
+    "Choose a number from the list and send it 👇",
+    "",
+    "1️⃣ Offers & promotions",
+    "2️⃣ Delivery",
+    "3️⃣ Warranty",
+    "4️⃣ Payment methods",
+    "5️⃣ Opening hours",
+    "6️⃣ Location",
+    "",
+    "✅ Send only the number and I will reply right away",
+    "",
+    "🌐 Website: https://digitronics.ma/",
+    "📝 Order form:",
+    "https://docs.google.com/forms/d/e/1FAIpQLScmDNagYSpUPfslT2s2t35KH7U1OWSNkUCIWmcJJm1R_alTQQ/viewform",
+    "",
+    "✅ You can order on the website or fill out the form for a direct order"
   ].join("\n"),
 };
 
@@ -3246,8 +3308,9 @@ function addStrike(key) {
 }
 
 function initialGreetingText(lang) {
-  if (!CFG.featureGreetingI18n) return GREETING_TEMPLATE;
   const normalized = normalizeLanguageHint(lang);
+  if (normalized === "fr" || normalized === "en") return GREETING_TEMPLATES[normalized] || GREETING_TEMPLATES.fr;
+  if (!CFG.featureGreetingI18n) return GREETING_TEMPLATE;
   const key = normalized === "fr" ? "fr" : "ar";
   return GREETING_TEMPLATES[key] || GREETING_TEMPLATES.ar;
 }
@@ -3293,17 +3356,19 @@ function maybeSendInitialGreeting({ key, lang }) {
   return reply;
 }
 
-function resolveGreetingLang(lang, text) {
+function resolveGreetingLang(lang, text, preferredLang) {
+  if (preferredLang === "ar") return "ar";
+  if (preferredLang === "fr" || preferredLang === "en") return preferredLang;
   if (!CFG.featureGreetingLangFromText) return lang;
   const derivedLang = normalizeLanguageHint(detectLang(text));
   const hasFrenchGreeting = /(^|\s)(bonjour|salut)/i.test(String(text || ""));
   return derivedLang === "fr" || hasFrenchGreeting ? "fr" : "ar";
 }
 
-function handleGreetingMessage({ key, lang, text }) {
+function handleGreetingMessage({ key, lang, text, preferredLang }) {
   if (!isGreetingLikeOpener(text)) return null;
 
-  const effectiveLang = resolveGreetingLang(lang, text);
+  const effectiveLang = resolveGreetingLang(lang, text, preferredLang);
 
   const reply = maybeSendInitialGreeting({ key, lang: effectiveLang });
   if (!reply) return null;
@@ -10999,6 +11064,11 @@ app.post("/wanotifier", express.raw({ type: "*/*", limit: "2mb" }), parseWanotif
       return res.json({ ok: true, reply });
     }
 
+    const preferredLang = resolvePreferredLang({ key, text: userTextRaw || incoming.lang || "" });
+    if (preferredLang === "fr" || preferredLang === "ar" || (!CFG.featureForceArFr && preferredLang === "en")) {
+      lang = preferredLang;
+    }
+
     const offersAvailable = Boolean(
       lastOffersSync &&
         lastOffersSync.ok &&
@@ -11044,12 +11114,12 @@ app.post("/wanotifier", express.raw({ type: "*/*", limit: "2mb" }), parseWanotif
     const knowledgeProduct = detectProductModel(userTextRaw);
 
     const forcedGreeting = isForcedGreeting(userTextRaw) && !isBuyIntent(userTextRaw);
-    const greetingLang = resolveGreetingLang(lang, userTextRaw);
+    const greetingLang = resolveGreetingLang(lang, userTextRaw, preferredLang);
     const greetingReply = forcedGreeting
       ? maybeSendInitialGreeting({ key, lang: greetingLang })
       : isBuyIntent(userTextRaw)
         ? null
-        : handleGreetingMessage({ key, lang, text: userTextRaw });
+        : handleGreetingMessage({ key, lang, text: userTextRaw, preferredLang });
     if (greetingReply) {
       const reply = finalizeReply(greetingReply, 520);
       memory.push(key, "assistant", reply);
