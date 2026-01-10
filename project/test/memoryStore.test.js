@@ -46,3 +46,31 @@ test('MemoryStore persistence tmp+rename and reload', async () => {
 
   assert.deepStrictEqual(reloaded.getMessages('c1'), [{ text: 'hello' }]);
 });
+
+test('MemoryStore context persists and respects TTL', async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'memstore-ctx-'));
+  const store = new MemoryStore({
+    ttlHours: 0.0001,
+    maxMessages: 10,
+    maxConversations: 5000,
+    persist: true,
+    dir,
+  });
+
+  store.setContext('c2', { preferredLang: 'dz' });
+  await store.flushNow();
+
+  const reloaded = new MemoryStore({
+    ttlHours: 0.0001,
+    maxMessages: 10,
+    maxConversations: 5000,
+    persist: true,
+    dir,
+  });
+
+  assert.deepStrictEqual(reloaded.getContext('c2'), { preferredLang: 'dz' });
+
+  await new Promise((r) => setTimeout(r, 400));
+  reloaded.prune();
+  assert.deepStrictEqual(reloaded.getContext('c2'), {});
+});

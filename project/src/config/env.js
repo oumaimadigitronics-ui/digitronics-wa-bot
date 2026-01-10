@@ -8,6 +8,8 @@ export function loadEnv(env) {
     PORT: env.PORT,
     OPENAI_API_KEY: env.OPENAI_API_KEY || '',
     OPENAI_MODEL: env.OPENAI_MODEL || '',
+    OPENAI_STT_MODEL: env.OPENAI_STT_MODEL || '',
+    OPENAI_STT_DARIJA_PROMPT: env.OPENAI_STT_DARIJA_PROMPT || '',
     OFFERS_REFRESH_MS: Number(env.OFFERS_REFRESH_MS || 0),
     OFFERS_REFRESH_TOKEN: env.OFFERS_REFRESH_TOKEN || '',
     WC_BASE_URL: env.WC_BASE_URL || '',

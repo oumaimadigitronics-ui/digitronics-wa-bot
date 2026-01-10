@@ -21,5 +21,5 @@ export function buildOffersIndex(offersByBrand = {}) {
   const classes = Object.keys(classToOffers);
   const categories = Object.keys(categoryToOffers);
 
-  return { brands, classes, categories, modelLookup, modelPrefix4, classToOffers, categoryToOffers };
+  return { brands, classes, categories, modelLookup, modelPrefix4, classToOffers, categoryToOffers, offersByBrand };
 }
