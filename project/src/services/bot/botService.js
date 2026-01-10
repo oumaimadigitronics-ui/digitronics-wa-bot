@@ -13,6 +13,8 @@ import { extractBudgetMad, detectCategory, isPriceQuery } from '../nlp/extractPr
 import { maybeAnswerFromCatalogOrEscalate } from '../guardrails/catalogEvidenceGuardrail.js';
 import { findClosestOffers } from '../offers/priceLookup.js';
 import { buildPriceReply } from '../replies/priceReply.js';
+import { buildBotContext } from './context.js';
+import { pickOverride } from './overrides/index.js';
 
 function getAudioPayload(body = {}) {
   const media = body.media || {};
@@ -154,14 +156,16 @@ export class BotService {
   }
 
   async handleNotification(body = {}, context = {}) {
-    const conversationId = body.conversationId || 'unknown';
+    const botContext = buildBotContext(body, context);
+    const conversationId = botContext.conversationId;
     const ctx = this.memoryStore?.getContext?.(conversationId) || {};
     const preUserText = getBodyText(body);
     const prePreferredLang = resolvePreferredLangFromText(preUserText);
     const preOverride = getPreReplyOverride({ userText: preUserText, preferredLang: prePreferredLang, body });
     let preferredLang = ctx.preferredLang;
     let userText = getUserText(body);
-    let reply = body.reply || 'ok';
+    const override = pickOverride(botContext);
+    let reply = override?.reply ?? (body.reply || 'ok');
     let sttFailed = false;
     let extractedPhone = null;
 
@@ -184,7 +188,7 @@ export class BotService {
         });
       }
       this.memoryStore?.appendMessage?.(conversationId, { text: safeReply, ts: Date.now() });
-      return { ok: true, reply: safeReply, requestId: context.requestId };
+      return { ok: true, reply: safeReply, requestId: botContext.requestId };
     }
 
     if (!userText) {
@@ -194,7 +198,7 @@ export class BotService {
         const transcript = await this.sttService?.transcribeAudio?.({
           ...audioPayload,
           preferredLangHint,
-          requestId: context.requestId,
+          requestId: botContext.requestId,
           cfg: this.cfg,
         });
         if (transcript) {
@@ -296,7 +300,7 @@ export class BotService {
     const safeReply = enforceReplyPolicy(reply, {
       offersByModel,
       allowUrls: false,
-      isPhotoFlow: Boolean(body?.photoFlow),
+      isPhotoFlow: botContext.isPhotoFlow,
       maxChars: this.cfg?.MAX_WA_REPLY_CHARS,
     });
     if (userText) {
@@ -309,6 +313,6 @@ export class BotService {
       });
     }
     this.memoryStore?.appendMessage?.(conversationId, { text: safeReply, ts: Date.now() });
-    return { ok: true, reply: safeReply, requestId: context.requestId };
+    return { ok: true, reply: safeReply, requestId: botContext.requestId };
   }
 }
