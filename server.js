@@ -4326,8 +4326,8 @@ const CATEGORY_ALIASES = Object.freeze({
   ],
   Congelateur: ["congelateur", "congélateur", "freezer", "فريزر"],
   "Chauffe-eau": ["chauffe-eau", "chauffe eau", "water heater", "سخان"],
-  "Micro-ondes": ["micro-ondes", "microwave", "ميكرو"],
-  "Lave Vaisselle": ["lave vaisselle", "dishwasher", "غسالة صحون"],
+  "Micro-ondes": ["micro-ondes", "micro ondes", "micro onde", "microondes", "microonde", "microwave", "ميكرو"],
+  "Lave Vaisselle": ["lave vaisselle", "lave-vaisselle", "lavevaisselle", "dishwasher", "غسالة صحون"],
   "Air Fryer": ["air fryer", "airfryer", "قلاية هوائية", "اير فراير", "ايرفراير"],
   "Barre De Son": ["barre de son", "soundbar", "ساندبار"],
   Cuisiniere: [
@@ -4497,6 +4497,18 @@ const CATEGORY_CLASS_KEYWORDS = Object.freeze([
       "stove",
       "range",
     ],
+  },
+  {
+    category: "Micro-ondes",
+    keywords: ["micro-ondes", "micro ondes", "micro onde", "microondes", "microonde", "microwave", "ميكرو"],
+  },
+  {
+    category: "Lave Vaisselle",
+    keywords: ["lave vaisselle", "lave-vaisselle", "lavevaisselle", "dishwasher", "غسالة صحون"],
+  },
+  {
+    category: "Chauffe-eau",
+    keywords: ["chauffe-eau", "chauffe eau", "water heater", "سخان"],
   },
 ]);
 
@@ -8313,16 +8325,24 @@ function shouldPreferCommerceRouting(text, ctx, opts = {}) {
 function detectApplianceCategory(text) {
   const s = normMatch(text || "");
   if (!s) return null;
+  let bestKey = null;
+  let bestLen = 0;
   const entries = Object.entries(APPLIANCE_CATEGORY_KEYWORDS);
   for (let i = 0; i < entries.length; i += 1) {
     const key = entries[i][0];
     const keywords = entries[i][1] || [];
     for (let j = 0; j < keywords.length; j += 1) {
       const kw = keywords[j];
-      if (kw && includesToken(s, kw)) return key;
+      if (kw && includesToken(s, kw)) {
+        const kwLen = normMatch(kw).length;
+        if (kwLen > bestLen) {
+          bestLen = kwLen;
+          bestKey = key;
+        }
+      }
     }
   }
-  return null;
+  return bestKey;
 }
 
 function detectExplicitApplianceCategory(text) {
@@ -11555,6 +11575,8 @@ export {
   checkProductAvailability,
   voiceNotUnderstoodTemplate,
   parseUserQuery,
+  shouldPreferCommerceRouting,
+  detectApplianceCategory,
 };
 
 function runSelfTests() {
