@@ -1,10 +1,10 @@
 import { enforceReplyPolicy } from '../../domain/replyPolicy.js';
 import { applyGuardrails } from '../guardrails/guardrails.js';
-import { detectUserLanguage, hasArabicScript } from '../lang/detectUserLanguage.js';
+import { detectUserLanguage } from '../lang/detectUserLanguage.js';
 import { isGreeting } from '../lang/greeting.js';
 import { normalizeDarijaLatin } from '../lang/normalizeDarijaLatin.js';
 import { extractMoroccoPhone, phoneConfirmationReply } from '../lang/phoneMA.js';
-import { getThanksReply } from '../lang/thanks.js';
+import { hasBye, isThanks, thanksReply } from '../lang/thanks.js';
 import { buildMainMenu } from '../menu/menuBuilder.js';
 import { transcribeAudio } from '../stt/sttService.js';
 import { STRONG_CATEGORY_KEYWORDS, WEAK_CATEGORY_KEYWORDS } from '../../knowledge/catalog.js';
@@ -48,14 +48,10 @@ function getUserText(body = {}) {
   return '';
 }
 
-function isFrenchPreferred(text = '') {
-  return detectUserLanguage(text) === 'fr';
-}
-
 function resolvePreferredLang({ userText, existingLang }) {
   if (!userText) return existingLang || 'dz';
-  if (hasArabicScript(userText)) return 'ar';
-  if (isFrenchPreferred(userText)) return 'fr';
+  const detected = detectUserLanguage(userText);
+  if (detected && detected !== 'dz') return detected;
   return existingLang || 'dz';
 }
 
@@ -160,13 +156,10 @@ export class BotService {
       if (extractedPhone) {
         reply = phoneConfirmationReply(preferredLang || 'dz');
       } else {
-        const thanksReply = getThanksReply({
-          text: userText,
-          normalizedText,
-          preferredLang: preferredLang || 'dz',
-        });
-        if (thanksReply) {
-          reply = thanksReply;
+        if (isThanks(normalizedText || userText)) {
+          reply = thanksReply(preferredLang || 'dz', {
+            isBye: hasBye(normalizedText || userText),
+          });
         } else {
           const greeting = isGreeting(userText);
           const wantsMenu = isMenuHelpIntent(normalizedText || userText);
