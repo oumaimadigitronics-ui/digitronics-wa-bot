@@ -48,6 +48,7 @@ const FEATURE_LEGACY_OFFER_LINE = String(process.env.FEATURE_LEGACY_OFFER_LINE |
 const FEATURE_LEGACY_OFFER_DISPLAY_NAME = String(process.env.FEATURE_LEGACY_OFFER_DISPLAY_NAME || "0") === "1";
 const FEATURE_OFFER_ITEM_EMOJI_FORMAT = String(process.env.FEATURE_OFFER_ITEM_EMOJI_FORMAT || "0") === "1";
 const FEATURE_OFFERS_BOX_HEADER = String(process.env.FEATURE_OFFERS_BOX_HEADER || (IS_TEST_ENV ? "1" : "0")) === "1";
+const WANOTIFIER_FOLLOWUP_FIELD = "followups";
 const IS_TEST = IS_TEST_ENV;
 const ENTRY_FILE = fileURLToPath(import.meta.url);
 const __filename = ENTRY_FILE;
@@ -136,6 +137,7 @@ const {
   AUDIO_MIN_SCORE = "0.45",
   FEATURE_AUDIO_SNIFF_MIME = "0",
   FEATURE_AUDIO_CLEAN_MIME = "1",
+  FEATURE_GREETING_FOLLOWUP_OFFERS = "0",
 
   SYSTEM_PROMPT = "",
   SYSTEM_PROMPT_FILE = "",
@@ -181,6 +183,7 @@ const CFG = {
   audioMinScore: Math.max(0, Math.min(1, Number(AUDIO_MIN_SCORE) || 0.45)),
   featureAudioSniffMime: String(FEATURE_AUDIO_SNIFF_MIME || "0") === "1",
   featureAudioCleanMime: String(FEATURE_AUDIO_CLEAN_MIME || "1") === "1",
+  featureGreetingFollowupOffers: String(FEATURE_GREETING_FOLLOWUP_OFFERS || "0") === "1",
 
   wcBase: String(WC_BASE_URL || "").replace(/\/$/g, ""),
   wcKey: String(WC_CONSUMER_KEY || ""),
@@ -10902,6 +10905,35 @@ app.post("/wanotifier", express.raw({ type: "*/*", limit: "2mb" }), parseWanotif
     const knowledgeCategory = detectCategoryKnowledge(userTextRaw);
     const knowledgeProduct = detectProductModel(userTextRaw);
 
+    const forcedGreeting = isForcedGreeting(userTextRaw) && !isBuyIntent(userTextRaw);
+    const greetingReply = forcedGreeting
+      ? maybeSendInitialGreeting({ key, lang })
+      : isBuyIntent(userTextRaw)
+        ? null
+        : handleGreetingMessage({ key, lang, text: userTextRaw });
+    if (greetingReply) {
+      const reply = finalizeReply(greetingReply, 520);
+      memory.push(key, "assistant", reply);
+      resetStrikes(key);
+      const response = { ok: true, reply };
+      if (CFG.featureGreetingFollowupOffers && offersAvailable) {
+        const now = Date.now();
+        const ctx = getCtx(key);
+        const hasRecentFollowup =
+          ctx.didSendGreetingFollowupOffers &&
+          ctx.greetingFollowupOffersAt &&
+          now - ctx.greetingFollowupOffersAt < INITIAL_GREETING_TTL_MS;
+        if (!hasRecentFollowup) {
+          const followupReply = finalizeReply(offersFallbackMessage(lang), 520);
+          response[WANOTIFIER_FOLLOWUP_FIELD] = [followupReply];
+          setCtx(key, { didSendGreetingFollowupOffers: true, greetingFollowupOffersAt: now });
+          memory.push(key, "assistant", followupReply);
+          console.log(JSON.stringify({ level: "info", ...logContext, msg: "greeting_followup_offers" }));
+        }
+      }
+      return res.json(response);
+    }
+
     const topicKey = detectTechTopic(userTextRaw);
     if (topicKey) {
       const topicReply = buildTechTopicAnswer(topicKey, lang);
@@ -10965,19 +10997,6 @@ app.post("/wanotifier", express.raw({ type: "*/*", limit: "2mb" }), parseWanotif
 
     if (isNegotiationIntent(userTextRaw)) {
       const reply = fixedPriceTemplate();
-      memory.push(key, "assistant", reply);
-      resetStrikes(key);
-      return res.json({ ok: true, reply });
-    }
-
-    const forcedGreeting = isForcedGreeting(userTextRaw) && !isBuyIntent(userTextRaw);
-    const greetingReply = forcedGreeting
-      ? maybeSendInitialGreeting({ key, lang })
-      : isBuyIntent(userTextRaw)
-        ? null
-        : handleGreetingMessage({ key, lang, text: userTextRaw });
-    if (greetingReply) {
-      const reply = finalizeReply(greetingReply, 520);
       memory.push(key, "assistant", reply);
       resetStrikes(key);
       return res.json({ ok: true, reply });
@@ -11952,6 +11971,8 @@ async function createServerForTests(opts = {}) {
     cfgPatch.wanotifierHmacHeader = String(env.WANOTIFIER_HMAC_HEADER || CFG.wanotifierHmacHeader).toLowerCase();
   if (env && env.WANOTIFIER_TS_HEADER !== undefined)
     cfgPatch.wanotifierTsHeader = String(env.WANOTIFIER_TS_HEADER || CFG.wanotifierTsHeader).toLowerCase();
+  if (env && env.FEATURE_GREETING_FOLLOWUP_OFFERS !== undefined)
+    cfgPatch.featureGreetingFollowupOffers = String(env.FEATURE_GREETING_FOLLOWUP_OFFERS || "0") === "1";
   if (env && env.MEDIA_MODE !== undefined) cfgPatch.mediaMode = String(env.MEDIA_MODE || CFG.mediaMode).toLowerCase();
   if (env && env.MEDIA_ALLOW_INSECURE_HTTP !== undefined)
     cfgPatch.mediaAllowHttp = String(env.MEDIA_ALLOW_INSECURE_HTTP || "0") === "1";
