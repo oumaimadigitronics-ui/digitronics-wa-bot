@@ -49,6 +49,7 @@ const FEATURE_LEGACY_OFFER_DISPLAY_NAME = String(process.env.FEATURE_LEGACY_OFFE
 const FEATURE_OFFER_ITEM_EMOJI_FORMAT = String(process.env.FEATURE_OFFER_ITEM_EMOJI_FORMAT || "0") === "1";
 const FEATURE_OFFERS_BOX_HEADER = String(process.env.FEATURE_OFFERS_BOX_HEADER || (IS_TEST_ENV ? "1" : "0")) === "1";
 const FEATURE_WA_HARD_CAP_4096 = String(process.env.FEATURE_WA_HARD_CAP_4096 || "0") === "1";
+const FEATURE_ALLOW_MAPS_URLS = String(process.env.FEATURE_ALLOW_MAPS_URLS || "0") === "1";
 const WANOTIFIER_FOLLOWUP_FIELD = "followups";
 const IS_TEST = IS_TEST_ENV;
 const ENTRY_FILE = fileURLToPath(import.meta.url);
@@ -693,13 +694,20 @@ function stripUrlQueriesInText(text) {
 }
 
 const ORDER_FORM_URL_SAFE = sanitizeUrlNoQuestion(ORDER_FORM_URL);
+const MAPS_URL_RAW = "https://maps.app.goo.gl/sLuZQCt74KVkq39H7?g_st=aw";
+const MAPS_URL_SAFE = sanitizeUrlNoQuestion(MAPS_URL_RAW);
 
 function stripNonPurchaseUrls(text) {
   const s = String(text || "");
   return s
     .replace(/https?:\/\/\S+/g, (m) => {
       const safe = sanitizeUrlNoQuestion(m);
-      if (safe.startsWith("https://digitronics.ma") || safe === ORDER_FORM_URL_SAFE) return m;
+      const isAllowedMaps =
+        FEATURE_ALLOW_MAPS_URLS &&
+        (safe.startsWith("https://maps.app.goo.gl") ||
+          safe.startsWith("https://www.google.com/maps") ||
+          safe.startsWith("https://goo.gl/maps"));
+      if (safe.startsWith("https://digitronics.ma") || safe === ORDER_FORM_URL_SAFE || isAllowedMaps) return m;
       return "";
     })
     .replace(/[ \t]{2,}/g, " ")
@@ -869,7 +877,9 @@ function t(lang, key, vars) {
         "\n📲 WhatsApp: " +
         CONTACTS.whatsapp +
         "\n📞 T3ayet lina: " +
-        CONTACTS.calls.join(" / "),
+        CONTACTS.calls.join(" / ") +
+        "\n🗺️ Maps: " +
+        MAPS_URL_SAFE,
       OPENING_HOURS: "🕒 Lkhadma: Lundi–Samedi 10:00–19:00.",
       DELIVERY_INFO: "🚚 Livraison f Maroc كامل: 24–72h حسب l-mdina.\n✅ COD (cash f livraison) kayn.",
       WARRANTY_INFO: (x) => {
@@ -955,7 +965,9 @@ function t(lang, key, vars) {
         "\n📲 WhatsApp: " +
         CONTACTS.whatsapp +
         "\n📞 Appels: " +
-        CONTACTS.calls.join(" / "),
+        CONTACTS.calls.join(" / ") +
+        "\n🗺️ Maps: " +
+        MAPS_URL_SAFE,
       OPENING_HOURS: "🕒 Horaires: Lun–Sam 10:00–19:00.",
       DELIVERY_INFO: "🚚 Livraison partout au Maroc: 24–72h selon la ville.\n✅ Paiement à la livraison (COD).",
       WARRANTY_INFO: (x) => {
@@ -1040,7 +1052,9 @@ function t(lang, key, vars) {
         "\n📲 واتساب: " +
         CONTACTS.whatsapp +
         "\n📞 مكالمات: " +
-        CONTACTS.calls.join(" / "),
+        CONTACTS.calls.join(" / ") +
+        "\n🗺️ Maps: " +
+        MAPS_URL_SAFE,
       OPENING_HOURS: "🕒 أوقات العمل: الإثنين–السبت 10:00–19:00.",
       DELIVERY_INFO: "🚚 التوصيل فالمغرب كامل: 24–72 ساعة حسب المدينة.\n✅ الدفع عند الاستلام (COD).",
       WARRANTY_INFO: (x) => {
@@ -1060,7 +1074,9 @@ function t(lang, key, vars) {
         "\n📲 WhatsApp: " +
         CONTACTS.whatsapp +
         "\n📞 Calls: " +
-        CONTACTS.calls.join(" / "),
+        CONTACTS.calls.join(" / ") +
+        "\n🗺️ Maps: " +
+        MAPS_URL_SAFE,
       OPENING_HOURS: "🕒 Hours: Mon–Sat 10:00–19:00.",
       DELIVERY_INFO: "🚚 Delivery across Morocco: 24–72h by city.\n✅ Cash on delivery (COD) available.",
       WARRANTY_INFO: (x) => {
@@ -11562,6 +11578,7 @@ export {
   buildProductDetailsReply,
   buildOfferDisplayName,
   stripQuestions,
+  stripNonPurchaseUrls,
   ensureNoQuestion,
   shortenNoQuestion,
   isTvOriginIntent,
