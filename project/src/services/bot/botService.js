@@ -3,6 +3,7 @@ import { applyGuardrails } from '../guardrails/guardrails.js';
 import { detectUserLanguage, hasArabicScript } from '../lang/detectUserLanguage.js';
 import { isGreeting } from '../lang/greeting.js';
 import { normalizeDarijaLatin } from '../lang/normalizeDarijaLatin.js';
+import { extractMoroccoPhone, phoneConfirmationReply } from '../lang/phoneMA.js';
 import { getThanksReply } from '../lang/thanks.js';
 import { buildMainMenu } from '../menu/menuBuilder.js';
 import { transcribeAudio } from '../stt/sttService.js';
@@ -124,6 +125,7 @@ export class BotService {
     let userText = getUserText(body);
     let reply = body.reply || 'ok';
     let sttFailed = false;
+    let extractedPhone = null;
 
     if (!userText) {
       const audioPayload = getAudioPayload(body);
@@ -154,70 +156,75 @@ export class BotService {
       reply = sttFallbackReply(preferredLang || 'dz');
     } else if (userText) {
       const { normalizedText } = normalizeDarijaLatin(userText);
-      const thanksReply = getThanksReply({
-        text: userText,
-        normalizedText,
-        preferredLang: preferredLang || 'dz',
-      });
-      if (thanksReply) {
-        reply = thanksReply;
+      extractedPhone = extractMoroccoPhone(userText);
+      if (extractedPhone) {
+        reply = phoneConfirmationReply(preferredLang || 'dz');
       } else {
-        const greeting = isGreeting(userText);
-        const wantsMenu = isMenuHelpIntent(normalizedText || userText);
-        const isMenuReply = looksLikeCategoryMenu(reply);
-        const hasWeakCategories = containsAnyKeyword(reply, WEAK_CATEGORY_KEYWORDS);
-        const hasStrongCategories = containsAnyKeyword(reply, STRONG_CATEGORY_KEYWORDS);
-        const shouldOverrideMenu = greeting || wantsMenu || (isMenuReply && hasWeakCategories && !hasStrongCategories);
-
-        if (shouldOverrideMenu) {
-          reply = buildMainMenu({ preferredLang: preferredLang || 'dz' });
+        const thanksReply = getThanksReply({
+          text: userText,
+          normalizedText,
+          preferredLang: preferredLang || 'dz',
+        });
+        if (thanksReply) {
+          reply = thanksReply;
         } else {
-          const guardrailReply = applyGuardrails({
-            userText,
-            normalizedText,
-            ctx: { ...ctx, preferredLang },
-            upstreamReply: reply,
-            offersIndex: this.offersIndex,
-          });
-          let structuredHandled = false;
-          if (guardrailReply !== reply) structuredHandled = true;
-          reply = guardrailReply;
+          const greeting = isGreeting(userText);
+          const wantsMenu = isMenuHelpIntent(normalizedText || userText);
+          const isMenuReply = looksLikeCategoryMenu(reply);
+          const hasWeakCategories = containsAnyKeyword(reply, WEAK_CATEGORY_KEYWORDS);
+          const hasStrongCategories = containsAnyKeyword(reply, STRONG_CATEGORY_KEYWORDS);
+          const shouldOverrideMenu = greeting || wantsMenu || (isMenuReply && hasWeakCategories && !hasStrongCategories);
 
-          if (isPriceQuery(userText)) {
-            structuredHandled = true;
-            const targetPrice = extractBudgetMad(userText);
-            const detectedCategory = detectCategory(userText);
-            if (detectedCategory) {
+          if (shouldOverrideMenu) {
+            reply = buildMainMenu({ preferredLang: preferredLang || 'dz' });
+          } else {
+            const guardrailReply = applyGuardrails({
+              userText,
+              normalizedText,
+              ctx: { ...ctx, preferredLang },
+              upstreamReply: reply,
+              offersIndex: this.offersIndex,
+            });
+            let structuredHandled = false;
+            if (guardrailReply !== reply) structuredHandled = true;
+            reply = guardrailReply;
+
+            if (isPriceQuery(userText)) {
               structuredHandled = true;
-              const offers = getOffersForCategory(this.offersIndex, detectedCategory);
-              if (offers.length > 0 && Number.isFinite(targetPrice)) {
-                const { limit, tolerancePct } = resolvePriceQueryConfig(this.cfg);
-                const matches = findClosestOffers({
-                  offers,
-                  targetPrice,
-                  limit,
-                  tolerancePct,
-                });
-                if (matches.length > 0) {
-                  reply = buildPriceReply({
-                    category: detectedCategory,
+              const targetPrice = extractBudgetMad(userText);
+              const detectedCategory = detectCategory(userText);
+              if (detectedCategory) {
+                structuredHandled = true;
+                const offers = getOffersForCategory(this.offersIndex, detectedCategory);
+                if (offers.length > 0 && Number.isFinite(targetPrice)) {
+                  const { limit, tolerancePct } = resolvePriceQueryConfig(this.cfg);
+                  const matches = findClosestOffers({
+                    offers,
                     targetPrice,
-                    matches,
-                    preferredLang: preferredLang || 'dz',
+                    limit,
+                    tolerancePct,
                   });
+                  if (matches.length > 0) {
+                    reply = buildPriceReply({
+                      category: detectedCategory,
+                      targetPrice,
+                      matches,
+                      preferredLang: preferredLang || 'dz',
+                    });
+                  }
                 }
               }
             }
-          }
 
-          if (!structuredHandled) {
-            const catalogResult = maybeAnswerFromCatalogOrEscalate({
-              userText,
-              preferredLang: preferredLang || 'dz',
-              offersIndex: this.offersIndex,
-            });
-            if (catalogResult?.reply) {
-              reply = catalogResult.reply;
+            if (!structuredHandled) {
+              const catalogResult = maybeAnswerFromCatalogOrEscalate({
+                userText,
+                preferredLang: preferredLang || 'dz',
+                offersIndex: this.offersIndex,
+              });
+              if (catalogResult?.reply) {
+                reply = catalogResult.reply;
+              }
             }
           }
         }
@@ -231,6 +238,15 @@ export class BotService {
       isPhotoFlow: Boolean(body?.photoFlow),
       maxChars: this.cfg?.MAX_WA_REPLY_CHARS,
     });
+    if (userText) {
+      const meta = extractedPhone ? { phone: extractedPhone } : undefined;
+      this.memoryStore?.appendMessage?.(conversationId, {
+        text: userText,
+        role: 'user',
+        ts: Date.now(),
+        ...(meta ? { meta } : {}),
+      });
+    }
     this.memoryStore?.appendMessage?.(conversationId, { text: safeReply, ts: Date.now() });
     return { ok: true, reply: safeReply, requestId: context.requestId };
   }
