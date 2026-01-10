@@ -48,6 +48,7 @@ const FEATURE_LEGACY_OFFER_LINE = String(process.env.FEATURE_LEGACY_OFFER_LINE |
 const FEATURE_LEGACY_OFFER_DISPLAY_NAME = String(process.env.FEATURE_LEGACY_OFFER_DISPLAY_NAME || "0") === "1";
 const FEATURE_OFFER_ITEM_EMOJI_FORMAT = String(process.env.FEATURE_OFFER_ITEM_EMOJI_FORMAT || "0") === "1";
 const FEATURE_OFFERS_BOX_HEADER = String(process.env.FEATURE_OFFERS_BOX_HEADER || (IS_TEST_ENV ? "1" : "0")) === "1";
+const FEATURE_WA_HARD_CAP_4096 = String(process.env.FEATURE_WA_HARD_CAP_4096 || "0") === "1";
 const WANOTIFIER_FOLLOWUP_FIELD = "followups";
 const IS_TEST = IS_TEST_ENV;
 const ENTRY_FILE = fileURLToPath(import.meta.url);
@@ -143,6 +144,11 @@ const {
   SYSTEM_PROMPT_FILE = "",
 } = process.env;
 
+const configuredMaxReplyChars = Number(MAX_WA_REPLY_CHARS) || 6000;
+const maxReplyCharsConfigured = FEATURE_WA_HARD_CAP_4096
+  ? Math.min(configuredMaxReplyChars, 4096)
+  : configuredMaxReplyChars;
+
 if (REQUIRE_ENV && !OPENAI_API_KEY) {
   console.error("Missing env var: OPENAI_API_KEY (OpenAI responses will fail until set).");
 }
@@ -158,7 +164,7 @@ const CFG = {
   refreshMs: Number(OFFERS_REFRESH_MS) || 300000,
   rateWindowMs: Number(RATE_LIMIT_WINDOW_MS) || 60000,
   rateMax: Number(RATE_LIMIT_MAX) || 25,
-  maxReplyChars: Math.max(200, Number(MAX_WA_REPLY_CHARS) || 6000),
+  maxReplyChars: Math.max(200, maxReplyCharsConfigured),
 
   memoryTtlMs: (Number(MEMORY_TTL_HOURS) || 24) * 60 * 60 * 1000,
   memoryMaxMessages: Math.max(6, Number(MEMORY_MAX_MESSAGES) || 12),
@@ -477,10 +483,30 @@ function setSystemPromptForTest(value) {
   systemPromptValue = String(value || "");
 }
 
-function shorten(text, max) {
+function logReplyTruncated(logContext) {
+  if (!logContext) return;
+  const payload = {
+    level: "info",
+    msg: "reply_truncated",
+    reqId: logContext.reqId || null,
+    conversationId: redactLogId(logContext.conversationId || null),
+    senderId: redactLogId(logContext.senderId || null),
+    mediaKind: logContext.mediaKind || null,
+  };
+  try {
+    console.log(JSON.stringify(payload));
+  } catch {
+    console.log("[INFO]", payload);
+  }
+}
+
+function shorten(text, max, logContext) {
   const m = Number(max) || CFG.maxReplyChars;
   const t0 = String(text || "").trim();
-  if (t0.length > m) return t0.slice(0, m).trim();
+  if (t0.length > m) {
+    logReplyTruncated(logContext);
+    return t0.slice(0, m).trim();
+  }
   return t0;
 }
 
@@ -582,9 +608,9 @@ function ensureNoQuestion(text) {
   return stripQuestions(out);
 }
 
-function shortenNoQuestion(text, max) {
+function shortenNoQuestion(text, max, logContext) {
   const cleaned = stripUrlQueriesInText(stripQuestions(text));
-  return shorten(ensureNoQuestion(cleaned), max || CFG.maxReplyChars);
+  return shorten(ensureNoQuestion(cleaned), max || CFG.maxReplyChars, logContext);
 }
 
 function sniffImageMime(buf) {
@@ -10719,7 +10745,7 @@ app.post("/wanotifier", express.raw({ type: "*/*", limit: "2mb" }), parseWanotif
       if (!audioAnswerNoteText) return text;
       return `${audioAnswerNoteText}\n\n${text}`;
     };
-    const finalizeReply = (text, limit) => shortenNoQuestion(applyAudioNote(text), limit);
+    const finalizeReply = (text, limit) => shortenNoQuestion(applyAudioNote(text), limit, logContext);
 
     // Immediate image handling with vision before deriving text
     if (mediaInfo && (mediaInfo.kind === "image" || guessMediaKind(mediaInfo) === "image")) {
@@ -11430,6 +11456,7 @@ export {
   buildOfferDisplayName,
   stripQuestions,
   ensureNoQuestion,
+  shortenNoQuestion,
   isTvOriginIntent,
   detectContactInfo,
   hasProductInquirySignal,

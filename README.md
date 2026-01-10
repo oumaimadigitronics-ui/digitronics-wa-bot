@@ -13,6 +13,7 @@ Core:
 - `OPENAI_API_KEY`: OpenAI API key
 - `OPENAI_MODEL`: chat model used for responses
 - `OPENAI_TRANSCRIBE_MODEL`: audio transcription model, default `gpt-4o-mini-transcribe`
+- `MAX_WA_REPLY_CHARS`: reply length cap (WhatsApp text messages are effectively limited to 4096 characters, so keep this aligned)
 
 Media:
 - `MEDIA_MODE`: `auto` or `disabled`
@@ -33,6 +34,7 @@ Feature flags (set in Render environment variables when needed):
 - `FEATURE_STRICT_STOCK_FILTER`: set to `1` to remove out-of-stock offers before ranking
 - `FEATURE_SHOW_SKU_IN_OFFERS`: set to `1` to include SKU/model in offer lines
 - `FEATURE_OFFER_ITEM_EMOJI_FORMAT`: set to `1` to use emoji offer item blocks in premium offers
+- `FEATURE_WA_HARD_CAP_4096`: set to `1` to hard-cap replies at 4096 characters
 
 Render configuration:
 - In the Render dashboard, open your service, go to **Environment**, and add/update the env vars above (for example `FEATURE_STRICT_STOCK_FILTER=1`).
