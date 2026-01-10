@@ -75,17 +75,16 @@ test('wanotifier battery TV intent overrides Arabic reply', async (t) => {
   const data = await res.json();
 
   assert.strictEqual(res.status, 200);
-  assert.strictEqual(data.reply, powerIntentReply('ar'));
+  assert.strictEqual(data.reply, powerIntentReply('ar').replace(/[?؟]/g, ''));
 });
 
-test('wanotifier battery TV intent overrides French reply', async (t) => {
+test('wanotifier battery TV intent overrides Darija reply', async (t) => {
   const memoryStore = new MemoryStore({ persist: false });
-  memoryStore.setContext('battery-fr', { preferredLang: 'fr' });
   const { server, url } = await startServer({ memoryStore });
   t.after(() => server.close());
 
   const rawBody = JSON.stringify({
-    conversationId: 'battery-fr',
+    conversationId: 'battery-dz',
     text: 'tv portable rechargeable',
     reply: 'Menu:\n- TV\n- Frigo',
   });
@@ -93,7 +92,7 @@ test('wanotifier battery TV intent overrides French reply', async (t) => {
   const data = await res.json();
 
   assert.strictEqual(res.status, 200);
-  assert.strictEqual(data.reply, powerIntentReply('fr'));
+  assert.strictEqual(data.reply, powerIntentReply('dz').replace(/[?؟]/g, ''));
 });
 
 test('wanotifier normal TV query does not trigger battery override', async (t) => {

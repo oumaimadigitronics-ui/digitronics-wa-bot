@@ -3,7 +3,7 @@ import { applyGuardrails } from '../guardrails/guardrails.js';
 import { detectUserLanguage } from '../lang/detectUserLanguage.js';
 import { isGreeting } from '../lang/greeting.js';
 import { normalizeDarijaLatin } from '../lang/normalizeDarijaLatin.js';
-import { extractMoroccoPhone, phoneConfirmationReply } from '../lang/phoneMA.js';
+import { extractMoroccoPhone, hasMoroccoPhone, phoneConfirmReply } from '../lang/phoneMA.js';
 import { isBatteryTvIntent, powerIntentReply } from '../lang/powerIntent.js';
 import { hasBye, isThanks, thanksReply } from '../lang/thanks.js';
 import { buildMainMenu } from '../menu/menuBuilder.js';
@@ -47,6 +47,44 @@ function getUserText(body = {}) {
   if (typeof body.userText === 'string') return body.userText.trim();
   if (typeof body.text === 'string') return body.text.trim();
   return '';
+}
+
+function getBodyText(body = {}) {
+  return typeof body.text === 'string' ? body.text.trim() : '';
+}
+
+function resolvePreferredLangFromText(userText = '') {
+  if (!userText) return 'dz';
+  return detectUserLanguage(userText) || 'dz';
+}
+
+function hasRealQuestionOrRequest(text = '') {
+  if (!text) return false;
+  if (/[?؟]/.test(text)) return true;
+  const latinRequestRegex =
+    /\b(price|prix|tarif|stock|dispo|disponible|availability|available|budget|taille|size|model|marque|brand)\b/i;
+  const arabicRequestRegex = /(ثمن|السعر|بكم|المقاس|القياس|موديل|الماركة|العلامة|متوفر|متوفرة)/;
+  return latinRequestRegex.test(text) || arabicRequestRegex.test(text);
+}
+
+function getPreReplyOverride({ userText, preferredLang }) {
+  if (!userText) return null;
+
+  if (hasMoroccoPhone(userText)) {
+    return { reply: phoneConfirmReply(preferredLang, extractMoroccoPhone(userText)), reason: 'phone' };
+  }
+
+  if (hasRealQuestionOrRequest(userText)) return null;
+
+  if (isThanks(userText)) {
+    return { reply: thanksReply(preferredLang, { isBye: hasBye(userText) }), reason: 'thanks' };
+  }
+
+  if (isBatteryTvIntent(userText)) {
+    return { reply: powerIntentReply(preferredLang), reason: 'battery-tv' };
+  }
+
+  return null;
 }
 
 function resolvePreferredLang({ userText, existingLang }) {
@@ -118,11 +156,36 @@ export class BotService {
   async handleNotification(body = {}, context = {}) {
     const conversationId = body.conversationId || 'unknown';
     const ctx = this.memoryStore?.getContext?.(conversationId) || {};
+    const preUserText = getBodyText(body);
+    const prePreferredLang = resolvePreferredLangFromText(preUserText);
+    const preOverride = getPreReplyOverride({ userText: preUserText, preferredLang: prePreferredLang, body });
     let preferredLang = ctx.preferredLang;
     let userText = getUserText(body);
     let reply = body.reply || 'ok';
     let sttFailed = false;
     let extractedPhone = null;
+
+    if (preOverride) {
+      const offersByModel = new Map(Object.entries(this.offersIndex?.modelLookup || {}));
+      const safeReply = enforceReplyPolicy(preOverride.reply, {
+        offersByModel,
+        allowUrls: false,
+        isPhotoFlow: Boolean(body?.photoFlow),
+        maxChars: this.cfg?.MAX_WA_REPLY_CHARS,
+      });
+      if (preUserText) {
+        const phone = extractMoroccoPhone(preUserText);
+        const meta = phone ? { phone } : undefined;
+        this.memoryStore?.appendMessage?.(conversationId, {
+          text: preUserText,
+          role: 'user',
+          ts: Date.now(),
+          ...(meta ? { meta } : {}),
+        });
+      }
+      this.memoryStore?.appendMessage?.(conversationId, { text: safeReply, ts: Date.now() });
+      return { ok: true, reply: safeReply, requestId: context.requestId };
+    }
 
     if (!userText) {
       const audioPayload = getAudioPayload(body);
@@ -152,17 +215,18 @@ export class BotService {
     if (sttFailed) {
       reply = sttFallbackReply(preferredLang || 'dz');
     } else if (userText) {
+      const thanksText = userText;
       const { normalizedText } = normalizeDarijaLatin(userText);
       extractedPhone = extractMoroccoPhone(userText);
       if (extractedPhone) {
-        reply = phoneConfirmationReply(preferredLang || 'dz');
+        reply = phoneConfirmReply(preferredLang || 'dz', extractedPhone);
       } else {
         const normalizedInput = normalizedText || userText;
         if (isBatteryTvIntent(normalizedInput)) {
           reply = powerIntentReply(preferredLang || 'dz');
-        } else if (isThanks(normalizedInput)) {
+        } else if (isThanks(thanksText)) {
           reply = thanksReply(preferredLang || 'dz', {
-            isBye: hasBye(normalizedInput),
+            isBye: hasBye(thanksText),
           });
         } else {
           const greeting = isGreeting(userText);
