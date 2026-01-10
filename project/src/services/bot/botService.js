@@ -6,6 +6,9 @@ import { normalizeDarijaLatin } from '../lang/normalizeDarijaLatin.js';
 import { buildMainMenu } from '../menu/menuBuilder.js';
 import { transcribeAudio } from '../stt/sttService.js';
 import { STRONG_CATEGORY_KEYWORDS, WEAK_CATEGORY_KEYWORDS } from '../../knowledge/catalog.js';
+import { extractBudgetMad, detectCategory, isPriceQuery } from '../nlp/extractPriceQuery.js';
+import { findClosestOffers } from '../offers/priceLookup.js';
+import { buildPriceReply } from '../replies/priceReply.js';
 
 function getAudioPayload(body = {}) {
   const media = body.media || {};
@@ -86,6 +89,20 @@ function isMenuHelpIntent(text = '') {
   return /\b(menu|help|aide|options|liste|categories|cat[ée]gories)\b/i.test(lower);
 }
 
+function resolvePriceQueryConfig(cfg = {}) {
+  const limit = Number(cfg.PRICE_LOOKUP_LIMIT || 3);
+  const tolerancePct = Number(cfg.PRICE_LOOKUP_TOLERANCE_PCT || 25);
+  return {
+    limit: Number.isFinite(limit) ? limit : 3,
+    tolerancePct: Number.isFinite(tolerancePct) ? tolerancePct : 25,
+  };
+}
+
+function getOffersForCategory(offersIndex, categoryKey) {
+  if (!offersIndex || !categoryKey) return [];
+  return offersIndex.categoryKeyToOffers?.[categoryKey] || [];
+}
+
 export class BotService {
   constructor({ memoryStore, offersIndex, cfg, sttService } = {}) {
     this.memoryStore = memoryStore;
@@ -148,6 +165,29 @@ export class BotService {
           upstreamReply: reply,
           offersIndex: this.offersIndex,
         });
+
+        if (isPriceQuery(userText)) {
+          const targetPrice = extractBudgetMad(userText);
+          const detectedCategory = detectCategory(userText) || 'tv';
+          const offers = getOffersForCategory(this.offersIndex, detectedCategory);
+          if (offers.length > 0 && Number.isFinite(targetPrice)) {
+            const { limit, tolerancePct } = resolvePriceQueryConfig(this.cfg);
+            const matches = findClosestOffers({
+              offers,
+              targetPrice,
+              limit,
+              tolerancePct,
+            });
+            if (matches.length > 0) {
+              reply = buildPriceReply({
+                category: detectedCategory,
+                targetPrice,
+                matches,
+                preferredLang: preferredLang || 'dz',
+              });
+            }
+          }
+        }
       }
     }
 
