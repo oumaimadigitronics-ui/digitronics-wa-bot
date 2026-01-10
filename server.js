@@ -7969,6 +7969,192 @@ function detectCheapIntent(text) {
   return false;
 }
 
+function extractMoroccoPhone(text) {
+  const ascii = arabicIndicToAsciiDigits(String(text || ""));
+  const phoneRe = /(?:\+?\s*212|00\s*212|0)?\s*[67](?:[\s\-().]*\d){8}/g;
+  let match = null;
+  while ((match = phoneRe.exec(ascii))) {
+    const digits = match[0].replace(/[^\d]/g, "");
+    let d = digits;
+    if (d.startsWith("212")) d = d.slice(3);
+    else if (d.startsWith("0")) d = d.slice(1);
+    if (d.length === 9 && (d[0] === "6" || d[0] === "7")) return "0" + d;
+  }
+  return null;
+}
+
+function maskPhoneForLog(phone) {
+  const raw = String(phone || "");
+  if (!raw) return null;
+  if (raw.length < 4) return stableHash(raw);
+  return raw.slice(0, 2) + "******" + raw.slice(-2);
+}
+
+function detectCityDeliveryIntent(text, normalized) {
+  const s = normalized || normMatch(text || "");
+  if (!s) return false;
+  const cityTokens = [
+    "مراكش",
+    "طنجة",
+    "الرباط",
+    "كازا",
+    "الدار البيضاء",
+    "البيضاء",
+    "فاس",
+    "أكادير",
+    "اغادير",
+    "مكناس",
+    "وجدة",
+    "سلا",
+    "تطوان",
+    "القنيطرة",
+    "الجديدة",
+    "مراكش",
+    "tanger",
+    "tangier",
+    "marrakech",
+    "marrakesh",
+    "rabat",
+    "casablanca",
+    "casa",
+    "fes",
+    "agadir",
+    "meknes",
+    "oujda",
+    "sale",
+    "tetouan",
+    "kenitra",
+    "jadida",
+  ];
+  const deliveryTokens = ["delivery", "livraison", "توصيل", "التوصيل", "يوصل", "شحن", "shipping", "livrer"];
+  const locationHints = [/موجود\s*ف/, /متوفر\s*ف/, /كاين\s*ف/, /\bfi\b/, /\bfil\b/];
+  const hasCity = cityTokens.some((token) => s.includes(normMatch(token)));
+  if (!hasCity) return false;
+  const hasDelivery = deliveryTokens.some((token) => s.includes(normMatch(token)));
+  const hasLocation = locationHints.some((re) => re.test(s));
+  return hasDelivery || hasLocation;
+}
+
+function detectBatteryTvIntent(text, normalized) {
+  const s = normalized || normMatch(text || "");
+  if (!s) return false;
+  const hasBattery =
+    s.includes("batterie") ||
+    s.includes("battery") ||
+    s.includes("بطارية") ||
+    s.includes("باطري") ||
+    s.includes("البطارية") ||
+    s.includes("بالبطارية");
+  const hasTv =
+    /\btv\b/.test(s) ||
+    s.includes("television") ||
+    s.includes("tele") ||
+    s.includes("تلفاز") ||
+    s.includes("تلفزة") ||
+    s.includes("تيليفزيون");
+  return hasBattery && hasTv;
+}
+
+function hasStrongProductIntent(text, normalized) {
+  const raw = String(text || "");
+  const s = normalized || normMatch(raw);
+  if (!s) return false;
+  if (/[?؟]/.test(raw)) return true;
+  if (/^(wach|wash|chno|chnou|chnoo|quel|combien)\b/.test(s)) return true;
+  if (s.includes("prix") || s.includes("ثمن") || s.includes("thaman") || s.includes("taman")) return true;
+  if (s.includes("offer") || s.includes("promo") || s.includes("promotion")) return true;
+  if (/\btv\b/.test(s) && /\b\d{2}\b/.test(s)) return true;
+  if (isBuyIntent(raw) || hasProductInquirySignal(raw) || detectPriceIntent(raw)) return true;
+  if (detectBrand(raw) || detectModel(raw) || detectCategory(raw) || detectClass(raw)) return true;
+  if (extractTvSize(raw, { allowNoHint: true })) return true;
+  return false;
+}
+
+function detectThanksIntent(text, normalized) {
+  const raw = String(text || "");
+  const s = normalized || normMatch(raw);
+  if (!s) return false;
+  if (hasStrongProductIntent(raw, s)) return false;
+  const thanksTokens = [
+    "thanks",
+    "thank you",
+    "thx",
+    "merci",
+    "merciii",
+    "mercii",
+    "شكرا",
+    "شكراً",
+    "شكرا بزاف",
+    "شكرًا",
+    "مشكور",
+    "متشكر",
+    "بارك الله فيك",
+    "جزاك الله خير",
+  ];
+  for (let i = 0; i < thanksTokens.length; i += 1) {
+    const token = normMatch(thanksTokens[i]);
+    if (!token) continue;
+    if (s.includes(token)) return true;
+  }
+  if (/[🙏❤️❤♥️💙💚💛💜]/.test(raw)) return true;
+  return false;
+}
+
+function phoneOverrideReply(lang) {
+  if (lang === "fr") {
+    return "Merci ! Nous avons bien reçu votre numéro. Un agent vous appellera pour confirmer.";
+  }
+  return "شكراً! توصلنا برقمك. غادي يعيط ليك وكيل باش يأكد الطلب.";
+}
+
+function batteryTvReply(lang) {
+  if (lang === "fr") {
+    return "Précisez si vous cherchez une TV avec batterie intégrée ou une solution externe (power bank).";
+  }
+  return "وضح ليا واش بغيتي تلفاز ببطارية داخلية ولا حل خارجي بحال باوربانك.";
+}
+
+function thanksReply(lang) {
+  if (lang === "fr") {
+    return "Avec plaisir 😊 Si vous avez besoin d’une offre ou d’un détail, je suis là.";
+  }
+  return "مرحبا 😊 أي وقت! إذا بغيتي شي عرض ولا معلومة قولّي.";
+}
+
+function applyOverrides({ userText, lang, key, normalized } = {}) {
+  const text = String(userText || "").trim();
+  if (!text) return null;
+  const s = normalized || normMatch(text);
+  const hintLang = lang || detectLang(text);
+  const replyLang = normalizeLanguageHint(effectiveReplyLang({ hintLang, userText: text })) || hintLang;
+
+  const phone = extractMoroccoPhone(text);
+  if (phone) {
+    if (LOG_DEBUG) {
+      debugLog("override_phone_detected", {
+        key,
+        phoneMasked: maskPhoneForLog(phone),
+        phoneHash: stableHash(phone),
+      });
+    }
+    return { reply: phoneOverrideReply(replyLang), reason: "override_phone" };
+  }
+
+  if (detectCityDeliveryIntent(text, s)) {
+    return { reply: DELIVERY_TEMPLATE, reason: "override_delivery_city" };
+  }
+
+  if (detectBatteryTvIntent(text, s)) {
+    return { reply: batteryTvReply(replyLang), reason: "override_battery_tv" };
+  }
+
+  if (detectThanksIntent(text, s)) {
+    return { reply: thanksReply(replyLang), reason: "override_thanks" };
+  }
+
+  return null;
+}
+
 function normalizeMoroccoPhone(raw) {
   const digitsOnly = arabicIndicToAsciiDigits(String(raw || "")).replace(/[^\d]/g, "");
   let d = digitsOnly;
@@ -11134,6 +11320,22 @@ app.post("/wanotifier", express.raw({ type: "*/*", limit: "2mb" }), parseWanotif
     memory.push(key, "user", userTextRaw);
     const history = memory.get(key);
 
+    const override = applyOverrides({ userText: userTextRaw, lang, key, normalized: normMatch(userTextRaw) });
+    if (override && override.reply) {
+      const reply = finalizeReply(override.reply, 520);
+      memory.push(key, "assistant", reply);
+      resetStrikes(key);
+      logger.info({
+        msg: "override_applied",
+        reason: override.reason,
+        reqId: logContext.reqId,
+        conversationId: logContext.conversationId || null,
+        senderId: logContext.senderId || null,
+        mediaKind: logContext.mediaKind || null,
+      });
+      return res.json({ ok: true, reply });
+    }
+
     const menuSelection = parseMenuSelection(userTextRaw);
     if (menuSelection) {
       const reply = finalizeReply(routeMenuSelection(menuSelection, lang, key), 520);
@@ -11766,6 +11968,7 @@ export {
   isTvOriginIntent,
   detectContactInfo,
   hasProductInquirySignal,
+  applyOverrides,
   wantsProductDetails,
   extractCapacityLiters,
   resolveCategoryIntent,
