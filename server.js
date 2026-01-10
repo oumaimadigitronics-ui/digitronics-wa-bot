@@ -5194,7 +5194,7 @@ function guessMediaKind(meta) {
   if (mime.startsWith("audio/")) return "audio";
   const ext = path.extname(filename || url).toLowerCase();
   if ([".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp"].includes(ext)) return "image";
-  if ([".mp3", ".wav", ".ogg", ".opus", ".m4a", ".webm"].includes(ext)) return "audio";
+  if ([".mp3", ".wav", ".ogg", ".opus", ".m4a", ".webm", ".3gp", ".3gpp"].includes(ext)) return "audio";
   return "unknown";
 }
 
@@ -12031,6 +12031,7 @@ export {
   isAudioMeta,
   sniffAudioMime,
   extFromAudioMime,
+  guessMediaKind,
   extractMediaMetaFromBody,
   downloadToTemp,
   transcribeAudioFile,
