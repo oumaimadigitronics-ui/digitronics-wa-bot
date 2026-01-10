@@ -368,6 +368,16 @@ async function handleMetaTextMessage(userText, senderId) {
   memory.push(key, "user", userText);
   const history = memory.get(key);
 
+  const menuSelection = parseMenuSelection(userText);
+  if (menuSelection) {
+    let reply = routeMenuSelection(menuSelection, lang, key);
+    reply = shortenNoQuestion(reply, 520);
+    memory.push(key, "assistant", reply);
+    resetStrikes(key);
+    console.log(JSON.stringify({ level: "info", msg: "menu_selection", channel: "meta", key, selection: menuSelection }));
+    return reply;
+  }
+
   const topicKey = detectTechTopic(userText);
   if (topicKey) {
     const topicReply = buildTechTopicAnswer(topicKey, lang);
@@ -554,6 +564,22 @@ function arabicIndicToAsciiDigits(s) {
 function normMatch(text) {
   const t = arabicIndicToAsciiDigits(String(text || ""));
   return stripDiacritics(t).toLowerCase().trim();
+}
+
+function parseMenuSelection(text) {
+  let s = arabicIndicToAsciiDigits(String(text || ""));
+  if (!s) return null;
+  s = s.replace(/[\uFE0F\u20E3]/g, "");
+  s = s.replace(/[０-９]/g, (d) => String(d.charCodeAt(0) - 0xff10));
+  s = s.trim();
+
+  const cleaned = s
+    .replace(/^[\s.,\-–—_:;!؟?'“”"‘’`~(){}\[\]<>|+*=\/\\]+/g, "")
+    .replace(/[\s.,\-–—_:;!؟?'“”"‘’`~(){}\[\]<>|+*=\/\\]+$/g, "")
+    .trim();
+
+  if (!/^[1-6]$/.test(cleaned)) return null;
+  return cleaned;
 }
 
 function hasArabicScript(text) {
@@ -1895,6 +1921,8 @@ const WARRANTY_TEMPLATE = [
   "✨ Qualité premium, confiance assurée."
 ].join("\n");
 
+const OPENING_HOURS_TEMPLATE = "🕒 Hours: Mon–Sat 10:00–19:00.";
+
 const CONTACT_TEMPLATE = [
   "│   ☎️ *Contact Premium*   │",
   "",
@@ -1910,6 +1938,17 @@ const CONTACT_TEMPLATE = [
   "🇫🇷 ✨ Service client disponible avant et après achat.",
   "🇲🇦 ✨ خدمة الزبناء متوفرة قبل و بعد الشراء."
 ].join("\n");
+
+function routeMenuSelection(selection, lang, key) {
+  void key;
+  if (selection === "1") return offersFallbackMessage(lang);
+  if (selection === "2") return DELIVERY_TEMPLATE;
+  if (selection === "3") return WARRANTY_TEMPLATE;
+  if (selection === "4") return PAYMENT_TEMPLATE;
+  if (selection === "5") return t(lang, "OPENING_HOURS") || OPENING_HOURS_TEMPLATE;
+  if (selection === "6") return t(lang, "CONTACT_DETAILS") || contactTemplate();
+  return "";
+}
 
 const ESCALATION_TEMPLATE = [
   "│   🛟 *Assistance Prioritaire*   │",
@@ -10891,6 +10930,26 @@ app.post("/wanotifier", express.raw({ type: "*/*", limit: "2mb" }), parseWanotif
 
     memory.push(key, "user", userTextRaw);
     const history = memory.get(key);
+
+    const menuSelection = parseMenuSelection(userTextRaw);
+    if (menuSelection) {
+      const reply = finalizeReply(routeMenuSelection(menuSelection, lang, key), 520);
+      memory.push(key, "assistant", reply);
+      resetStrikes(key);
+      console.log(
+        JSON.stringify({
+          level: "info",
+          msg: "menu_selection",
+          channel: "whatsapp",
+          reqId: logContext.reqId,
+          conversationId: logContext.conversationId || null,
+          senderId: logContext.senderId || null,
+          selection: menuSelection,
+        })
+      );
+      return res.json({ ok: true, reply });
+    }
+
     let ctxData = getCtx(key);
     const ctxUpdated = updateContextFromMessage(userTextRaw, ctxData);
     if (ctxUpdated) {
@@ -11506,6 +11565,7 @@ export {
   extractCapacityLiters,
   resolveCategoryIntent,
   parseSelectedOptionNumber,
+  parseMenuSelection,
   buildConversationKey,
   normalizeIncoming,
   maybeSendInitialGreeting,
