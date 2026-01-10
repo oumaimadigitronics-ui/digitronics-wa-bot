@@ -1,9 +1,11 @@
 import { enforceReplyPolicy } from '../../domain/replyPolicy.js';
 import { applyGuardrails } from '../guardrails/guardrails.js';
-import { detectUserLanguage, hasArabicScript } from '../lang/detectUserLanguage.js';
+import { detectUserLanguage } from '../lang/detectUserLanguage.js';
 import { isGreeting } from '../lang/greeting.js';
 import { normalizeDarijaLatin } from '../lang/normalizeDarijaLatin.js';
-import { getThanksReply } from '../lang/thanks.js';
+import { extractMoroccoPhone, hasMoroccoPhone, phoneConfirmReply } from '../lang/phoneMA.js';
+import { isBatteryTvIntent, powerIntentReply } from '../lang/powerIntent.js';
+import { hasBye, isThanks, thanksReply } from '../lang/thanks.js';
 import { buildMainMenu } from '../menu/menuBuilder.js';
 import { transcribeAudio } from '../stt/sttService.js';
 import { STRONG_CATEGORY_KEYWORDS, WEAK_CATEGORY_KEYWORDS } from '../../knowledge/catalog.js';
@@ -11,6 +13,8 @@ import { extractBudgetMad, detectCategory, isPriceQuery } from '../nlp/extractPr
 import { maybeAnswerFromCatalogOrEscalate } from '../guardrails/catalogEvidenceGuardrail.js';
 import { findClosestOffers } from '../offers/priceLookup.js';
 import { buildPriceReply } from '../replies/priceReply.js';
+import { buildBotContext } from './context.js';
+import { pickOverride } from './overrides/index.js';
 
 function getAudioPayload(body = {}) {
   const media = body.media || {};
@@ -47,14 +51,48 @@ function getUserText(body = {}) {
   return '';
 }
 
-function isFrenchPreferred(text = '') {
-  return detectUserLanguage(text) === 'fr';
+function getBodyText(body = {}) {
+  return typeof body.text === 'string' ? body.text.trim() : '';
+}
+
+function resolvePreferredLangFromText(userText = '') {
+  if (!userText) return 'dz';
+  return detectUserLanguage(userText) || 'dz';
+}
+
+function hasRealQuestionOrRequest(text = '') {
+  if (!text) return false;
+  if (/[?؟]/.test(text)) return true;
+  const latinRequestRegex =
+    /\b(price|prix|tarif|stock|dispo|disponible|availability|available|budget|taille|size|model|marque|brand)\b/i;
+  const arabicRequestRegex = /(ثمن|السعر|بكم|المقاس|القياس|موديل|الماركة|العلامة|متوفر|متوفرة)/;
+  return latinRequestRegex.test(text) || arabicRequestRegex.test(text);
+}
+
+function getPreReplyOverride({ userText, preferredLang }) {
+  if (!userText) return null;
+
+  if (hasMoroccoPhone(userText)) {
+    return { reply: phoneConfirmReply(preferredLang, extractMoroccoPhone(userText)), reason: 'phone' };
+  }
+
+  if (hasRealQuestionOrRequest(userText)) return null;
+
+  if (isThanks(userText)) {
+    return { reply: thanksReply(preferredLang, { isBye: hasBye(userText) }), reason: 'thanks' };
+  }
+
+  if (isBatteryTvIntent(userText)) {
+    return { reply: powerIntentReply(preferredLang), reason: 'battery-tv' };
+  }
+
+  return null;
 }
 
 function resolvePreferredLang({ userText, existingLang }) {
   if (!userText) return existingLang || 'dz';
-  if (hasArabicScript(userText)) return 'ar';
-  if (isFrenchPreferred(userText)) return 'fr';
+  const detected = detectUserLanguage(userText);
+  if (detected && detected !== 'dz') return detected;
   return existingLang || 'dz';
 }
 
@@ -118,12 +156,40 @@ export class BotService {
   }
 
   async handleNotification(body = {}, context = {}) {
-    const conversationId = body.conversationId || 'unknown';
+    const botContext = buildBotContext(body, context);
+    const conversationId = botContext.conversationId;
     const ctx = this.memoryStore?.getContext?.(conversationId) || {};
+    const preUserText = getBodyText(body);
+    const prePreferredLang = resolvePreferredLangFromText(preUserText);
+    const preOverride = getPreReplyOverride({ userText: preUserText, preferredLang: prePreferredLang, body });
     let preferredLang = ctx.preferredLang;
     let userText = getUserText(body);
-    let reply = body.reply || 'ok';
+    const override = pickOverride(botContext);
+    let reply = override?.reply ?? (body.reply || 'ok');
     let sttFailed = false;
+    let extractedPhone = null;
+
+    if (preOverride) {
+      const offersByModel = new Map(Object.entries(this.offersIndex?.modelLookup || {}));
+      const safeReply = enforceReplyPolicy(preOverride.reply, {
+        offersByModel,
+        allowUrls: false,
+        isPhotoFlow: Boolean(body?.photoFlow),
+        maxChars: this.cfg?.MAX_WA_REPLY_CHARS,
+      });
+      if (preUserText) {
+        const phone = extractMoroccoPhone(preUserText);
+        const meta = phone ? { phone } : undefined;
+        this.memoryStore?.appendMessage?.(conversationId, {
+          text: preUserText,
+          role: 'user',
+          ts: Date.now(),
+          ...(meta ? { meta } : {}),
+        });
+      }
+      this.memoryStore?.appendMessage?.(conversationId, { text: safeReply, ts: Date.now() });
+      return { ok: true, reply: safeReply, requestId: botContext.requestId };
+    }
 
     if (!userText) {
       const audioPayload = getAudioPayload(body);
@@ -132,7 +198,7 @@ export class BotService {
         const transcript = await this.sttService?.transcribeAudio?.({
           ...audioPayload,
           preferredLangHint,
-          requestId: context.requestId,
+          requestId: botContext.requestId,
           cfg: this.cfg,
         });
         if (transcript) {
@@ -153,71 +219,77 @@ export class BotService {
     if (sttFailed) {
       reply = sttFallbackReply(preferredLang || 'dz');
     } else if (userText) {
+      const thanksText = userText;
       const { normalizedText } = normalizeDarijaLatin(userText);
-      const thanksReply = getThanksReply({
-        text: userText,
-        normalizedText,
-        preferredLang: preferredLang || 'dz',
-      });
-      if (thanksReply) {
-        reply = thanksReply;
+      extractedPhone = extractMoroccoPhone(userText);
+      if (extractedPhone) {
+        reply = phoneConfirmReply(preferredLang || 'dz', extractedPhone);
       } else {
-        const greeting = isGreeting(userText);
-        const wantsMenu = isMenuHelpIntent(normalizedText || userText);
-        const isMenuReply = looksLikeCategoryMenu(reply);
-        const hasWeakCategories = containsAnyKeyword(reply, WEAK_CATEGORY_KEYWORDS);
-        const hasStrongCategories = containsAnyKeyword(reply, STRONG_CATEGORY_KEYWORDS);
-        const shouldOverrideMenu = greeting || wantsMenu || (isMenuReply && hasWeakCategories && !hasStrongCategories);
-
-        if (shouldOverrideMenu) {
-          reply = buildMainMenu({ preferredLang: preferredLang || 'dz' });
-        } else {
-          const guardrailReply = applyGuardrails({
-            userText,
-            normalizedText,
-            ctx: { ...ctx, preferredLang },
-            upstreamReply: reply,
-            offersIndex: this.offersIndex,
+        const normalizedInput = normalizedText || userText;
+        if (isBatteryTvIntent(normalizedInput)) {
+          reply = powerIntentReply(preferredLang || 'dz');
+        } else if (isThanks(thanksText)) {
+          reply = thanksReply(preferredLang || 'dz', {
+            isBye: hasBye(thanksText),
           });
-          let structuredHandled = false;
-          if (guardrailReply !== reply) structuredHandled = true;
-          reply = guardrailReply;
+        } else {
+          const greeting = isGreeting(userText);
+          const wantsMenu = isMenuHelpIntent(normalizedInput);
+          const isMenuReply = looksLikeCategoryMenu(reply);
+          const hasWeakCategories = containsAnyKeyword(reply, WEAK_CATEGORY_KEYWORDS);
+          const hasStrongCategories = containsAnyKeyword(reply, STRONG_CATEGORY_KEYWORDS);
+          const shouldOverrideMenu = greeting || wantsMenu || (isMenuReply && hasWeakCategories && !hasStrongCategories);
 
-          if (isPriceQuery(userText)) {
-            structuredHandled = true;
-            const targetPrice = extractBudgetMad(userText);
-            const detectedCategory = detectCategory(userText);
-            if (detectedCategory) {
+          if (shouldOverrideMenu) {
+            reply = buildMainMenu({ preferredLang: preferredLang || 'dz' });
+          } else {
+            const guardrailReply = applyGuardrails({
+              userText,
+              normalizedText,
+              ctx: { ...ctx, preferredLang },
+              upstreamReply: reply,
+              offersIndex: this.offersIndex,
+            });
+            let structuredHandled = false;
+            if (guardrailReply !== reply) structuredHandled = true;
+            reply = guardrailReply;
+
+            if (isPriceQuery(userText)) {
               structuredHandled = true;
-              const offers = getOffersForCategory(this.offersIndex, detectedCategory);
-              if (offers.length > 0 && Number.isFinite(targetPrice)) {
-                const { limit, tolerancePct } = resolvePriceQueryConfig(this.cfg);
-                const matches = findClosestOffers({
-                  offers,
-                  targetPrice,
-                  limit,
-                  tolerancePct,
-                });
-                if (matches.length > 0) {
-                  reply = buildPriceReply({
-                    category: detectedCategory,
+              const targetPrice = extractBudgetMad(userText);
+              const detectedCategory = detectCategory(userText);
+              if (detectedCategory) {
+                structuredHandled = true;
+                const offers = getOffersForCategory(this.offersIndex, detectedCategory);
+                if (offers.length > 0 && Number.isFinite(targetPrice)) {
+                  const { limit, tolerancePct } = resolvePriceQueryConfig(this.cfg);
+                  const matches = findClosestOffers({
+                    offers,
                     targetPrice,
-                    matches,
-                    preferredLang: preferredLang || 'dz',
+                    limit,
+                    tolerancePct,
                   });
+                  if (matches.length > 0) {
+                    reply = buildPriceReply({
+                      category: detectedCategory,
+                      targetPrice,
+                      matches,
+                      preferredLang: preferredLang || 'dz',
+                    });
+                  }
                 }
               }
             }
-          }
 
-          if (!structuredHandled) {
-            const catalogResult = maybeAnswerFromCatalogOrEscalate({
-              userText,
-              preferredLang: preferredLang || 'dz',
-              offersIndex: this.offersIndex,
-            });
-            if (catalogResult?.reply) {
-              reply = catalogResult.reply;
+            if (!structuredHandled) {
+              const catalogResult = maybeAnswerFromCatalogOrEscalate({
+                userText,
+                preferredLang: preferredLang || 'dz',
+                offersIndex: this.offersIndex,
+              });
+              if (catalogResult?.reply) {
+                reply = catalogResult.reply;
+              }
             }
           }
         }
@@ -228,10 +300,19 @@ export class BotService {
     const safeReply = enforceReplyPolicy(reply, {
       offersByModel,
       allowUrls: false,
-      isPhotoFlow: Boolean(body?.photoFlow),
+      isPhotoFlow: botContext.isPhotoFlow,
       maxChars: this.cfg?.MAX_WA_REPLY_CHARS,
     });
+    if (userText) {
+      const meta = extractedPhone ? { phone: extractedPhone } : undefined;
+      this.memoryStore?.appendMessage?.(conversationId, {
+        text: userText,
+        role: 'user',
+        ts: Date.now(),
+        ...(meta ? { meta } : {}),
+      });
+    }
     this.memoryStore?.appendMessage?.(conversationId, { text: safeReply, ts: Date.now() });
-    return { ok: true, reply: safeReply, requestId: context.requestId };
+    return { ok: true, reply: safeReply, requestId: botContext.requestId };
   }
 }
