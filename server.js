@@ -237,23 +237,29 @@ const VOICE_NOT_UNDERSTOOD_TEMPLATE = `╭────────────�
 ✅ Envoyez-le مرة أخرى بصوت واضح أو كتب ليا الرسالة.
 🔒 Service pro — réponse rapide.`;
 
-const OFFERS_FALLBACK_MESSAGE = `🔥 *NOUVELLES OFFRES* 📢 عروض اليوم 🔥
-(Stock limité – حتى يكمّل الستوك)
+const OFFERS_FALLBACK_MESSAGE = `🚨🔥 *PROMO FLASH اليوم* 🔥🚨
+⚠️ (Stock limité – حتى يكمّل الستوك)
+🚚 *توصيل مجاني* + 🎁 *هدية مع كل TV*
 
-1) *Samsung TV HD 32" (32H5000F)*
-✅ 1499 DH 🎁 سبورة هدية + 🚛 توصيل مجاني
-2) *Echolink TV QLED 32" (Q32WM)*
-✅ 1199 DH 🎁 سبورة هدية + 🚛 توصيل مجاني
-3) *Morsat TV HD 32"*
-✅ 1120 DH 🎁 سبورة هدية + 🚛 توصيل مجاني
-4) *Morsat TV 43"*
-✅ 1999 DH 🎁 سبورة هدية + 🚛 توصيل مجاني
-5) *TCL 32" QLED 32S5K*
-✅ 1499 DH 🎁 سبورة هدية + 🚛 توصيل مجاني
-6) *TCL 43" P7K QLED 4K*
-✅ 3389 DH 🎁 عام ديال الاشتراك + سبورة هدية + 🚛 توصيل مجاني
+1️⃣ *Samsung 32" HD* (32H5000F)
+💥 *1499 DH فقط!* ✅
 
-📝 Commande/طلب: digitronics.ma`;
+2️⃣ *Echolink 32" QLED* (Q32WM)
+💥 *1199 DH فقط!* ✅
+
+3️⃣ *Morsat 32" HD*
+💥 *1120 DH فقط!* ✅
+
+4️⃣ *Morsat 43"*
+💥 *1999 DH فقط!* ✅
+
+5️⃣ *TCL 32" QLED* (32S5K)
+💥 *1499 DH فقط!* ✅
+
+6️⃣ *TCL 43" QLED 4K* (P7K)
+💥 *3389 DH* 🎁 *(+ عام اشتراك)* ✅
+
+🛒 *Commande / طلب:* digitronics.ma`;
 
 function offersFallbackMessage() {
   return OFFERS_FALLBACK_MESSAGE;
