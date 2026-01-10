@@ -13,7 +13,7 @@ Core:
 - `OPENAI_API_KEY`: OpenAI API key
 - `OPENAI_MODEL`: chat model used for responses
 - `OPENAI_TRANSCRIBE_MODEL`: audio transcription model, default `gpt-4o-mini-transcribe`
-- `MAX_WA_REPLY_CHARS`: reply length cap (WhatsApp text messages are effectively limited to 4096 characters, so keep this aligned)
+- `MAX_WA_REPLY_CHARS`: reply length cap (defaults to `6000`; set lower if you want shorter replies)
 
 Media:
 - `MEDIA_MODE`: `auto` or `disabled`
@@ -37,7 +37,8 @@ Feature flags (set in Render environment variables when needed):
 - `FEATURE_GREETING_LANG_FROM_TEXT`: set to `1` to derive greeting language from the opener text (French or Arabic only)
 - `FEATURE_GREETING_I18N`: set to `1` to use Arabic/French greeting templates
 - `FEATURE_FORCE_AR_FR`: set to `1` to force replies to Arabic or French only
-- `FEATURE_WA_HARD_CAP_4096`: set to `1` to hard-cap replies at 4096 characters
+- `FEATURE_WA_HARD_CAP_4096`: set to `1` to hard-cap replies at 4096 characters, overriding higher `MAX_WA_REPLY_CHARS` values
+- For WhatsApp compliance (4096-character limit), enable `FEATURE_WA_HARD_CAP_4096=1` in production environments.
 
 Render configuration:
 - In the Render dashboard, open your service, go to **Environment**, and add/update the env vars above (for example `FEATURE_STRICT_STOCK_FILTER=1`).
