@@ -9494,6 +9494,15 @@ function tryDirectOfferAnswer(userText, historyMsgs, lang, key, opts = {}) {
   const isTvCategory = categoryNorm === tvCanonNorm || categoryNorm === "tv";
   const isTvClass = clsNorm === tvCanonNorm;
   const isNonTvSignal = Boolean((category && !isTvCategory) || (cls && !isTvClass));
+  const brandOnlyQuery = Boolean(brand && isBrandOnlyQuery(text, brand));
+  if (brandOnlyQuery && FEATURE_STRICT_CATEGORY_SWITCH) {
+    const brandOffers = ((OFFERS && OFFERS.offers && OFFERS.offers[brand]) || []).filter((offer) => Number((offer && offer.stock) || 0) > 0);
+    const hasTvOffer = brandOffers.some((offer) => isTvOffer(offer));
+    if (hasTvOffer) {
+      category = null;
+      cls = tvCanon;
+    }
+  }
 
   const tvFlow = handleTvSizePriceFlow(parsed, lang, key);
 
@@ -9533,8 +9542,7 @@ function tryDirectOfferAnswer(userText, historyMsgs, lang, key, opts = {}) {
       ? capacityVal
       : ctx.lastCapacity || null;
 
-  const brandOnly = Boolean(brand && isBrandOnlyQuery(text, brand));
-  if (brandOnly) {
+  if (brandOnlyQuery) {
     const packTv = listOffersForBrand(brand, { cls: tvCanon, limit: MAX_OFFERS, withOffers: true, tvOnly: true });
     const tvCount = packTv.offers ? packTv.offers.length : 0;
     logger.info({ msg: "brand_only_tv_first", brand, tvClassCanon: tvCanon, tvOfferCount: tvCount });
