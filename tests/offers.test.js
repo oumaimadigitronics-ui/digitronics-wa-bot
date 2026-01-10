@@ -44,6 +44,7 @@ import {
   getCtxForTest,
   setCtxForTest,
   INITIAL_GREETING_TTL_MS,
+  guessMediaKind,
   normalizeMedia,
   deriveMediaText,
   getSizeFromNameSku,
@@ -1418,6 +1419,11 @@ test("normalizeMedia covers image/audio/data url inputs", () => {
   assert.strictEqual(audio.kind, "audio");
   const data = normalizeMedia("data:image/png;base64,AAA");
   assert.strictEqual(data.kind, "image");
+});
+
+test("guessMediaKind treats 3gp as audio", () => {
+  assert.strictEqual(guessMediaKind({ url: "https://example.com/note.3gp" }), "audio");
+  assert.strictEqual(guessMediaKind({ url: "https://example.com/note.3gpp" }), "audio");
 });
 
 test("media-only image wanotifier derives text and replies", async () => {

@@ -12031,6 +12031,7 @@ export {
   isAudioMeta,
   sniffAudioMime,
   extFromAudioMime,
+  guessMediaKind,
   extractMediaMetaFromBody,
   downloadToTemp,
   transcribeAudioFile,
