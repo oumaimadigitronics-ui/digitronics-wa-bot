@@ -17,4 +17,5 @@ test('offers index builds lookups', () => {
   assert.ok(idx.modelPrefix4['UN12'].some((o) => o.model === 'UN123'));
   assert.deepStrictEqual(idx.classToOffers.TV.length, 3);
   assert.deepStrictEqual(idx.categoryToOffers.TVs.length, 3);
+  assert.deepStrictEqual(idx.categoryKeyToOffers.tv.length, 3);
 });
