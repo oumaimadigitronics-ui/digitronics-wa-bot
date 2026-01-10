@@ -15,3 +15,8 @@ export function isGreeting(text = '') {
   if (!input) return false;
   return GREETING_PATTERNS.some((pattern) => pattern.test(input));
 }
+
+export function isMenuHelpIntent(text = '') {
+  if (!text) return false;
+  return /\b(menu|help|aide|options|liste|categories|cat[ée]gories)\b/i.test(text);
+}

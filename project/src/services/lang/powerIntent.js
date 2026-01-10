@@ -1,8 +1,10 @@
-const TV_POWER_REGEX = /(tv|television|tele|tlfaz|telfaz|telfaza|تلفاز|تلفزيون|تلفزة).*(battery|batterie|batri|bateri|portable|portatif|rechargeable|recharge|power\s*station|powerstation|station\s*d'?energie|onduleur|inverter|convertisseur|محطة\s*طاقة|محطة\s*الطاقة|محول|عاكس|انفرتر|بطارية|باطري|باتري)/i;
+const TV_REGEX = /(tv|television|tele|tlfaz|telfaz|telfaza|تلفاز|تلفزيون|تلفزة)/i;
+const POWER_REGEX =
+  /(battery|batterie|batri|bateri|portable|portatif|rechargeable|recharge|power\s*station|powerstation|station\s*d'?energie|onduleur|inverter|convertisseur|محطة\s*طاقة|محطة\s*الطاقة|محول|عاكس|انفرتر|بطارية|باطري|باتري)/i;
 
 export function isBatteryTvIntent(text = '') {
   if (!text) return false;
-  return TV_POWER_REGEX.test(text);
+  return TV_REGEX.test(text) && POWER_REGEX.test(text);
 }
 
 export function powerIntentReply(lang = 'dz') {

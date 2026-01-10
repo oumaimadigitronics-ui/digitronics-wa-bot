@@ -6,6 +6,9 @@ const BYE_REGEX =
 const BYE_AR_REGEX = /(مع السلامة|سلام|نشوفك|نشوفكم)/i;
 const FILLER_REGEX = /\b(ok|okay|okey|dacc|daccord|d'accord|alors|bcp)\b/i;
 const EMOJI_REGEX = /[👍🙏😊]/g;
+const PRODUCT_INTENT_REGEX =
+  /\b(price|prix|tarif|stock|dispo|disponible|availability|available|budget|taille|size|model|marque|brand)\b/i;
+const PRODUCT_INTENT_AR_REGEX = /(ثمن|السعر|بكم|المقاس|القياس|موديل|الماركة|العلامة|متوفر|متوفرة)/;
 
 function normalizeText(text = '') {
   return text
@@ -34,6 +37,11 @@ export function isThanks(text = '') {
     .replace(/\s+/g, ' ')
     .trim();
   return cleaned.length === 0;
+}
+
+export function hasQuestionOrProductIntent(text = '') {
+  if (!text) return false;
+  return /[?؟]/.test(text) || PRODUCT_INTENT_REGEX.test(text) || PRODUCT_INTENT_AR_REGEX.test(text);
 }
 
 export function thanksReply(preferredLang = 'dz', { isBye = false } = {}) {
