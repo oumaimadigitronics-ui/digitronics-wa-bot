@@ -1784,167 +1784,129 @@ const FALLBACK_TTL_MS = 2 * 60 * 60 * 1000;
 const INITIAL_GREETING_TTL_MS = 2 * 60 * 60 * 1000;
 
 const GREETING_TEMPLATE = [
-  "╭───────────────╮",
-  "│   👋 *Digitronics AI Bot* 🤖   │",
-  "╰───────────────╯",
+  "👋 *Digitronics AI Bot* 🤖",
   "",
   "🇫🇷 Bonjour ! Dites-moi ce que vous cherchez 👇",
   "🇲🇦 مرحباً! قل لي ماذا تريد وسأساعدك فوراً 👇",
   "",
-  "━━━━━━━━━━━━━━━",
   "Prix • Disponibilité • Livraison • Garantie",
   "الأسعار • التوفر • التوصيل • الضمان",
-  "━━━━━━━━━━━━━━━",
   "",
   "📍 *Casablanca – Oulfa*",
   "🚚 Livraison: *1–7 jours*  |  💳 *Paiement à la livraison*"
 ].join("\n");
 
 const BUY_INTENT_TEMPLATE = [
-  "╭───────────────╮",
-  "│   🛒 *Achat Premium*   │",
-  "╰───────────────╯",
+  "🛒 *Achat Premium*",
   "",
   "🇫🇷 Achat rapide et sécurisé en 1 clic.",
   "🇲🇦 شري سريع وآمن فـ ضغطة وحدة.",
   "",
-  "━━━━━━━━━━━━━━",
   "🔗 {ORDER_LINK}",
   "🔒 Transaction premium: protection et suivi assurés.",
-  "━━━━━━━━━━━━━━"
 ].join("\n");
 
 const CLARITY_TEMPLATE = [
-  "╭──────────────╮",
   "│   ✨ *Clarté Premium*   │",
-  "╰──────────────╯",
   "",
   "🇫🇷 Clarté, précision et transparence à chaque étape.",
   "🇲🇦 وضوح، دقة وشفافية فكل مرحلة.",
   "",
-  "━━━━━━━━━━━━━━",
   "✅ Étape 1: Vérification du produit",
   "✅ Étape 2: Détails de livraison clairs",
   "✅ Étape 3: Option de paiement confirmée",
-  "━━━━━━━━━━━━━━",
   "",
   "🇫🇷 Soyez rassuré: suivi pro et service fiable.",
   "🇲🇦 متطمن: متابعة محترفة وخدمة موثوقة."
 ].join("\n");
 
 const DELIVERY_TEMPLATE = [
-  "╭──────────────╮",
   "│   🚚 *Livraison Premium*   │",
-  "╰──────────────╯",
   "",
   "🇫🇷 Livraison nationale au Maroc, rapide et fiable.",
   "🇲🇦 توصيل فالمغرب كامل، سريع وموثوق.",
   "",
-  "━━━━━━━━━━━━━━",
   "✅ Délais: *24–72h* selon la ville",
   "✅ Emballage sécurisé et protégé",
   "✅ Frais de livraison selon *ville + حجم*",
   "✅ Confirmation + suivi après validation",
-  "━━━━━━━━━━━━━━",
   "",
   "✨ Service premium, sérénité garantie."
 ].join("\n");
 
 const PAYMENT_TEMPLATE = [
-  "╭──────────────╮",
   "│   💳 *Paiement Premium*   │",
-  "╰──────────────╯",
   "",
   "🇫🇷 Paiement clair, sécurisé et professionnel.",
   "🇲🇦 الأداء واضح، آمن واحترافي.",
   "",
-  "━━━━━━━━━━━━━━",
   "✅ *Paiement à la livraison* (Cash on Delivery)",
   "✅ *Virement bancaire* (Bank transfer)",
   "✅ Traitement sécurisé des paiements",
   "✅ Processus pro et suivi avec rigueur",
-  "━━━━━━━━━━━━━━",
   "",
   "✨ Fiabilité premium, tranquillité assurée."
 ].join("\n");
 
 const WARRANTY_TEMPLATE = [
-  "╭──────────────╮",
   "│   🛡️ *Garantie Premium*   │",
-  "╰──────────────╯",
   "",
   "🇫🇷 Produits 100% originaux, sélectionnés avec soin.",
   "🇲🇦 منتجات أصلية 100%، مختارة بعناية.",
   "",
-  "━━━━━━━━━━━━━━",
   "✅ Garantie officielle حسب الماركة",
   "✅ Couvre les défauts de fabrication selon شروط العلامة",
   "✅ Facture fournie avec chaque achat",
-    "━━━━━━━━━━━━━━",
   "",
   "✨ Qualité premium, confiance assurée."
 ].join("\n");
 
 const CONTACT_TEMPLATE = [
-  "╭──────────────╮",
   "│   ☎️ *Contact Premium*   │",
-  "╰──────────────╯",
   "",
   "🇫🇷 Nos coordonnées officielles, claires et fiables.",
   "🇲🇦 معلومات التواصل الرسمية، واضحة وموثوقة.",
   "",
-  "━━━━━━━━━━━━━━",
   "📞 WhatsApp: {PHONE}",
   "📧 Email: {EMAIL}",
   "📍 Adresse: {ADDRESS}",
   "🕒 Horaires: {HOURS}",
   "🗺️ Maps: {MAP_LINK}",
-  "━━━━━━━━━━━━━━",
   "",
   "🇫🇷 ✨ Service client disponible avant et après achat.",
   "🇲🇦 ✨ خدمة الزبناء متوفرة قبل و بعد الشراء."
 ].join("\n");
 
 const ESCALATION_TEMPLATE = [
-  "╭──────────────╮",
   "│   🛟 *Assistance Prioritaire*   │",
-  "╰──────────────╯",
   "",
   "🇫🇷 Nous comprenons votre insatisfaction.",
   "🇲🇦 كنقدّرو عدم الرضا ديالك.",
   "",
-  "━━━━━━━━━━━━━━",
   "🙏 Nous vous présentons nos excuses.",
   "🚨 Traitement prioritaire immédiat",
   "✅ Escalade vers le support en cours",
   "🔍 Vérification en progression",
   "🤝 Suivi jusqu’à résolution complète",
   "🙏 Merci pour votre patience",
-  "━━━━━━━━━━━━━━",
 ].join("\n");
 
 const SUPPORT_TEMPLATE = [
-  "╭──────────────╮",
   "│   🛠️ *Support Premium*   │",
-  "╰──────────────╯",
   "",
   "🇫🇷 Nous sommes là pour résoudre votre problème rapidement.",
   "🇲🇦 حنا هنا باش نحلّو المشكل ديالك بسرعة.",
   "",
-  "━━━━━━━━━━━━━━",
   "✅ Diagnostic immédiat",
   "✅ Assistance étape par étape",
   "✅ Retour/échange si لازم",
   "✅ Suivi jusqu’à résolution",
-  "━━━━━━━━━━━━━━",
   "",
   "✨ Support fiable, الحل مضمون."
 ].join("\n");
 
 const TV_DIMENSION_TEMPLATE = [
-  "╭──────────────╮",
   "│   📏 *Dimensions TV en cm*   │",
-  "╰──────────────╯",
   "",
   "🇫🇷 Les cm indiquent la largeur ou la hauteur de l’écran, pas les pouces.",
   "🇫🇷 Repères approximatifs en largeur d’écran:",
@@ -1961,9 +1923,7 @@ const TV_DIMENSION_TEMPLATE = [
 ].join("\n");
 
 const DIMENSION_SELECTION_TEMPLATE = [
-  "╭──────────────╮",
   "│   📐 *Dimensions Premium*   │",
-  "╰──────────────╯",
   "",
   "🇫🇷 Choisissez la catégorie:",
   "• TV",
@@ -1978,7 +1938,6 @@ const DIMENSION_SELECTION_TEMPLATE = [
   "• Cuisinière",
   "• Machine à laver",
   "• Clim",
-  "━━━━━━━━━━━━━━",
 ].join("\n");
 
 const PRODUCT_REVIEW_TEMPLATE = (productName, highlights = {}) => {
@@ -1990,21 +1949,17 @@ const PRODUCT_REVIEW_TEMPLATE = (productName, highlights = {}) => {
   const useCase = Array.isArray(safe.useCase) && safe.useCase.length ? safe.useCase : ["Netflix/YouTube", "Usage familial"];
 
   return [
-  "╭──────────────╮",
     "│   ⭐ *Avis Produit Premium*   │",
-  "╰──────────────╯",
     "",
     `🇫🇷 Avis rapide sur ${nameFr}.`,
     `🇲🇦 رأي سريع على ${nameAr}.`,
     "",
-    "━━━━━━━━━━━━━━",
     "✅ Points forts:",
     ...pros.map((p) => `• ${p}`),
     "⚠️ Points à noter:",
     ...cons.map((c) => `• ${c}`),
     "🎯 Idéal pour:",
     ...useCase.map((u) => `• ${u}`),
-    "━━━━━━━━━━━━━━",
   ].join("\n");
 };
 
@@ -2012,21 +1967,17 @@ const PRODUCT_COMPARE_TEMPLATE = (a, b) => {
   const left = a || "Option A";
   const right = b || "Option B";
   return [
-  "╭──────────────╮",
     "│   ⚖️ *Comparatif Premium*   │",
-  "╰──────────────╯",
     "",
     `🇫🇷 Comparatif clair: *${left}* vs *${right}*.`,
     `🇲🇦 مقارنة واضحة: *${left}* ضد *${right}*.`,
     "",
-    "━━━━━━━━━━━━━━",
     `✅ Choisir *${left}* si:`,
     "• Image et couleurs plus riches",
     "• Usage cinéma/streaming régulier",
     `✅ Choisir *${right}* si:`,
     "• Budget optimisé",
     "• Usage quotidien simple",
-    "━━━━━━━━━━━━━━",
   ].join("\n");
 };
 
@@ -2034,30 +1985,24 @@ const BRAND_COMPARE_TEMPLATE = (a, b) => {
   const left = a || "Option A";
   const right = b || "Option B";
   return [
-    "╭──────────────╮",
     "│   ⚖️ *Comparatif Premium*   │",
-    "╰──────────────╯",
     "",
     `🇫🇷 Marques: *${left}* vs *${right}*.`,
     `🇲🇦 الماركات: *${left}* ضد *${right}*.`,
     "",
-    "━━━━━━━━━━━━━━",
     "✅ Différences typiques:",
     "• Garantie & SAV",
     "• Qualité de fabrication",
     "• Système/OS",
     "• Qualité dalle/image",
     "• Disponibilité pièces & service بعد البيع",
-    "━━━━━━━━━━━━━━",
   ].join("\n");
 };
 
 const TECH_EXPLAIN_TEMPLATE = (topic) => {
   if (topic === "google_vs_android") {
     return [
-  "╭──────────────╮",
       "│   🧠 *Tech Premium*   │",
-  "╰──────────────╯",
       "",
       "🇫🇷 Google TV vs Android TV.",
       "• Google TV: interface moderne, recommandations meilleures, plus simple.",
@@ -2068,14 +2013,11 @@ const TECH_EXPLAIN_TEMPLATE = (topic) => {
       "• Google TV: واجهة جديدة وسهلة وتوصيات أحسن.",
       "• Android TV: واجهة كلاسيكية وتوافق واسع مع التطبيقات.",
       "• بجوجهم: Netflix/YouTube/Play Store شغالين.",
-      "━━━━━━━━━━━━━━",
     ].join("\n");
   }
   if (topic === "qled_vs_led") {
     return [
-  "╭──────────────╮",
       "│   🧠 *Tech Premium*   │",
-  "╰──────────────╯",
       "",
       "🇫🇷 QLED vs LED.",
       "• QLED: couleurs plus vives, meilleure luminosité.",
@@ -2088,9 +2030,7 @@ const TECH_EXPLAIN_TEMPLATE = (topic) => {
     ].join("\n");
   }
   return [
-  "╭──────────────╮",
     "│   🧠 *Tech Premium*   │",
-  "╰──────────────╯",
     "",
     "🇫🇷 4K vs FHD.",
     "• 4K: netteté supérieure, ممتازة للشاشات الكبيرة.",
@@ -2099,7 +2039,6 @@ const TECH_EXPLAIN_TEMPLATE = (topic) => {
     "🇲🇦 4K ولا FHD.",
     "• 4K: وضوح أعلى خصوصاً فالأحجام الكبيرة.",
     "• FHD: كافي للاستعمال اليومي بثمن مناسب.",
-    "━━━━━━━━━━━━━━",
   ].join("\n");
 };
 
@@ -2301,22 +2240,17 @@ function buildTechTopicAnswer(topicKey, lang) {
 
   const build = (frPoints, arPoints, aFr, bFr, aAr, bAr) => {
     const lines = [
-      "╭───────────────╮",
       "│  🎓 *Tech Guide / دليل*      │",
-      "╰───────────────╯",
       "",
       `🇫🇷 ${topic.title_fr || ""}`,
       `🇲🇦 ${topic.title_ar || ""}`,
       "",
-      "━━━━━━━━━━━━━━━",
       ...frPoints.map((p) => `✅ ${p}`),
       ...arPoints.map((p) => `✅ ${p}`),
-      "━━━━━━━━━━━━━━━",
       `✅ Choisir A si: ${aFr.join(" · ")}`.trim(),
       `✅ Choisir B si: ${bFr.join(" · ")}`.trim(),
       `✅ اختار A إلا: ${aAr.join(" · ")}`.trim(),
       `✅ اختار B إلا: ${bAr.join(" · ")}`.trim(),
-      "━━━━━━━━━━━━━━━",
       `📌 ${topic.recommendation_fr || ""}`,
       `📌 ${topic.recommendation_ar || ""}`,
       "",
