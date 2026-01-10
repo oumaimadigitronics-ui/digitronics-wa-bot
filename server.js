@@ -140,6 +140,9 @@ const {
   FEATURE_AUDIO_SNIFF_MIME = "0",
   FEATURE_AUDIO_CLEAN_MIME = "1",
   FEATURE_GREETING_FOLLOWUP_OFFERS = "0",
+  FEATURE_GREETING_LANG_FROM_TEXT = "0",
+  FEATURE_GREETING_I18N = "0",
+  FEATURE_FORCE_AR_FR = "0",
 
   SYSTEM_PROMPT = "",
   SYSTEM_PROMPT_FILE = "",
@@ -191,6 +194,9 @@ const CFG = {
   featureAudioSniffMime: String(FEATURE_AUDIO_SNIFF_MIME || "0") === "1",
   featureAudioCleanMime: String(FEATURE_AUDIO_CLEAN_MIME || "1") === "1",
   featureGreetingFollowupOffers: String(FEATURE_GREETING_FOLLOWUP_OFFERS || "0") === "1",
+  featureGreetingLangFromText: String(FEATURE_GREETING_LANG_FROM_TEXT || "0") === "1",
+  featureGreetingI18n: String(FEATURE_GREETING_I18N || "0") === "1",
+  featureForceArFr: String(FEATURE_FORCE_AR_FR || "0") === "1",
 
   wcBase: String(WC_BASE_URL || "").replace(/\/$/g, ""),
   wcKey: String(WC_CONSUMER_KEY || ""),
@@ -797,6 +803,13 @@ function normalizeLanguageHint(lang) {
   if (L.startsWith("en")) return "en";
   if (/^[a-z]{2}$/.test(L)) return L;
   return null;
+}
+
+function effectiveReplyLang({ hintLang, userText }) {
+  const normalized = normalizeLanguageHint(hintLang);
+  if (normalized === "fr") return "fr";
+  const inferred = detectLang(userText);
+  return inferred === "fr" ? "fr" : "ar";
 }
 
 function t(lang, key, vars) {
@@ -1877,6 +1890,30 @@ const GREETING_TEMPLATE = [
   "",
   "✅ تقدر تطلب من الويبسايت ولا تعمر الفورم للطلب المباشر"
 ].join("\n");
+
+const GREETING_TEMPLATES = {
+  ar: GREETING_TEMPLATE,
+  fr: [
+    "👋 *Bienvenue chez Digitronics*",
+    "",
+    "Choisissez un numéro dans la liste et envoyez-le 👇",
+    "",
+    "1️⃣ Offres et promotions",
+    "2️⃣ Livraison",
+    "3️⃣ Garantie",
+    "4️⃣ Modes de paiement",
+    "5️⃣ Horaires",
+    "6️⃣ Localisation",
+    "",
+    "✅ Envoyez seulement le numéro et je vous réponds tout de suite",
+    "",
+    "🌐 Site web: https://digitronics.ma/",
+    "📝 Formulaire de commande:",
+    "https://docs.google.com/forms/d/e/1FAIpQLScmDNagYSpUPfslT2s2t35KH7U1OWSNkUCIWmcJJm1R_alTQQ/viewform",
+    "",
+    "✅ Vous pouvez commander sur le site ou remplir le formulaire pour une commande directe"
+  ].join("\n"),
+};
 
 const BUY_INTENT_TEMPLATE = [
   "🛒 *Achat Premium*",
@@ -3209,7 +3246,10 @@ function addStrike(key) {
 }
 
 function initialGreetingText(lang) {
-  return GREETING_TEMPLATE;
+  if (!CFG.featureGreetingI18n) return GREETING_TEMPLATE;
+  const normalized = normalizeLanguageHint(lang);
+  const key = normalized === "fr" ? "fr" : "ar";
+  return GREETING_TEMPLATES[key] || GREETING_TEMPLATES.ar;
 }
 
 
@@ -3253,10 +3293,19 @@ function maybeSendInitialGreeting({ key, lang }) {
   return reply;
 }
 
+function resolveGreetingLang(lang, text) {
+  if (!CFG.featureGreetingLangFromText) return lang;
+  const derivedLang = normalizeLanguageHint(detectLang(text));
+  const hasFrenchGreeting = /(^|\s)(bonjour|salut)/i.test(String(text || ""));
+  return derivedLang === "fr" || hasFrenchGreeting ? "fr" : "ar";
+}
+
 function handleGreetingMessage({ key, lang, text }) {
   if (!isGreetingLikeOpener(text)) return null;
 
-  const reply = maybeSendInitialGreeting({ key, lang });
+  const effectiveLang = resolveGreetingLang(lang, text);
+
+  const reply = maybeSendInitialGreeting({ key, lang: effectiveLang });
   if (!reply) return null;
 
   setCtx(key, { hasGreeted: true });
@@ -10828,7 +10877,10 @@ app.post("/wanotifier", express.raw({ type: "*/*", limit: "2mb" }), parseWanotif
     const mediaInfo = normalizeMediaInput(mediaMeta || incoming.media);
     const normalizedMedia = normalizeMedia(mediaMeta || incoming.media);
     const msgType = String(incoming.type || "").toLowerCase();
-    const lang = detectLang(userTextRaw || incoming.lang || "");
+    let lang = detectLang(userTextRaw || incoming.lang || "");
+    if (CFG.featureForceArFr) {
+      lang = effectiveReplyLang({ hintLang: lang, userText: userTextRaw });
+    }
     const ip = String(req.ip || "");
     const logContext = {
       reqId,
@@ -10897,11 +10949,20 @@ app.post("/wanotifier", express.raw({ type: "*/*", limit: "2mb" }), parseWanotif
 
       userTextRaw = transcript;
       incoming.text = userTextRaw;
+      if (CFG.featureForceArFr) {
+        const hintLang = detectLang(userTextRaw || incoming.lang || "");
+        lang = effectiveReplyLang({ hintLang, userText: userTextRaw });
+      }
       audioAnswerNoteText = audioAnswerNote(lang);
     } else if (mediaDerivedText) {
       if (userTextRaw) userTextRaw = (userTextRaw + "\n" + mediaDerivedText).slice(0, 2000);
       else userTextRaw = mediaDerivedText;
       incoming.text = userTextRaw;
+    }
+
+    if (CFG.featureForceArFr && !isAudioMessage) {
+      const hintLang = detectLang(userTextRaw || incoming.lang || "");
+      lang = effectiveReplyLang({ hintLang, userText: userTextRaw });
     }
 
     const logLine = {
@@ -10983,8 +11044,9 @@ app.post("/wanotifier", express.raw({ type: "*/*", limit: "2mb" }), parseWanotif
     const knowledgeProduct = detectProductModel(userTextRaw);
 
     const forcedGreeting = isForcedGreeting(userTextRaw) && !isBuyIntent(userTextRaw);
+    const greetingLang = resolveGreetingLang(lang, userTextRaw);
     const greetingReply = forcedGreeting
-      ? maybeSendInitialGreeting({ key, lang })
+      ? maybeSendInitialGreeting({ key, lang: greetingLang })
       : isBuyIntent(userTextRaw)
         ? null
         : handleGreetingMessage({ key, lang, text: userTextRaw });
@@ -11634,6 +11696,7 @@ export {
   DELIVERY_TEMPLATE,
   PAYMENT_TEMPLATE,
   WARRANTY_TEMPLATE,
+  GREETING_TEMPLATE,
   ESCALATION_TEMPLATE,
   CLARITY_TEMPLATE,
   SUPPORT_TEMPLATE,
@@ -12061,6 +12124,12 @@ async function createServerForTests(opts = {}) {
     cfgPatch.wanotifierTsHeader = String(env.WANOTIFIER_TS_HEADER || CFG.wanotifierTsHeader).toLowerCase();
   if (env && env.FEATURE_GREETING_FOLLOWUP_OFFERS !== undefined)
     cfgPatch.featureGreetingFollowupOffers = String(env.FEATURE_GREETING_FOLLOWUP_OFFERS || "0") === "1";
+  if (env && env.FEATURE_GREETING_LANG_FROM_TEXT !== undefined)
+    cfgPatch.featureGreetingLangFromText = String(env.FEATURE_GREETING_LANG_FROM_TEXT || "0") === "1";
+  if (env && env.FEATURE_GREETING_I18N !== undefined)
+    cfgPatch.featureGreetingI18n = String(env.FEATURE_GREETING_I18N || "0") === "1";
+  if (env && env.FEATURE_FORCE_AR_FR !== undefined)
+    cfgPatch.featureForceArFr = String(env.FEATURE_FORCE_AR_FR || "0") === "1";
   if (env && env.MEDIA_MODE !== undefined) cfgPatch.mediaMode = String(env.MEDIA_MODE || CFG.mediaMode).toLowerCase();
   if (env && env.MEDIA_ALLOW_INSECURE_HTTP !== undefined)
     cfgPatch.mediaAllowHttp = String(env.MEDIA_ALLOW_INSECURE_HTTP || "0") === "1";

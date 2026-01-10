@@ -34,11 +34,16 @@ Feature flags (set in Render environment variables when needed):
 - `FEATURE_STRICT_STOCK_FILTER`: set to `1` to remove out-of-stock offers before ranking
 - `FEATURE_SHOW_SKU_IN_OFFERS`: set to `1` to include SKU/model in offer lines
 - `FEATURE_OFFER_ITEM_EMOJI_FORMAT`: set to `1` to use emoji offer item blocks in premium offers
+- `FEATURE_GREETING_LANG_FROM_TEXT`: set to `1` to derive greeting language from the opener text (French or Arabic only)
+- `FEATURE_GREETING_I18N`: set to `1` to use Arabic/French greeting templates
+- `FEATURE_FORCE_AR_FR`: set to `1` to force replies to Arabic or French only
 - `FEATURE_WA_HARD_CAP_4096`: set to `1` to hard-cap replies at 4096 characters
 
 Render configuration:
 - In the Render dashboard, open your service, go to **Environment**, and add/update the env vars above (for example `FEATURE_STRICT_STOCK_FILTER=1`).
 - Set `FEATURE_OFFER_ITEM_EMOJI_FORMAT=1` on Render to enable new offer formatting.
+- Set `FEATURE_GREETING_LANG_FROM_TEXT=1` and `FEATURE_GREETING_I18N=1` on Render to enable greeting language detection.
+- Set `FEATURE_FORCE_AR_FR=1` on Render to enforce Arabic/French-only replies.
 
 ## Audio pipeline
 See `docs/audio-pipeline.md` for a detailed walkthrough of the audio processing flow, chunking, quality checks, and logging.
