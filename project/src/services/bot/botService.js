@@ -7,6 +7,10 @@ import { buildMainMenu } from '../menu/menuBuilder.js';
 import { transcribeAudio } from '../stt/sttService.js';
 import { STRONG_CATEGORY_KEYWORDS, WEAK_CATEGORY_KEYWORDS } from '../../knowledge/catalog.js';
 import { extractBudgetMad, detectCategory, isPriceQuery } from '../nlp/extractPriceQuery.js';
+import { extractBudgetMad as extractBudgetMadStrict, extractInchSize, isTvBudgetQuery } from '../nlp/priceQuery.js';
+import { maybeAnswerFromCatalogOrEscalate } from '../guardrails/catalogEvidenceGuardrail.js';
+import { findClosestByPrice } from '../offers/findClosestByPrice.js';
+import { buildTvBudgetReply } from '../replies/tvBudgetReply.js';
 import { findClosestOffers } from '../offers/priceLookup.js';
 import { buildPriceReply } from '../replies/priceReply.js';
 
@@ -98,6 +102,10 @@ function resolvePriceQueryConfig(cfg = {}) {
   };
 }
 
+function hasInchMarker(text = '') {
+  return /\b\d{2,3}\s*(?:"|''|inch|inches|pouce|بوصة|بول)\b/i.test(text);
+}
+
 function getOffersForCategory(offersIndex, categoryKey) {
   if (!offersIndex || !categoryKey) return [];
   return offersIndex.categoryKeyToOffers?.[categoryKey] || [];
@@ -158,34 +166,84 @@ export class BotService {
       if (shouldOverrideMenu) {
         reply = buildMainMenu({ preferredLang: preferredLang || 'dz' });
       } else {
-        reply = applyGuardrails({
+        const guardrailReply = applyGuardrails({
           userText,
           normalizedText,
           ctx: { ...ctx, preferredLang },
           upstreamReply: reply,
           offersIndex: this.offersIndex,
         });
+        let structuredHandled = false;
+        if (guardrailReply !== reply) structuredHandled = true;
+        reply = guardrailReply;
+
+        if (isTvBudgetQuery(userText)) {
+          structuredHandled = true;
+          const budget = extractBudgetMadStrict(userText);
+          const matches = findClosestByPrice({
+            offers: this.offersIndex?.tvOffersSortedByPrice || [],
+            targetPrice: budget,
+          });
+          reply = buildTvBudgetReply({
+            budget,
+            matches,
+            preferredLang: preferredLang || 'dz',
+            allOffers: this.offersIndex?.tvOffersSortedByPrice || [],
+          });
+        }
 
         if (isPriceQuery(userText)) {
           const targetPrice = extractBudgetMad(userText);
-          const detectedCategory = detectCategory(userText) || 'tv';
-          const offers = getOffersForCategory(this.offersIndex, detectedCategory);
-          if (offers.length > 0 && Number.isFinite(targetPrice)) {
-            const { limit, tolerancePct } = resolvePriceQueryConfig(this.cfg);
-            const matches = findClosestOffers({
-              offers,
-              targetPrice,
-              limit,
-              tolerancePct,
-            });
-            if (matches.length > 0) {
-              reply = buildPriceReply({
-                category: detectedCategory,
+          const detectedCategory = detectCategory(userText);
+          if (detectedCategory) {
+            structuredHandled = true;
+            const offers = getOffersForCategory(this.offersIndex, detectedCategory);
+            if (offers.length > 0 && Number.isFinite(targetPrice)) {
+              const { limit, tolerancePct } = resolvePriceQueryConfig(this.cfg);
+              const matches = findClosestOffers({
+                offers,
                 targetPrice,
-                matches,
-                preferredLang: preferredLang || 'dz',
+                limit,
+                tolerancePct,
               });
+              if (matches.length > 0) {
+                reply = buildPriceReply({
+                  category: detectedCategory,
+                  targetPrice,
+                  matches,
+                  preferredLang: preferredLang || 'dz',
+                });
+              }
             }
+          }
+        }
+
+        if (!structuredHandled) {
+          const budget = extractBudgetMadStrict(userText);
+          const inchSize = extractInchSize(userText);
+          if (budget && !inchSize && hasInchMarker(reply)) {
+            const matches = findClosestByPrice({
+              offers: this.offersIndex?.tvOffersSortedByPrice || [],
+              targetPrice: budget,
+            });
+            reply = buildTvBudgetReply({
+              budget,
+              matches,
+              preferredLang: preferredLang || 'dz',
+              allOffers: this.offersIndex?.tvOffersSortedByPrice || [],
+            });
+            structuredHandled = true;
+          }
+        }
+
+        if (!structuredHandled) {
+          const catalogResult = maybeAnswerFromCatalogOrEscalate({
+            userText,
+            preferredLang: preferredLang || 'dz',
+            offersIndex: this.offersIndex,
+          });
+          if (catalogResult?.reply) {
+            reply = catalogResult.reply;
           }
         }
       }
