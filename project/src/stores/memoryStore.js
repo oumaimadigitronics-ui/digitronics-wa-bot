@@ -24,7 +24,12 @@ export class MemoryStore {
       const content = fs.readFileSync(this.filePath, 'utf8');
       const parsed = JSON.parse(content);
       for (const [key, value] of Object.entries(parsed)) {
-        this.data.set(key, value);
+        const normalized = {
+          messages: Array.isArray(value.messages) ? value.messages : [],
+          context: value.context && typeof value.context === 'object' ? value.context : {},
+          updatedAt: value.updatedAt || Date.now(),
+        };
+        this.data.set(key, normalized);
       }
     } catch (err) {
       if (err.code !== 'ENOENT') {
@@ -51,10 +56,18 @@ export class MemoryStore {
     await fsp.rename(tmpPath, this.filePath);
   }
 
-  appendMessage(conversationId, message) {
-    const existing = this.data.get(conversationId) || { messages: [], updatedAt: Date.now() };
-    const messages = [...existing.messages, message].slice(-this.maxMessages);
-    this.data.set(conversationId, { messages, updatedAt: Date.now() });
+  _getFreshEntry(conversationId) {
+    const entry = this.data.get(conversationId);
+    if (!entry) return null;
+    if (Date.now() - entry.updatedAt > this.ttlMs) {
+      this.data.delete(conversationId);
+      return null;
+    }
+    return entry;
+  }
+
+  _setEntry(conversationId, entry) {
+    this.data.set(conversationId, entry);
     while (this.data.size > this.maxConversations) {
       const oldestKey = [...this.data.entries()].sort((a, b) => a[1].updatedAt - b[1].updatedAt)[0][0];
       this.data.delete(oldestKey);
@@ -62,14 +75,28 @@ export class MemoryStore {
     this._scheduleFlush();
   }
 
+  appendMessage(conversationId, message) {
+    const existing = this.data.get(conversationId) || { messages: [], context: {}, updatedAt: Date.now() };
+    const messages = [...existing.messages, message].slice(-this.maxMessages);
+    this._setEntry(conversationId, { messages, context: existing.context || {}, updatedAt: Date.now() });
+  }
+
   getMessages(conversationId) {
-    const entry = this.data.get(conversationId);
+    const entry = this._getFreshEntry(conversationId);
     if (!entry) return [];
-    if (Date.now() - entry.updatedAt > this.ttlMs) {
-      this.data.delete(conversationId);
-      return [];
-    }
-    return entry.messages;
+    return entry.messages || [];
+  }
+
+  getContext(conversationId) {
+    const entry = this._getFreshEntry(conversationId);
+    if (!entry) return {};
+    return entry.context || {};
+  }
+
+  setContext(conversationId, patch = {}) {
+    const existing = this.data.get(conversationId) || { messages: [], context: {}, updatedAt: Date.now() };
+    const context = { ...(existing.context || {}), ...(patch || {}) };
+    this._setEntry(conversationId, { messages: existing.messages || [], context, updatedAt: Date.now() });
   }
 
   prune() {
