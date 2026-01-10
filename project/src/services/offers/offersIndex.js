@@ -1,18 +1,6 @@
 import { normalizeOfferCategory } from './categoryNormalization.js';
 import { normalizeText } from '../search/normalizeText.js';
 
-const TV_KEYWORDS = ['tv', 'television', 'télévision', 'tele', 'télé', 'talfaza', 'تلفاز', 'تلفزة', 'تلفزيون'];
-const WATER_HEATER_KEYWORDS = ['chauffe-eau', 'chauffe eau', 'boiler', 'water heater', '100l', 'سخان'];
-
-function isTvOffer(offer = {}) {
-  const title = String(offer.name || offer.model || offer.sku || '').toLowerCase();
-  const category = String(offer.category || '').toLowerCase();
-  const cls = String(offer.class || '').toLowerCase();
-  const combined = `${title} ${category} ${cls}`;
-  if (WATER_HEATER_KEYWORDS.some((keyword) => combined.includes(keyword))) return false;
-  return TV_KEYWORDS.some((keyword) => combined.includes(keyword));
-}
-
 export function buildOffersIndex(offersByBrand = {}) {
   const brands = Object.keys(offersByBrand);
   const modelLookup = {};
@@ -21,7 +9,6 @@ export function buildOffersIndex(offersByBrand = {}) {
   const categoryToOffers = {};
   const categoryKeyToOffers = {};
   const productsIndex = [];
-  const tvOffersSortedByPrice = [];
 
   for (const brand of brands) {
     for (const offer of offersByBrand[brand]) {
@@ -48,18 +35,6 @@ export function buildOffersIndex(offersByBrand = {}) {
           inStock: Number(offer.stock || 0) > 0,
         });
       }
-      if (isTvOffer(offer)) {
-        const tvTitle = title || offer.name || offer.model || offer.sku;
-        if (tvTitle && Number.isFinite(offer.price)) {
-          tvOffersSortedByPrice.push({
-            title: tvTitle,
-            price: offer.price,
-            url: offer.link || offer.url || '',
-            model: offer.model || '',
-            inStock: Number(offer.stock || 0) > 0,
-          });
-        }
-      }
     }
   }
 
@@ -81,7 +56,6 @@ export function buildOffersIndex(offersByBrand = {}) {
     categoryToOffers,
     categoryKeyToOffers,
     productsIndex,
-    tvOffersSortedByPrice,
     offersByBrand,
   };
 }

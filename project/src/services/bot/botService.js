@@ -7,10 +7,7 @@ import { buildMainMenu } from '../menu/menuBuilder.js';
 import { transcribeAudio } from '../stt/sttService.js';
 import { STRONG_CATEGORY_KEYWORDS, WEAK_CATEGORY_KEYWORDS } from '../../knowledge/catalog.js';
 import { extractBudgetMad, detectCategory, isPriceQuery } from '../nlp/extractPriceQuery.js';
-import { extractBudgetMad as extractBudgetMadStrict, extractInchSize, isTvBudgetQuery } from '../nlp/priceQuery.js';
 import { maybeAnswerFromCatalogOrEscalate } from '../guardrails/catalogEvidenceGuardrail.js';
-import { findClosestByPrice } from '../offers/findClosestByPrice.js';
-import { buildTvBudgetReply } from '../replies/tvBudgetReply.js';
 import { findClosestOffers } from '../offers/priceLookup.js';
 import { buildPriceReply } from '../replies/priceReply.js';
 
@@ -177,22 +174,8 @@ export class BotService {
         if (guardrailReply !== reply) structuredHandled = true;
         reply = guardrailReply;
 
-        if (isTvBudgetQuery(userText)) {
-          structuredHandled = true;
-          const budget = extractBudgetMadStrict(userText);
-          const matches = findClosestByPrice({
-            offers: this.offersIndex?.tvOffersSortedByPrice || [],
-            targetPrice: budget,
-          });
-          reply = buildTvBudgetReply({
-            budget,
-            matches,
-            preferredLang: preferredLang || 'dz',
-            allOffers: this.offersIndex?.tvOffersSortedByPrice || [],
-          });
-        }
-
         if (isPriceQuery(userText)) {
+          structuredHandled = true;
           const targetPrice = extractBudgetMad(userText);
           const detectedCategory = detectCategory(userText);
           if (detectedCategory) {
@@ -215,24 +198,6 @@ export class BotService {
                 });
               }
             }
-          }
-        }
-
-        if (!structuredHandled) {
-          const budget = extractBudgetMadStrict(userText);
-          const inchSize = extractInchSize(userText);
-          if (budget && !inchSize && hasInchMarker(reply)) {
-            const matches = findClosestByPrice({
-              offers: this.offersIndex?.tvOffersSortedByPrice || [],
-              targetPrice: budget,
-            });
-            reply = buildTvBudgetReply({
-              budget,
-              matches,
-              preferredLang: preferredLang || 'dz',
-              allOffers: this.offersIndex?.tvOffersSortedByPrice || [],
-            });
-            structuredHandled = true;
           }
         }
 
