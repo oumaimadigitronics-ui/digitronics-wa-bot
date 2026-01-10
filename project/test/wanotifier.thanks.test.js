@@ -4,6 +4,7 @@ import crypto from 'node:crypto';
 import test from 'node:test';
 import { createApp } from '../src/app.js';
 import { BotService } from '../src/services/bot/botService.js';
+import { powerIntentReply } from '../src/services/lang/powerIntent.js';
 import { MemoryStore } from '../src/stores/memoryStore.js';
 
 const cfgBase = {
@@ -61,6 +62,22 @@ async function postWanotifier(url, rawBody) {
   });
 }
 
+test('wanotifier phone number overrides reply', async (t) => {
+  const { server, url } = await startServer();
+  t.after(() => server.close());
+
+  const rawBody = JSON.stringify({
+    conversationId: 'phone-basic',
+    text: '+212 660111438',
+    reply: 'Menu:\n- TV\n- Frigo',
+  });
+  const res = await postWanotifier(url, rawBody);
+  const data = await res.json();
+
+  assert.strictEqual(res.status, 200);
+  assert.strictEqual(data.reply, 'Thanks, an agent will call to confirm.');
+});
+
 test('wanotifier thanks message returns acknowledgement reply', async (t) => {
   const { server, url } = await startServer();
   t.after(() => server.close());
@@ -93,18 +110,34 @@ test('wanotifier thanks + goodbye returns farewell reply', async (t) => {
   assert.strictEqual(data.reply, 'Choukran! Bslama 👋');
 });
 
-test('wanotifier thanks with question does not override', async (t) => {
+test('wanotifier battery TV intent overrides reply', async (t) => {
   const { server, url } = await startServer();
   t.after(() => server.close());
 
   const rawBody = JSON.stringify({
-    conversationId: 'thanks-question',
-    text: 'thanks, price?',
+    conversationId: 'battery-ar',
+    text: 'بغيت تلفاز بالباطري',
+    reply: 'Menu:\n- TV\n- Frigo',
+  });
+  const res = await postWanotifier(url, rawBody);
+  const data = await res.json();
+
+  assert.strictEqual(res.status, 200);
+  assert.strictEqual(data.reply, powerIntentReply('ar').replace(/[?؟]/g, ''));
+});
+
+test('wanotifier normal message forwards upstream reply', async (t) => {
+  const { server, url } = await startServer();
+  t.after(() => server.close());
+
+  const rawBody = JSON.stringify({
+    conversationId: 'normal-message',
+    text: '2000 dh',
     reply: 'send brand/model/size/budget',
   });
   const res = await postWanotifier(url, rawBody);
   const data = await res.json();
 
   assert.strictEqual(res.status, 200);
-  assert.doesNotMatch(data.reply, /Thanks!|Merci !|Choukran!/i);
+  assert.strictEqual(data.reply, 'send brand/model/size/budget');
 });

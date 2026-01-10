@@ -37,15 +37,6 @@ export function hasMoroccoPhone(text = '') {
   return Boolean(extractMoroccoPhone(text));
 }
 
-export function phoneConfirmationReply(preferredLang = 'dz') {
-  if (preferredLang === 'ar') {
-    return 'شكراً، سيتصل بك وكيل للتأكيد.';
-  }
-  if (preferredLang === 'fr') {
-    return 'Merci ! Un agent vous appellera pour confirmer.';
-  }
-  if (preferredLang === 'en') {
-    return 'Thanks! An agent will call you to confirm.';
-  }
-  return 'Choukran! Ghadi ytsel bik agent bach yconfirmi.';
+export function phoneConfirmReply() {
+  return 'Thanks, an agent will call to confirm.';
 }
