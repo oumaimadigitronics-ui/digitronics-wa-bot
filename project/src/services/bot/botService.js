@@ -99,6 +99,10 @@ function resolvePriceQueryConfig(cfg = {}) {
   };
 }
 
+function hasInchMarker(text = '') {
+  return /\b\d{2,3}\s*(?:"|''|inch|inches|pouce|بوصة|بول)\b/i.test(text);
+}
+
 function getOffersForCategory(offersIndex, categoryKey) {
   if (!offersIndex || !categoryKey) return [];
   return offersIndex.categoryKeyToOffers?.[categoryKey] || [];
@@ -173,23 +177,26 @@ export class BotService {
         if (isPriceQuery(userText)) {
           structuredHandled = true;
           const targetPrice = extractBudgetMad(userText);
-          const detectedCategory = detectCategory(userText) || 'tv';
-          const offers = getOffersForCategory(this.offersIndex, detectedCategory);
-          if (offers.length > 0 && Number.isFinite(targetPrice)) {
-            const { limit, tolerancePct } = resolvePriceQueryConfig(this.cfg);
-            const matches = findClosestOffers({
-              offers,
-              targetPrice,
-              limit,
-              tolerancePct,
-            });
-            if (matches.length > 0) {
-              reply = buildPriceReply({
-                category: detectedCategory,
+          const detectedCategory = detectCategory(userText);
+          if (detectedCategory) {
+            structuredHandled = true;
+            const offers = getOffersForCategory(this.offersIndex, detectedCategory);
+            if (offers.length > 0 && Number.isFinite(targetPrice)) {
+              const { limit, tolerancePct } = resolvePriceQueryConfig(this.cfg);
+              const matches = findClosestOffers({
+                offers,
                 targetPrice,
-                matches,
-                preferredLang: preferredLang || 'dz',
+                limit,
+                tolerancePct,
               });
+              if (matches.length > 0) {
+                reply = buildPriceReply({
+                  category: detectedCategory,
+                  targetPrice,
+                  matches,
+                  preferredLang: preferredLang || 'dz',
+                });
+              }
             }
           }
         }

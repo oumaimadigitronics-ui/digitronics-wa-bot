@@ -29,6 +29,7 @@ test('price query overrides upstream reply with closest offers', async () => {
   });
 
   assert.match(result.reply, /3000dh/);
+  assert.match(result.reply, /📺/);
   assert.match(result.reply, /TCL 32" HD/);
   assert.doesNotMatch(result.reply, /upstream nonsense reply/);
 });
@@ -47,5 +48,6 @@ test('price query does not override when no close match', async () => {
     reply: 'upstream reply',
   });
 
-  assert.strictEqual(result.reply, 'upstream reply');
+  assert.match(result.reply, /1000dh/);
+  assert.match(result.reply, /Aqel taman|أقل ثمن/i);
 });
