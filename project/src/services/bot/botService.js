@@ -7,6 +7,7 @@ import { buildMainMenu } from '../menu/menuBuilder.js';
 import { transcribeAudio } from '../stt/sttService.js';
 import { STRONG_CATEGORY_KEYWORDS, WEAK_CATEGORY_KEYWORDS } from '../../knowledge/catalog.js';
 import { extractBudgetMad, detectCategory, isPriceQuery } from '../nlp/extractPriceQuery.js';
+import { maybeAnswerFromCatalogOrEscalate } from '../guardrails/catalogEvidenceGuardrail.js';
 import { findClosestOffers } from '../offers/priceLookup.js';
 import { buildPriceReply } from '../replies/priceReply.js';
 
@@ -158,15 +159,19 @@ export class BotService {
       if (shouldOverrideMenu) {
         reply = buildMainMenu({ preferredLang: preferredLang || 'dz' });
       } else {
-        reply = applyGuardrails({
+        const guardrailReply = applyGuardrails({
           userText,
           normalizedText,
           ctx: { ...ctx, preferredLang },
           upstreamReply: reply,
           offersIndex: this.offersIndex,
         });
+        let structuredHandled = false;
+        if (guardrailReply !== reply) structuredHandled = true;
+        reply = guardrailReply;
 
         if (isPriceQuery(userText)) {
+          structuredHandled = true;
           const targetPrice = extractBudgetMad(userText);
           const detectedCategory = detectCategory(userText) || 'tv';
           const offers = getOffersForCategory(this.offersIndex, detectedCategory);
@@ -186,6 +191,17 @@ export class BotService {
                 preferredLang: preferredLang || 'dz',
               });
             }
+          }
+        }
+
+        if (!structuredHandled) {
+          const catalogResult = maybeAnswerFromCatalogOrEscalate({
+            userText,
+            preferredLang: preferredLang || 'dz',
+            offersIndex: this.offersIndex,
+          });
+          if (catalogResult?.reply) {
+            reply = catalogResult.reply;
           }
         }
       }

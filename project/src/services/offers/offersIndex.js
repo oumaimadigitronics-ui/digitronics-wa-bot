@@ -1,4 +1,5 @@
 import { normalizeOfferCategory } from './categoryNormalization.js';
+import { normalizeText } from '../search/normalizeText.js';
 
 export function buildOffersIndex(offersByBrand = {}) {
   const brands = Object.keys(offersByBrand);
@@ -7,6 +8,7 @@ export function buildOffersIndex(offersByBrand = {}) {
   const classToOffers = {};
   const categoryToOffers = {};
   const categoryKeyToOffers = {};
+  const productsIndex = [];
 
   for (const brand of brands) {
     for (const offer of offersByBrand[brand]) {
@@ -21,6 +23,18 @@ export function buildOffersIndex(offersByBrand = {}) {
       const categoryKey = normalizeOfferCategory(offer);
       if (!categoryKeyToOffers[categoryKey]) categoryKeyToOffers[categoryKey] = [];
       categoryKeyToOffers[categoryKey].push(offer);
+      const title = offer.name || offer.model || offer.sku;
+      if (title) {
+        productsIndex.push({
+          id: offer.model || offer.sku || title,
+          title,
+          normalizedTitle: normalizeText(title),
+          price: offer.price,
+          url: offer.link || offer.url || '',
+          categoryKey,
+          inStock: Number(offer.stock || 0) > 0,
+        });
+      }
     }
   }
 
@@ -40,6 +54,7 @@ export function buildOffersIndex(offersByBrand = {}) {
     classToOffers,
     categoryToOffers,
     categoryKeyToOffers,
+    productsIndex,
     offersByBrand,
   };
 }
