@@ -1810,16 +1810,24 @@ const FALLBACK_TTL_MS = 2 * 60 * 60 * 1000;
 const INITIAL_GREETING_TTL_MS = 2 * 60 * 60 * 1000;
 
 const GREETING_TEMPLATE = [
-  "👋 *Digitronics AI Bot* 🤖",
+  "👋 *مرحبا بك في ديجيترو نيكس*",
   "",
-  "🇫🇷 Bonjour ! Dites-moi ce que vous cherchez 👇",
-  "🇲🇦 مرحباً! قل لي ماذا تريد وسأساعدك فوراً 👇",
+  "اختر رقم من القائمة و أرسلها 👇",
   "",
-  "Prix • Disponibilité • Livraison • Garantie",
-  "الأسعار • التوفر • التوصيل • الضمان",
+  "1️⃣ العروض والتخفيضات",
+  "2️⃣ التوصيل",
+  "3️⃣ الضمان",
+  "4️⃣ طرق الدفع",
+  "5️⃣ أوقات العمل",
+  "6️⃣ الموقع",
   "",
-  "📍 *Casablanca – Oulfa*",
-  "🚚 Livraison: *1–7 jours*  |  💳 *Paiement à la livraison*"
+  "✅ اكتب الرقم فقط وسأرسل لك التفاصيل فوراً",
+  "",
+  "🌐 الموقع الإلكتروني: https://digitronics.ma/",
+  "📝 فورم الطلب المباشر:",
+  "https://docs.google.com/forms/d/e/1FAIpQLScmDNagYSpUPfslT2s2t35KH7U1OWSNkUCIWmcJJm1R_alTQQ/viewform",
+  "",
+  "✅ تقدر تطلب من الويبسايت ولا تعمر الفورم للطلب المباشر"
 ].join("\n");
 
 const BUY_INTENT_TEMPLATE = [
