@@ -10876,7 +10876,7 @@ app.post("/wanotifier", express.raw({ type: "*/*", limit: "2mb" }), parseWanotif
       memory.push(key, "assistant", reply);
       resetStrikes(key);
       const response = { ok: true, reply };
-      if (CFG.featureGreetingFollowupOffers && offersAvailable) {
+      if (CFG.featureGreetingFollowupOffers) {
         const now = Date.now();
         const ctx = getCtx(key);
         const hasRecentFollowup =
@@ -10888,7 +10888,13 @@ app.post("/wanotifier", express.raw({ type: "*/*", limit: "2mb" }), parseWanotif
           response[WANOTIFIER_FOLLOWUP_FIELD] = [followupReply];
           setCtx(key, { didSendGreetingFollowupOffers: true, greetingFollowupOffersAt: now });
           memory.push(key, "assistant", followupReply);
-          console.log(JSON.stringify({ level: "info", ...logContext, msg: "greeting_followup_offers" }));
+          logger.info({
+            msg: "greeting_followup_attached",
+            reqId: logContext.reqId,
+            conversationId: logContext.conversationId || null,
+            senderId: logContext.senderId || null,
+            mediaKind: logContext.mediaKind || null,
+          });
         }
       }
       return res.json(response);
