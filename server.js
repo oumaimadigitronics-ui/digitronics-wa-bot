@@ -1,8 +1,10 @@
 import "dotenv/config";
 import express from "express";
 import crypto from "crypto";
+import dns from "dns/promises";
 import { execFile, spawn } from "child_process";
 import fs from "fs";
+import net from "net";
 import path from "path";
 import os from "os";
 import assert from "assert";
@@ -5277,9 +5279,57 @@ function isPrivateHost(hostname) {
   if (/^10\./.test(h)) return true;
   if (/^192\.168\./.test(h)) return true;
   if (/^172\.(1[6-9]|2[0-9]|3[0-1])\./.test(h)) return true;
+  if (/^169\.254\./.test(h)) return true;
+  if (/^100\.(6[4-9]|[7-9]\d|1[0-1]\d|12[0-7])\./.test(h)) return true;
+  if (/^198\.(1[8-9])\./.test(h)) return true;
+  if (/^192\.0\./.test(h)) return true;
   if (/^(fc00|fd00)/.test(h)) return true;
   if (/^fe80:/.test(h)) return true;
   return false;
+}
+
+function isPrivateIp(ip) {
+  const addr = String(ip || "").trim().toLowerCase();
+  if (!addr) return true;
+  if (net.isIP(addr) === 6) {
+    if (addr === "::1") return true;
+    if (addr.startsWith("fe80:")) return true;
+    if (addr.startsWith("fc") || addr.startsWith("fd")) return true;
+    return false;
+  }
+  if (net.isIP(addr) !== 4) return true;
+  const parts = addr.split(".").map((part) => Number(part));
+  if (parts.length !== 4 || parts.some((part) => !Number.isFinite(part))) return true;
+  const [a, b] = parts;
+  if (a === 10) return true;
+  if (a === 127) return true;
+  if (a === 0) return true;
+  if (a === 169 && b === 254) return true;
+  if (a === 172 && b >= 16 && b <= 31) return true;
+  if (a === 192 && b === 168) return true;
+  if (a === 100 && b >= 64 && b <= 127) return true;
+  if (a === 198 && (b === 18 || b === 19)) return true;
+  if (a === 192 && b === 0) return true;
+  return false;
+}
+
+async function ensurePublicUrl(urlObj) {
+  if (!urlObj) throw new Error("media_url_missing");
+  if (isPrivateHost(urlObj.hostname)) throw new Error("media_ssrf_blocked");
+  if (net.isIP(urlObj.hostname)) {
+    if (isPrivateIp(urlObj.hostname)) throw new Error("media_ssrf_blocked");
+    return;
+  }
+  let addresses = [];
+  try {
+    addresses = await dns.lookup(urlObj.hostname, { all: true, verbatim: true });
+  } catch {
+    throw new Error("media_ssrf_blocked");
+  }
+  if (!addresses.length) throw new Error("media_ssrf_blocked");
+  for (const addr of addresses) {
+    if (isPrivateIp(addr.address)) throw new Error("media_ssrf_blocked");
+  }
 }
 
 async function fetchMedia(url, opts = {}) {
@@ -5305,7 +5355,7 @@ async function fetchMedia(url, opts = {}) {
     const u = new URL(currentUrl);
     if (u.protocol !== "http:" && u.protocol !== "https:") throw new Error("media_protocol_blocked");
     if (u.protocol === "http:" && !allowHttp) throw new Error("media_http_blocked");
-    if (isPrivateHost(u.hostname)) throw new Error("media_ssrf_blocked");
+    await ensurePublicUrl(u);
 
     let ctrl = null;
     let timeoutId = null;
