@@ -4,6 +4,7 @@ import { detectUserLanguage } from '../lang/detectUserLanguage.js';
 import { isGreeting } from '../lang/greeting.js';
 import { normalizeDarijaLatin } from '../lang/normalizeDarijaLatin.js';
 import { extractMoroccoPhone, phoneConfirmationReply } from '../lang/phoneMA.js';
+import { isBatteryTvIntent, powerIntentReply } from '../lang/powerIntent.js';
 import { hasBye, isThanks, thanksReply } from '../lang/thanks.js';
 import { buildMainMenu } from '../menu/menuBuilder.js';
 import { transcribeAudio } from '../stt/sttService.js';
@@ -156,13 +157,16 @@ export class BotService {
       if (extractedPhone) {
         reply = phoneConfirmationReply(preferredLang || 'dz');
       } else {
-        if (isThanks(normalizedText || userText)) {
+        const normalizedInput = normalizedText || userText;
+        if (isBatteryTvIntent(normalizedInput)) {
+          reply = powerIntentReply(preferredLang || 'dz');
+        } else if (isThanks(normalizedInput)) {
           reply = thanksReply(preferredLang || 'dz', {
-            isBye: hasBye(normalizedText || userText),
+            isBye: hasBye(normalizedInput),
           });
         } else {
           const greeting = isGreeting(userText);
-          const wantsMenu = isMenuHelpIntent(normalizedText || userText);
+          const wantsMenu = isMenuHelpIntent(normalizedInput);
           const isMenuReply = looksLikeCategoryMenu(reply);
           const hasWeakCategories = containsAnyKeyword(reply, WEAK_CATEGORY_KEYWORDS);
           const hasStrongCategories = containsAnyKeyword(reply, STRONG_CATEGORY_KEYWORDS);
