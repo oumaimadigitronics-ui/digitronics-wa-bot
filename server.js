@@ -8603,8 +8603,9 @@ function hasTvSizeContext(text) {
 
 function extractSizeInfo(text) {
   const raw = arabicIndicToAsciiDigits(String(text || ""));
-  const cmUnitRe = /(cm|centimetre|centimètre|centimeter|سنتيم|سم)/i;
-  const cmRe = /(\d{1,4})\s*(cm|centimetre|centimètre|centimeter|سنتيم|سم)/i;
+  const cmUnitPattern = "(?:cm|centimetre|centimètre|centimeter|سنتيم(?:تر)?|سم)(?![ء-ي])";
+  const cmUnitRe = new RegExp(cmUnitPattern, "i");
+  const cmRe = new RegExp(`(\\d{1,4})\\s*${cmUnitPattern}`, "i");
   const inchUnitRe = /(\"|''|”|″|pouce|pouces|inch|inches|بوصة|بوص|بوس)/i;
   const inchRe = /(\d{2,3})\s*(\"|''|”|″|pouce|pouces|inch|inches|بوصة|بوص|بوس)/i;
 
