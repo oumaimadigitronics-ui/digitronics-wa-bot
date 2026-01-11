@@ -13,6 +13,7 @@ import { extractBudgetMad, detectCategory, isPriceQuery } from '../nlp/extractPr
 import { maybeAnswerFromCatalogOrEscalate } from '../guardrails/catalogEvidenceGuardrail.js';
 import { findClosestOffers } from '../offers/priceLookup.js';
 import { buildPriceReply } from '../replies/priceReply.js';
+import { buildTvBudgetReply } from '../replies/tvBudgetReply.js';
 import { buildBotContext } from './context.js';
 import { pickOverride } from './overrides/index.js';
 
@@ -269,14 +270,22 @@ export class BotService {
                     limit,
                     tolerancePct,
                   });
-                  if (matches.length > 0) {
-                    reply = buildPriceReply({
-                      category: detectedCategory,
-                      targetPrice,
-                      matches,
-                      preferredLang: preferredLang || 'dz',
-                    });
-                  }
+                  reply =
+                    detectedCategory === 'tv'
+                      ? buildTvBudgetReply({
+                          budget: targetPrice,
+                          matches,
+                          preferredLang: preferredLang || 'dz',
+                          allOffers: offers,
+                        })
+                      : matches.length > 0
+                        ? buildPriceReply({
+                            category: detectedCategory,
+                            targetPrice,
+                            matches,
+                            preferredLang: preferredLang || 'dz',
+                          })
+                        : reply;
                 }
               }
             }

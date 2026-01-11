@@ -1,5 +1,5 @@
-const BUDGET_REGEX = /(\d{2,6}(?:[\s.,]\d{3})*)\s*(dh|dhs|mad|درهم|د\.?م\.?)\b/i;
-const BUDGET_PREFIX_REGEX = /(dh|dhs|mad|درهم|د\.?م\.?)\s*(\d{2,6}(?:[\s.,]\d{3})*)\b/i;
+const BUDGET_REGEX = /(\d{2,6}(?:[\s.,]\d{3})*)\s*(dh|dhs|mad|درهم|د\.?م\.?)/i;
+const BUDGET_PREFIX_REGEX = /(dh|dhs|mad|درهم|د\.?م\.?)\s*(\d{2,6}(?:[\s.,]\d{3})*)/i;
 
 function normalizeNumber(value) {
   if (!value) return null;
