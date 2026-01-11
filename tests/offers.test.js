@@ -1598,6 +1598,83 @@ test("offer parsing falls back to name/sku size", () => {
   assert.strictEqual(offer.size, 55);
 });
 
+test("offer parsing reads Class attribute from WooCommerce", () => {
+  // Test with Daiko TV that has Class attribute
+  const daikoProduct = {
+    sku: "GLED32AI93DK",
+    name: 'Daiko Google Tv 32" Smart Silver Frameless FHD -GLED32AI93DK',
+    categories: [{ name: "TV" }, { name: "32 pouce" }],
+    attributes: [
+      { name: "Class", options: ["Tv"] },
+      { name: "Brand", options: ["DAIKO"] },
+    ],
+    brands: [{ name: "DAIKO" }],
+    regular_price: "2499",
+    stock_status: "instock",
+    permalink: "https://example.com/daiko-tv",
+  };
+  
+  const offer = offerFromWooProduct(daikoProduct);
+  if (!offer) {
+    console.log("DAIKO TEST: offer is null!");
+    console.log("Product:", JSON.stringify(daikoProduct, null, 2));
+  }
+  assert.ok(offer, "Offer should be created");
+  assert.strictEqual(offer.class, "Tv", "Class should be 'Tv' from attribute");
+  if (offer && offer.brand) {
+    assert.strictEqual(offer.brand, "DAIKO");
+    assert.strictEqual(offer.model, "GLED32AI93DK");
+  }
+});
+
+test("offer parsing falls back to category when Class attribute missing", () => {
+  // Test product without Class attribute but with TV category
+  const productWithoutAttr = {
+    sku: "TEST-50",
+    name: "Test TV 50 inches",
+    categories: [{ name: "TV" }],
+    brands: [{ name: "TestBrand" }],
+    regular_price: "3000",
+    stock_status: "instock",
+  };
+  
+  const offer = offerFromWooProduct(productWithoutAttr);
+  assert.ok(offer, "Offer should be created");
+  assert.strictEqual(offer.class, "Tv", "Class should be 'Tv' from category");
+});
+
+test("offer parsing handles different Class attribute variations", () => {
+  // Test with lowercase "class" attribute name
+  const product1 = {
+    sku: "PROD-1",
+    name: "Test Product",
+    categories: [{ name: "Electronics" }],
+    attributes: [{ name: "class", options: ["Refrigerateur"] }],
+    brands: [{ name: "TestBrand" }],
+    regular_price: "2000",
+    stock_status: "instock",
+  };
+  
+  const offer1 = offerFromWooProduct(product1);
+  assert.ok(offer1, "Offer should be created");
+  assert.strictEqual(offer1.class, "Refrigerateur", "Should read lowercase 'class' attribute");
+  
+  // Test with "pa_class" attribute name (WooCommerce product attribute format)
+  const product2 = {
+    sku: "PROD-2",
+    name: "Test Product 2",
+    categories: [{ name: "Electronics" }],
+    attributes: [{ name: "pa_class", options: ["Machine A Laver"] }],
+    brands: [{ name: "TestBrand" }],
+    regular_price: "2500",
+    stock_status: "instock",
+  };
+  
+  const offer2 = offerFromWooProduct(product2);
+  assert.ok(offer2, "Offer should be created");
+  assert.strictEqual(offer2.class, "Machine A Laver", "Should read 'pa_class' attribute");
+});
+
 test("size-only reply ignores lastBrand leak", () => {
   setOffersForTest({ OTHER: [{ model: "TV-43", class: "Tv", category: "Tv", size: 43, price: 2000, stock: 1 }] });
   setCtxForTest("size-leak", { lastBrand: "MORSAT" });
