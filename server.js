@@ -6518,7 +6518,7 @@ function selectOffersFromVision(hints) {
         withOffers: true,
         tvOnly: true,
       });
-      if (resTv && Array.isArray(resTv.offers) && resTv.offers.length) {
+      if (resTv?.offers?.length > 0) {
         return { offers: resTv.offers.map((offer) => ({ brand, offer })) };
       }
     }
