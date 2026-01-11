@@ -1,25 +1,4 @@
-const ARABIC_INDIC_MAP = {
-  "٠": "0",
-  "١": "1",
-  "٢": "2",
-  "٣": "3",
-  "٤": "4",
-  "٥": "5",
-  "٦": "6",
-  "٧": "7",
-  "٨": "8",
-  "٩": "9",
-  "۰": "0",
-  "۱": "1",
-  "۲": "2",
-  "۳": "3",
-  "۴": "4",
-  "۵": "5",
-  "۶": "6",
-  "۷": "7",
-  "۸": "8",
-  "۹": "9",
-};
+import { arabicIndicToAsciiDigits as sharedArabicIndicToAsciiDigits } from "../utils/arabicDigits.js";
 
 const FILLER_WORDS = {
   fr: ["euh", "heu", "hum", "hmm", "mmm", "ben", "genre", "tu vois"],
@@ -58,7 +37,7 @@ const DARIJA_PRODUCT_TERMS = new Map([
 ]);
 
 function arabicIndicToAsciiDigits(text) {
-  return String(text || "").replace(/[\u0660-\u0669\u06F0-\u06F9]/g, (d) => ARABIC_INDIC_MAP[d] || d);
+  return sharedArabicIndicToAsciiDigits(text);
 }
 
 function normalizeNumberWordsFr(text) {

@@ -1,29 +1,8 @@
+import { replaceArabicDigits } from '../../../../src/utils/arabicDigits.js';
+
 const BUDGET_REGEX = /(\d{2,6}(?:[\s.,]\d{3})*)\s*(dh|dhs|mad|درهم)(?=\s|$)/i;
 const BUDGET_PREFIX_REGEX = /(dh|dhs|mad|درهم)\s*(\d{2,6}(?:[\s.,]\d{3})*)(?=\s|$)/i;
 const INCH_REGEX = /(\d{2,3})\s*(?:"|''|inch|inches|pouce|بوصة|بول)(?=\s|$)/i;
-
-const ARABIC_DIGITS = {
-  '٠': '0',
-  '١': '1',
-  '٢': '2',
-  '٣': '3',
-  '٤': '4',
-  '٥': '5',
-  '٦': '6',
-  '٧': '7',
-  '٨': '8',
-  '٩': '9',
-  '۰': '0',
-  '۱': '1',
-  '۲': '2',
-  '۳': '3',
-  '۴': '4',
-  '۵': '5',
-  '۶': '6',
-  '۷': '7',
-  '۸': '8',
-  '۹': '9',
-};
 
 const TV_KEYWORDS = ['tv', 'tele', 'télé', 'television', 'télévision', 'talfaza', 'televiseur', 'تلفاز', 'تلفزة', 'تلفزيون'];
 const OTHER_CATEGORY_KEYWORDS = [
@@ -49,7 +28,7 @@ const OTHER_CATEGORY_KEYWORDS = [
 ];
 
 function normalizeDigits(text = '') {
-  return text.replace(/[٠-٩۰-۹]/g, (char) => ARABIC_DIGITS[char] || char);
+  return replaceArabicDigits(text);
 }
 
 function normalizeNumber(value) {
