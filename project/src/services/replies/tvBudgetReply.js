@@ -38,10 +38,12 @@ export function buildTvBudgetReply({ budget, matches = [], preferredLang = 'dz',
 
   const lines = matches.map((offer, index) => {
     const price = formatPrice(offer.price);
-    const base = `${index + 1}) ${offer.title}`;
+    const title = offer.title || offer.name || offer.model || offer.sku || 'Model';
+    const base = `${index + 1}) ${title}`;
     const withPrice = price ? `${base} — ${price}` : base;
-    if (offer.url) {
-      return `${withPrice} (${offer.url})`;
+    const link = offer.url || offer.link;
+    if (link) {
+      return `${withPrice} (${link})`;
     }
     return withPrice;
   });

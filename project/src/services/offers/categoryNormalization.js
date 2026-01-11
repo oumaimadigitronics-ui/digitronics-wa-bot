@@ -1,3 +1,6 @@
+const TV_REGEX =
+  /(^|[^\p{L}\p{N}])(tv(?:s)?|tele|télé|television|télévision|talfaza|smart\s*tv|google\s*tv|android\s*tv|تلفاز|تلفزة|شاشة)([^\p{L}\p{N}]|$)/iu;
+
 function includesKeyword(text = '', keyword = '') {
   if (!keyword) return false;
   if (/[^\u0000-\u00ff]/.test(keyword)) {
@@ -15,7 +18,7 @@ function matchesAny(text = '', keywords = []) {
 
 export function normalizeOfferCategory(offer = {}) {
   const combined = `${offer.category || ''} ${offer.class || ''} ${offer.name || ''}`.toLowerCase();
-  if (matchesAny(combined, ['tv', 'tele', 'télé', 'television', 'télévision', 'talfaza', 'تلفاز', 'تلفزة', 'شاشة'])) {
+  if (TV_REGEX.test(combined)) {
     return 'tv';
   }
   if (matchesAny(combined, ['fridge', 'frigo', 'réfrigérateur', 'refrigerateur', 'refrigerator', 'ثلاجة', 'ثلاجات'])) {
