@@ -596,6 +596,7 @@ function arabicIndicToAsciiDigits(s) {
 // Simple LRU cache for normMatch to avoid repeated normalization
 const normMatchCache = new Map();
 const NORM_MATCH_CACHE_SIZE = 500;
+const CACHE_EVICTION_RATIO = 0.2; // Remove 20% of entries when cache is full
 
 function normMatch(text) {
   const key = String(text || "");
@@ -615,8 +616,8 @@ function normMatch(text) {
   
   // Add to cache - clear oldest entries if full
   if (normMatchCache.size >= NORM_MATCH_CACHE_SIZE) {
-    // Clear 20% of cache when full (batch removal is more efficient)
-    const entriesToRemove = Math.floor(NORM_MATCH_CACHE_SIZE * 0.2);
+    // Clear portion of cache when full (batch removal is more efficient)
+    const entriesToRemove = Math.floor(NORM_MATCH_CACHE_SIZE * CACHE_EVICTION_RATIO);
     let removed = 0;
     for (const k of normMatchCache.keys()) {
       if (removed >= entriesToRemove) break;
@@ -671,8 +672,8 @@ function includesToken(text, token) {
       
       // Add to cache - batch remove when full
       if (includesTokenRegExpCache.size >= INCLUDES_TOKEN_CACHE_SIZE) {
-        // Clear 20% of cache for better performance
-        const entriesToRemove = Math.floor(INCLUDES_TOKEN_CACHE_SIZE * 0.2);
+        // Clear portion of cache for better performance
+        const entriesToRemove = Math.floor(INCLUDES_TOKEN_CACHE_SIZE * CACHE_EVICTION_RATIO);
         let removed = 0;
         for (const k of includesTokenRegExpCache.keys()) {
           if (removed >= entriesToRemove) break;
@@ -856,7 +857,7 @@ function warrantyTextForBrand(lang, brand, cls) {
 
 // Cache language detection tokens to avoid recreating arrays on every call
 const LANG_DETECT_FR_STRONG = Object.freeze(["bonjour", "salut", "merci"]);
-const LANG_DETECT_FR_TOKENS = Object.freeze(["merci", "livraison", "garantie", "prix", "commande", "commander", "svp", "s'il", "sil", "s'il"]);
+const LANG_DETECT_FR_TOKENS = Object.freeze(["merci", "livraison", "garantie", "prix", "commande", "commander", "svp", "s'il", "sil"]);
 const LANG_DETECT_EN_STRONG = Object.freeze(["hello", "hi", "hey"]);
 const LANG_DETECT_EN_TOKENS = Object.freeze(["thanks", "please", "delivery", "warranty", "price", "order", "buy", "purchase"]);
 
