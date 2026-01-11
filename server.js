@@ -18,6 +18,46 @@ import {
   updateContextFromMessage,
 } from "./src/knowledge/productKnowledge.js";
 import { toFile } from "openai/uploads";
+import {
+  CFG,
+  FOCUS,
+  META,
+  OPENAI_CONFIG,
+  OPENAI_MODEL_VALUE,
+  OFFERS_CONFIG,
+  SYSTEM_PROMPT_CONFIG,
+  ORDER_FORM_URL_VALUE,
+  LOG_DEBUG,
+  IS_TEST,
+  MAX_AUDIO_BYTES,
+  FEATURE_STRICT_CATEGORY_SWITCH,
+  FEATURE_OFFER_TAIL_COMPACT,
+  FEATURE_STRICT_STOCK_FILTER,
+  FEATURE_SHOW_SKU_IN_OFFERS,
+  FEATURE_LEGACY_OFFER_LINE,
+  FEATURE_LEGACY_OFFER_DISPLAY_NAME,
+  FEATURE_OFFER_ITEM_EMOJI_FORMAT,
+  FEATURE_OFFERS_BOX_HEADER,
+  FEATURE_WA_HARD_CAP_4096,
+  FEATURE_ALLOW_MAPS_URLS,
+  FEATURE_CATALOG_OVERVIEW_INTENT,
+  FEATURE_ASSUME_TV_ON_BRAND_ONLY,
+  BRAND_PRIORITY,
+  TV_BRAND_PRIORITY,
+  MAX_OFFERS,
+  WANOTIFIER_FOLLOWUP_FIELD,
+  DEFAULT_SYSTEM_PROMPT,
+  CONTACTS,
+  COMPANY,
+  TV_CLASS_SYNONYMS,
+  TV_TITLE_HINTS,
+  BRAND_ONLY_CATEGORY_KEYWORDS,
+  BRAND_ONLY_OK_TOKENS,
+  CATEGORY_ALIASES,
+  APPLIANCE_CATEGORY_KEYWORDS,
+  APPLIANCE_CATEGORY_CANON,
+  CATEGORY_CLASS_KEYWORDS,
+} from "./src/config/index.js";
 
 let toFileImpl = toFile;
 
@@ -32,38 +72,16 @@ process.on("uncaughtException", (err) => {
   console.error("Uncaught exception:", err);
 });
 
-// --- META (Facebook Messenger) ENV ---
-const {
-  META_VERIFY_TOKEN = "",
-  META_PAGE_ACCESS_TOKEN = "",
-  META_APP_SECRET = "",
-  META_GRAPH_VERSION = "v21.0",
-} = process.env;
 
-const IS_TEST_ENV = String(process.env.NODE_ENV || "").toLowerCase() === "test";
-const LOG_DEBUG = String(process.env.LOG_DEBUG || "0") === "1";
-const FEATURE_STRICT_CATEGORY_SWITCH = String(process.env.FEATURE_STRICT_CATEGORY_SWITCH || "0") === "1";
-const FEATURE_OFFER_TAIL_COMPACT = String(process.env.FEATURE_OFFER_TAIL_COMPACT || "0") === "1";
-const FEATURE_STRICT_STOCK_FILTER = String(process.env.FEATURE_STRICT_STOCK_FILTER || "0") === "1";
-const FEATURE_SHOW_SKU_IN_OFFERS = String(process.env.FEATURE_SHOW_SKU_IN_OFFERS || "0") === "1";
-const FEATURE_LEGACY_OFFER_LINE = String(process.env.FEATURE_LEGACY_OFFER_LINE || "0") === "1";
-const FEATURE_LEGACY_OFFER_DISPLAY_NAME = String(process.env.FEATURE_LEGACY_OFFER_DISPLAY_NAME || "0") === "1";
-const FEATURE_OFFER_ITEM_EMOJI_FORMAT = String(process.env.FEATURE_OFFER_ITEM_EMOJI_FORMAT || "0") === "1";
-const FEATURE_OFFERS_BOX_HEADER = String(process.env.FEATURE_OFFERS_BOX_HEADER || (IS_TEST_ENV ? "1" : "0")) === "1";
-const FEATURE_WA_HARD_CAP_4096 = String(process.env.FEATURE_WA_HARD_CAP_4096 || "0") === "1";
-const FEATURE_ALLOW_MAPS_URLS = String(process.env.FEATURE_ALLOW_MAPS_URLS || "0") === "1";
-const FEATURE_CATALOG_OVERVIEW_INTENT = String(process.env.FEATURE_CATALOG_OVERVIEW_INTENT || "0") === "1";
-const FEATURE_ASSUME_TV_ON_BRAND_ONLY = String(process.env.FEATURE_ASSUME_TV_ON_BRAND_ONLY || "1") === "1";
-const WANOTIFIER_FOLLOWUP_FIELD = "followups";
-const IS_TEST = IS_TEST_ENV;
+// --- META (Facebook Messenger) ENV ---
+// Now imported from src/config/env.js
+
 const ENTRY_FILE = fileURLToPath(import.meta.url);
 const __filename = ENTRY_FILE;
 const RUN_SELF_TESTS = String(process.env.RUN_SELF_TESTS || process.env.SELF_TEST || "0") === "1";
 const REQUIRE_ENV = process.argv[1] === ENTRY_FILE && !RUN_SELF_TESTS;
-const MAX_AUDIO_BYTES = Number(process.env.MEDIA_MAX_BYTES_AUDIO || 12000000) || 12000000;
 let systemPromptLoaded = false;
 let systemPromptValue = "";
-const DEFAULT_SYSTEM_PROMPT = "You are DigiBot for Digitronics.ma.";
 
 function debugLog(event, payload) {
   if (!LOG_DEBUG) return;
@@ -95,153 +113,19 @@ const logger = {
   },
 };
 
-const DEFAULT_ORDER_FORM_URL =
-  "https://docs.google.com/forms/d/e/1FAIpQLScmDNagYSpUPfsIT2s2t35KH7U1OWSNkUCIWmcJJm1R_aITQQ/viewform?usp=header";
+// Environment configuration now imported from src/config/
+// CFG, FOCUS, BRAND_PRIORITY, MAX_OFFERS, CONTACTS, COMPANY, etc.
 
-const {
-  PORT = "3000",
-
-  OPENAI_API_KEY,
-  OPENAI_MODEL = "gpt-5.2",
-
-  OFFERS_REFRESH_MS = "300000",
-  OFFERS_REFRESH_TOKEN = "",
-
-  WC_BASE_URL = "",
-  WC_CONSUMER_KEY = "",
-  WC_CONSUMER_SECRET = "",
-  WC_PER_PAGE = "100",
-  WC_STATUS = "publish",
-
-  ORDER_FORM_URL = DEFAULT_ORDER_FORM_URL,
-
-  RATE_LIMIT_WINDOW_MS = "60000",
-  RATE_LIMIT_MAX = "25",
-
-  MEMORY_TTL_HOURS = "24",
-  MEMORY_MAX_MESSAGES = "12",
-  MEMORY_PERSIST = "0",
-  MEMORY_DIR = "./data",
-
-  FOCUS_BRAND = "",
-  FOCUS_MODE = "preferred",
-
-  MAX_WA_REPLY_CHARS = "6000",
-
-  WANOTIFIER_TOKEN = "",
-  WANOTIFIER_HMAC_SECRET = "",
-  WANOTIFIER_HMAC_HEADER = "x-signature",
-  WANOTIFIER_TS_HEADER = "x-timestamp",
-  WANOTIFIER_MAX_SKEW_SECONDS = "300",
-  WANOTIFIER_MEDIA_URL = "",
-
-  MEDIA_MODE = "auto",
-  MEDIA_FETCH_TIMEOUT_MS = "8000",
-  MEDIA_MAX_BYTES_IMAGE = "4000000",
-  MEDIA_MAX_BYTES_AUDIO = "12000000",
-  MEDIA_ALLOW_INSECURE_HTTP = "0",
-
-  OPENAI_VISION_MODEL = "",
-  OPENAI_TRANSCRIBE_MODEL = "gpt-4o-mini-transcribe",
-  AUDIO_MIN_SCORE = "0.45",
-  FEATURE_AUDIO_SNIFF_MIME = "0",
-  FEATURE_AUDIO_CLEAN_MIME = "1",
-  FEATURE_GREETING_FOLLOWUP_OFFERS = "0",
-  FEATURE_GREETING_LANG_FROM_TEXT = "0",
-  FEATURE_GREETING_I18N = "0",
-  FEATURE_FORCE_AR_FR = "0",
-
-  SYSTEM_PROMPT = "",
-  SYSTEM_PROMPT_FILE = "",
-} = process.env;
-
-const configuredMaxReplyChars = Number(MAX_WA_REPLY_CHARS) || 6000;
-const maxReplyCharsConfigured = FEATURE_WA_HARD_CAP_4096
-  ? Math.min(configuredMaxReplyChars, 4096)
-  : configuredMaxReplyChars;
-
-if (REQUIRE_ENV && !OPENAI_API_KEY) {
+// Environment variables validation
+if (REQUIRE_ENV && !OPENAI_CONFIG.apiKey) {
   console.error("Missing env var: OPENAI_API_KEY (OpenAI responses will fail until set).");
 }
 
-if (REQUIRE_ENV && (!WC_BASE_URL || !WC_CONSUMER_KEY || !WC_CONSUMER_SECRET)) {
+if (REQUIRE_ENV && (!CFG.wcBase || !CFG.wcKey || !CFG.wcSecret)) {
   console.error(
     "Missing WooCommerce env vars: WC_BASE_URL, WC_CONSUMER_KEY, WC_CONSUMER_SECRET (offers sync will fail until set)."
   );
 }
-
-const CFG = {
-  port: Number(process.env.PORT || PORT) || 3000,
-  refreshMs: Number(OFFERS_REFRESH_MS) || 300000,
-  rateWindowMs: Number(RATE_LIMIT_WINDOW_MS) || 60000,
-  rateMax: Number(RATE_LIMIT_MAX) || 25,
-  maxReplyChars: Math.max(200, maxReplyCharsConfigured),
-
-  memoryTtlMs: (Number(MEMORY_TTL_HOURS) || 24) * 60 * 60 * 1000,
-  memoryMaxMessages: Math.max(6, Number(MEMORY_MAX_MESSAGES) || 12),
-  memoryPersist: String(MEMORY_PERSIST || "0") === "1",
-  memoryDir: String(MEMORY_DIR || "./data"),
-
-  wanotifierToken: String(WANOTIFIER_TOKEN || "").trim(),
-  wanotifierHmacSecret: String(WANOTIFIER_HMAC_SECRET || "").trim(),
-  wanotifierHmacHeader: String(WANOTIFIER_HMAC_HEADER || "x-signature").toLowerCase(),
-  wanotifierTsHeader: String(WANOTIFIER_TS_HEADER || "x-timestamp").toLowerCase(),
-  wanotifierMaxSkewSec: Math.max(30, Number(WANOTIFIER_MAX_SKEW_SECONDS) || 300),
-  wanotifierMediaUrl: String(WANOTIFIER_MEDIA_URL || "").trim(),
-
-  mediaMode: String(MEDIA_MODE || "auto").toLowerCase(),
-  mediaFetchTimeoutMs: Math.max(1000, Number(MEDIA_FETCH_TIMEOUT_MS) || 8000),
-  mediaMaxBytesImage: Number(MEDIA_MAX_BYTES_IMAGE) || 4000000,
-  mediaMaxBytesAudio: Number(MEDIA_MAX_BYTES_AUDIO) || MAX_AUDIO_BYTES,
-  mediaAllowHttp: String(MEDIA_ALLOW_INSECURE_HTTP || "0") === "1",
-
-  openaiVisionModel: String(OPENAI_VISION_MODEL || "").trim(),
-  openaiTranscribeModel: String(OPENAI_TRANSCRIBE_MODEL || "gpt-4o-mini-transcribe").trim(),
-  audioMinScore: Math.max(0, Math.min(1, Number(AUDIO_MIN_SCORE) || 0.45)),
-  featureAudioSniffMime: String(FEATURE_AUDIO_SNIFF_MIME || "0") === "1",
-  featureAudioCleanMime: String(FEATURE_AUDIO_CLEAN_MIME || "1") === "1",
-  featureGreetingFollowupOffers: String(FEATURE_GREETING_FOLLOWUP_OFFERS || "0") === "1",
-  featureGreetingLangFromText: String(FEATURE_GREETING_LANG_FROM_TEXT || "0") === "1",
-  featureGreetingI18n: String(FEATURE_GREETING_I18N || "0") === "1",
-  featureForceArFr: String(FEATURE_FORCE_AR_FR || "0") === "1",
-
-  wcBase: String(WC_BASE_URL || "").replace(/\/$/g, ""),
-  wcKey: String(WC_CONSUMER_KEY || ""),
-  wcSecret: String(WC_CONSUMER_SECRET || ""),
-  wcPerPage: Math.max(10, Math.min(100, Number(WC_PER_PAGE) || 100)),
-  wcStatus: String(WC_STATUS || "publish"),
-};
-
-const FOCUS = {
-  brand: String(FOCUS_BRAND || "").trim().toUpperCase(),
-  mode: String(FOCUS_MODE || "preferred").trim().toLowerCase(),
-};
-
-const CONTACTS = {
-  whatsapp: "0660111438",
-  calls: ["0660111438"],
-};
-
-// RULE #1 no questions
-const BRAND_PRIORITY = [
-  "TCL",
-  "Daiko",
-  "Haier",
-  "Samsung",
-  "LG",
-  "Elexia",
-  "Revolution",
-  "Visio",
-  "Echolink",
-  "Hisense",
-  "Tivoli",
-];
-const MAX_OFFERS = 3;
-
-const COMPANY = {
-  name: "Digitronics",
-  address: "Ville de Casablanca – Quartier Oulfa (Haj Fateh) – Rue 9 – Rond-point Chahdiya – à côté de la boulangerie Pan Com",
-};
 
 const VOICE_NOT_UNDERSTOOD_TEMPLATE = `╭───────────────╮
 │  🎤 *Message vocal*          │
@@ -341,7 +225,7 @@ app.get("/meta/webhook", (req, res) => {
   const token = req.query["hub.verify_token"];
   const challenge = req.query["hub.challenge"];
 
-  if (mode === "subscribe" && token === META_VERIFY_TOKEN) {
+  if (mode === "subscribe" && token === META.verifyToken) {
     return res.status(200).send(challenge);
   }
   return res.sendStatus(403);
@@ -375,12 +259,12 @@ app.post("/meta/webhook", async (req, res) => {
 });
 
 async function sendMessengerText(recipientId, text) {
-  if (!META_PAGE_ACCESS_TOKEN) {
+  if (!META.pageAccessToken) {
     console.warn("META_PAGE_ACCESS_TOKEN missing - cannot send messages.");
     return;
   }
 
-  const url = `https://graph.facebook.com/${META_GRAPH_VERSION}/me/messages?access_token=${META_PAGE_ACCESS_TOKEN}`;
+  const url = `https://graph.facebook.com/${META.graphVersion}/me/messages?access_token=${META.pageAccessToken}`;
 
   const payload = {
     recipient: { id: recipientId },
@@ -504,10 +388,10 @@ function stableReqId() {
 }
 
 function loadSystemPromptValue() {
-  const promptInline = String(SYSTEM_PROMPT || "").trim();
+  const promptInline = String(SYSTEM_PROMPT_CONFIG.prompt || "").trim();
   if (promptInline) return promptInline;
 
-  const promptFile = String(SYSTEM_PROMPT_FILE || "").trim();
+  const promptFile = String(SYSTEM_PROMPT_CONFIG.file || "").trim();
   if (!promptFile) return "";
 
   try {
@@ -778,7 +662,7 @@ function stripUrlQueriesInText(text) {
   return s.replace(/https?:\/\/\S+/g, (m) => sanitizeUrlNoQuestion(m));
 }
 
-const ORDER_FORM_URL_SAFE = sanitizeUrlNoQuestion(ORDER_FORM_URL);
+const ORDER_FORM_URL_SAFE = sanitizeUrlNoQuestion(ORDER_FORM_URL_VALUE);
 const MAPS_URL_RAW = "https://maps.app.goo.gl/sLuZQCt74KVkq39H7?g_st=aw";
 const MAPS_URL_SAFE = sanitizeUrlNoQuestion(MAPS_URL_RAW);
 
@@ -3664,110 +3548,8 @@ function pickCanonicalClass(classes, tokens) {
   return null;
 }
 
-const TV_CLASS_SYNONYMS = Object.freeze([
-  "tv",
-  "tele",
-  "télé",
-  "television",
-  "télévision",
-  "televiseur",
-  "téléviseur",
-  "smart tv",
-  "android tv",
-  "google tv",
-  "تلفاز",
-  "تلفزة",
-  "تلفزيون",
-  "تيليفزيون",
-]);
-
-const TV_TITLE_HINTS = Object.freeze([
-  "tv",
-  "smart tv",
-  "android tv",
-  "google tv",
-  "oled",
-  "qled",
-  "mini led",
-  "mini-led",
-  "4k",
-  "uhd",
-  "led",
-  "tele",
-  "télé",
-  "television",
-  "télévision",
-  "تلفاز",
-  "تلفزيون",
-]);
-
-const BRAND_ONLY_CATEGORY_KEYWORDS = Object.freeze([
-  "tv",
-  "tele",
-  "télé",
-  "television",
-  "télévision",
-  "téléviseur",
-  "smart tv",
-  "android tv",
-  "oled",
-  "qled",
-  "4k",
-  "frigo",
-  "refrigerateur",
-  "réfrigérateur",
-  "congelateur",
-  "congélateur",
-  "ثلاجة",
-  "فريكو",
-  "clim",
-  "climatiseur",
-  "مكيف",
-  "كليم",
-  "machine",
-  "lave linge",
-  "lave-linge",
-  "غسالة",
-  "déshumidificateur",
-  "deshumidificateur",
-  "مزيل الرطوبة",
-]);
-
-const BRAND_ONLY_OK_TOKENS = Object.freeze([
-  "option",
-  "options",
-  "choix",
-  "selection",
-  "sélection",
-  "catalog",
-  "catalogue",
-  "liste",
-  "list",
-  "menu",
-  "show",
-  "display",
-  "prix",
-  "price",
-  "promo",
-  "promotion",
-  "promos",
-  "offre",
-  "offres",
-  "offer",
-  "offers",
-  "deal",
-  "deals",
-  "discount",
-  "sale",
-  "soldes",
-  "svp",
-  "stp",
-  "please",
-  "pls",
-  "dyal",
-  "dial",
-  "diall",
-]);
+// Category constants now imported from src/config/categories.js
+// TV_CLASS_SYNONYMS, TV_TITLE_HINTS, BRAND_ONLY_CATEGORY_KEYWORDS, BRAND_ONLY_OK_TOKENS
 
 // Cache the Set for performance - avoid creating on every call
 const BRAND_ONLY_OK_TOKENS_SET = new Set(BRAND_ONLY_OK_TOKENS);
@@ -4708,275 +4490,8 @@ function detectClass(text) {
   return null;
 }
 
-const CATEGORY_ALIASES = Object.freeze({
-  Tv: [
-    "tv",
-    "tele",
-    "télé",
-    "television",
-    "télévision",
-    "تلفاز",
-    "تلفزة",
-    "تلفزيون",
-    "ecran",
-    "écran",
-    "lcran",
-  ],
-  Climatiseur: [
-    "clim",
-    "climatiseur",
-    "climatiseur mobile",
-    "climatisation",
-    "air conditioner",
-    "ac",
-    "مكيف",
-    "مكيف هواء",
-    "klima",
-    "كليما",
-  ],
-  "Machine A Laver": [
-    "machine a laver",
-    "machine à laver",
-    "machine a laver le linge",
-    "machine à laver le linge",
-    "lave linge",
-    "lave-linge",
-    "lavelinge",
-    "washing machine",
-    "ماكينة صابون",
-    "غسالة",
-    "غسالة ملابس",
-    "غسالة ديال الحوايج",
-    "غسالة ديال لوايج",
-    "ماكينة اوتوماتيك",
-    "ماكينة أوتوماتيك",
-    "ماكينة اوطوماتيك",
-    "ماكينة أوطوماتيك",
-    "ماكينة اتوماتيك",
-    "مكينة اوتوماتيك",
-    "مكينة اوطوماتيك",
-    "مكينة اتوماتيك",
-    "mquina dial ssiab",
-    "mquina dyal ssiab",
-    "machina dial ssiab",
-    "machine automatique",
-    "lave linge automatique",
-  ],
-  Refrigerateur: [
-    "refrigerateur",
-    "réfrigérateur",
-    "refrigerator",
-    "frigo",
-    "frigidaire",
-    "ريفريجيراتور",
-    "ثلاجة",
-    "ثلاج",
-    "تلاجة",
-    "لاجة",
-    "براد",
-    "refrigirateur",
-    "talaja",
-    "tlaja",
-    "thalaja",
-    "thallaja",
-    "thallajat",
-    "telajja",
-    "friko",
-    "فريكو",
-  ],
-  Congelateur: ["congelateur", "congélateur", "freezer", "فريزر"],
-  "Chauffe-eau": ["chauffe-eau", "chauffe eau", "water heater", "سخان"],
-  "Micro-ondes": ["micro-ondes", "micro ondes", "micro onde", "microondes", "microonde", "microwave", "ميكرو"],
-  "Lave Vaisselle": ["lave vaisselle", "lave-vaisselle", "lavevaisselle", "dishwasher", "غسالة صحون"],
-  "Air Fryer": ["air fryer", "airfryer", "قلاية هوائية", "اير فراير", "ايرفراير"],
-  "Barre De Son": ["barre de son", "soundbar", "ساندبار"],
-  Cuisiniere: [
-    "cuisiniere",
-    "cuisinière",
-    "cuisinier",
-    "gaziniere",
-    "gazinière",
-    "four",
-    "forn",
-    "فران",
-    "فورنو",
-    "طباخة",
-    "موقد",
-    "بوتاجاز",
-    "kuzina",
-    "kouzina",
-    "kوزينة",
-    "كوزينة",
-    "كوجينة",
-    "cuisinière gaz",
-    "cuisson",
-    "cuisine",
-    "cooker",
-    "stove",
-    "range",
-  ],
-});
-
-const APPLIANCE_CATEGORY_KEYWORDS = Object.freeze({
-  cooker: CATEGORY_ALIASES.Cuisiniere,
-  refrigerator: CATEGORY_ALIASES.Refrigerateur,
-  washing_machine: CATEGORY_ALIASES["Machine A Laver"],
-  air_conditioner: CATEGORY_ALIASES.Climatiseur,
-  microwave: CATEGORY_ALIASES["Micro-ondes"],
-  dishwasher: CATEGORY_ALIASES["Lave Vaisselle"],
-  water_heater: CATEGORY_ALIASES["Chauffe-eau"],
-});
-
-const APPLIANCE_CATEGORY_CANON = Object.freeze({
-  cooker: "Cuisiniere",
-  refrigerator: "Refrigerateur",
-  washing_machine: "Machine A Laver",
-  air_conditioner: "Climatiseur",
-  microwave: "Micro-ondes",
-  dishwasher: "Lave Vaisselle",
-  water_heater: "Chauffe-eau",
-});
-
-const CATEGORY_CLASS_KEYWORDS = Object.freeze([
-  {
-    category: "Refrigerateur",
-    keywords: [
-      "ثلاجة",
-      "ثلاج",
-      "تلاجة",
-      "لاجة",
-      "fridge",
-      "frigo",
-      "frigidaire",
-      "réfrigérateur",
-      "refrigerator",
-      "refrigerateur",
-      "refrigirateur",
-      "no frost",
-      "nofrost",
-      "نو فروست",
-      "نو فرست",
-      "talaja",
-      "tlaja",
-      "thalaja",
-      "thallaja",
-      "thallajat",
-      "telajja",
-      "friko",
-      "فريكو",
-      "براد",
-    ],
-  },
-  {
-    category: "Tv",
-    cls: "Tv",
-    keywords: [
-      "تلفاز",
-      "تلفزة",
-      "تلفزيون",
-      "tv",
-      "télé",
-      "tele",
-      "télévision",
-      "television",
-      "smart tv",
-      "android tv",
-      "google tv",
-      "oled",
-      "qled",
-      "ecran",
-      "écran",
-      "lcran",
-    ],
-  },
-  {
-    category: "Machine A Laver",
-    keywords: [
-      "غسالة",
-      "غسالة ملابس",
-      "غسالة ديال الحوايج",
-      "غسالة ديال لوايج",
-      "lavage",
-      "machine a laver",
-      "machine à laver",
-      "machine a laver le linge",
-      "machine à laver le linge",
-      "lave linge",
-      "lave-linge",
-      "lavelinge",
-      "washing machine",
-      "machina dial ssiab",
-      "mquina dial ssiab",
-      "mquina dyal ssiab",
-      "ماكينة اوتوماتيك",
-      "ماكينة أوتوماتيك",
-      "ماكينة اوطوماتيك",
-      "ماكينة أوطوماتيك",
-      "ماكينة اتوماتيك",
-      "مكينة اوتوماتيك",
-      "مكينة اوطوماتيك",
-      "مكينة اتوماتيك",
-      "machine automatique",
-      "lave linge automatique",
-    ],
-  },
-  {
-    category: "Climatiseur",
-    keywords: [
-      "مكيف",
-      "مكيف هواء",
-      "مكيف هوائي",
-      "climatiseur",
-      "clim",
-      "climatisation",
-      "climatiseur mobile",
-      "air conditioner",
-      "ac",
-      "klima",
-      "كليما",
-    ],
-  },
-  {
-    category: "Cuisiniere",
-    keywords: [
-      "cuisiniere",
-      "cuisinière",
-      "cuisinier",
-      "gaziniere",
-      "gazinière",
-      "four",
-      "forn",
-      "فران",
-      "فورنو",
-      "طباخة",
-      "موقد",
-      "بوتاجاز",
-      "kuzina",
-      "kouzina",
-      "kوزينة",
-      "كوزينة",
-      "كوجينة",
-      "cuisinière gaz",
-      "cuisson",
-      "cuisine",
-      "cooker",
-      "stove",
-      "range",
-    ],
-  },
-  {
-    category: "Micro-ondes",
-    keywords: ["micro-ondes", "micro ondes", "micro onde", "microondes", "microonde", "microwave", "ميكرو"],
-  },
-  {
-    category: "Lave Vaisselle",
-    keywords: ["lave vaisselle", "lave-vaisselle", "lavevaisselle", "dishwasher", "غسالة صحون"],
-  },
-  {
-    category: "Chauffe-eau",
-    keywords: ["chauffe-eau", "chauffe eau", "water heater", "سخان"],
-  },
-]);
+// Category aliases and keywords now imported from src/config/categories.js
+// CATEGORY_ALIASES, APPLIANCE_CATEGORY_KEYWORDS, APPLIANCE_CATEGORY_CANON, CATEGORY_CLASS_KEYWORDS
 
 function detectCategory(text) {
   const s = normMatch(text);
@@ -6463,7 +5978,7 @@ function isVisionCapableModel(modelName) {
 
 function pickVisionModel() {
   if (CFG.openaiVisionModel && isVisionCapableModel(CFG.openaiVisionModel)) return CFG.openaiVisionModel;
-  if (OPENAI_MODEL && isVisionCapableModel(OPENAI_MODEL)) return OPENAI_MODEL;
+  if (OPENAI_MODEL_VALUE && isVisionCapableModel(OPENAI_MODEL_VALUE)) return OPENAI_MODEL_VALUE;
   // Default to a known vision-capable model if none provided
   return "gpt-4o-mini";
 }
@@ -7120,7 +6635,7 @@ async function deriveMediaText(mediaInput, lang, reqId) {
 
       const dataUrl = `data:${mimeType};base64,${buffer.toString("base64")}`;
       const desc = await describeImage(
-        { image: dataUrl, model: CFG.openaiVisionModel || OPENAI_MODEL },
+        { image: dataUrl, model: CFG.openaiVisionModel || OPENAI_MODEL_VALUE },
         getOpenAIClient()
       );
       const safe = ensureNoQuestion(sanitizeDerivedText(desc));
@@ -10862,7 +10377,7 @@ function defaultTvOffersForReceiver(lang, key) {
 
 const MAX_OFFERS_FOR_PROMPT = 20;
 
-const TV_BRAND_PRIORITY = BRAND_PRIORITY.map((b) => String(b || "").toUpperCase());
+// TV_BRAND_PRIORITY now imported from src/config/brands.js
 
 const OFFER_SCHEMA_HINT = {
   description:
@@ -11170,14 +10685,14 @@ async function callOpenAIChat(messages, maxOut) {
   const maxTokens = Number(maxOut) || 380;
   try {
     return await getOpenAIClient().chat.completions.create({
-      model: OPENAI_MODEL,
+      model: OPENAI_MODEL_VALUE,
       messages,
       temperature: 0.3,
       max_completion_tokens: maxTokens,
     });
   } catch (_e) {
     return await getOpenAIClient().chat.completions.create({
-      model: OPENAI_MODEL,
+      model: OPENAI_MODEL_VALUE,
       messages,
       temperature: 0.3,
       max_tokens: maxTokens,
@@ -11503,9 +11018,9 @@ app.get("/offers-status", (_req, res) => {
 });
 
 app.post("/refresh-offers", async (req, res) => {
-  if (OFFERS_REFRESH_TOKEN) {
+  if (OFFERS_CONFIG.refreshToken) {
     const token = String(req.headers["x-refresh-token"] || "");
-    if (token !== OFFERS_REFRESH_TOKEN) return res.status(401).json({ ok: false, error: "Unauthorized" });
+    if (token !== OFFERS_CONFIG.refreshToken) return res.status(401).json({ ok: false, error: "Unauthorized" });
   }
   await refreshOffersSafe();
   return res.json({ ok: true, lastOffersSync });
