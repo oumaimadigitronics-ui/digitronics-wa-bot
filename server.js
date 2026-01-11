@@ -7854,8 +7854,24 @@ function listOffersForBrand(brand, opts) {
   const withOffers = Boolean(o.withOffers);
   const useTvFilter = Boolean(o.tvOnly) || (cls && normMatch(cls) === normMatch(OFFERS_INDEX.classCanon.tv || ""));
 
-  const filtered = ((OFFERS && OFFERS.offers && OFFERS.offers[brand]) || [])
-    .map((offer, idx) => ({ brand, offer, originalIdx: idx }))
+  // Find the actual brand key in OFFERS.offers (case-sensitive lookup)
+  let actualBrandKey = brand;
+  const allOffers = (OFFERS && OFFERS.offers && OFFERS.offers[brand]) || [];
+  
+  // If no offers found with exact brand, try to find the correct key
+  if (!allOffers.length && brand && OFFERS && OFFERS.offers) {
+    const brandNorm = normMatch(brand);
+    const keys = Object.keys(OFFERS.offers);
+    for (let i = 0; i < keys.length; i += 1) {
+      if (normMatch(keys[i]) === brandNorm) {
+        actualBrandKey = keys[i];
+        break;
+      }
+    }
+  }
+
+  const filtered = ((OFFERS && OFFERS.offers && OFFERS.offers[actualBrandKey]) || [])
+    .map((offer, idx) => ({ brand: actualBrandKey, offer, originalIdx: idx }))
     .filter((it) => {
       const o1 = it.offer || {};
       if (useTvFilter) {
@@ -7881,7 +7897,21 @@ function listOffersForBrand(brand, opts) {
   const picked = (brand ? ranked : pickCheapestPerBrand(ranked)).slice(0, limit);
   const offers = picked.map((r) => r.offer || r);
   const lines = picked.map((r) => formatOfferLine(r.brand, r.offer || r));
-  debugLog("rank_offers_for_brand", { brand, cls, category, size: hasSize ? sizeNum : null, count: picked.length });
+  
+  // Debug logging to track brand lookup and filtering
+  const totalOffersForBrand = (OFFERS && OFFERS.offers && OFFERS.offers[actualBrandKey]) ? OFFERS.offers[actualBrandKey].length : 0;
+  const tvFilteredOffers = filtered.filter((it) => isTvOffer(it.offer || {}));
+  logger.info({
+    msg: "listOffersForBrand_debug",
+    inputBrand: brand,
+    foundKey: actualBrandKey,
+    totalOffersForBrand: totalOffersForBrand,
+    tvOnlyParam: o.tvOnly,
+    tvOffersCount: tvFilteredOffers.length,
+    offersReturned: picked.length
+  });
+  
+  debugLog("rank_offers_for_brand", { brand: actualBrandKey, cls, category, size: hasSize ? sizeNum : null, count: picked.length });
   if (withOffers) return { lines, offers };
   return lines;
 }
