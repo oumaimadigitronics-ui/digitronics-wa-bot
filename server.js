@@ -284,7 +284,23 @@ try {
 }
 
 // RULE #1 no questions
+// Cache brand rank map for performance - initialized lazily to avoid circular dependency
+let BRAND_RANK_MAP = null;
+
+function getBrandRankMap() {
+  if (!BRAND_RANK_MAP) {
+    BRAND_RANK_MAP = new Map(BRAND_PRIORITY.map((b, idx) => [normMatch(b), idx]));
+  }
+  return BRAND_RANK_MAP;
+}
+
 function brandRank(name, priority = BRAND_PRIORITY) {
+  // Use cached map if using default priority
+  if (priority === BRAND_PRIORITY) {
+    const r = getBrandRankMap().get(normMatch(name || ""));
+    return Number.isInteger(r) ? r : Number.POSITIVE_INFINITY;
+  }
+  // Fallback for custom priority (rare case)
   const m = new Map(priority.map((b, idx) => [normMatch(b), idx]));
   const r = m.get(normMatch(name || ""));
   return Number.isInteger(r) ? r : Number.POSITIVE_INFINITY;
@@ -577,9 +593,31 @@ function arabicIndicToAsciiDigits(s) {
   });
 }
 
+// Simple LRU cache for normMatch to avoid repeated normalization
+const normMatchCache = new Map();
+const NORM_MATCH_CACHE_SIZE = 500;
+
 function normMatch(text) {
-  const t = arabicIndicToAsciiDigits(String(text || ""));
-  return stripDiacritics(t).toLowerCase().trim();
+  const key = String(text || "");
+  
+  // Check cache first
+  if (normMatchCache.has(key)) {
+    return normMatchCache.get(key);
+  }
+  
+  // Compute normalized value
+  const t = arabicIndicToAsciiDigits(key);
+  const result = stripDiacritics(t).toLowerCase().trim();
+  
+  // Add to cache (with simple size limit)
+  if (normMatchCache.size >= NORM_MATCH_CACHE_SIZE) {
+    // Remove oldest entry (first key)
+    const firstKey = normMatchCache.keys().next().value;
+    normMatchCache.delete(firstKey);
+  }
+  normMatchCache.set(key, result);
+  
+  return result;
 }
 
 function parseMenuSelection(text) {
@@ -3193,6 +3231,18 @@ function hasRecentProductContext(ctx) {
   );
 }
 
+// Cache catalog overview intent phrases for performance
+const CATALOG_OVERVIEW_PHRASES = new Set([
+  "شنو",
+  "شنو كاين",
+  "شنو كتبيعو",
+  "شنو كتبيعوا",
+  "chno",
+  "chno katbi3o",
+  "chno katbi3ou",
+  "chno kayn",
+]);
+
 function isCatalogOverviewIntent(text, ctx) {
   const raw = String(text || "");
   const s = normalizeIntentText(raw);
@@ -3203,18 +3253,7 @@ function isCatalogOverviewIntent(text, ctx) {
   if (cleaned.length > 12) return false;
   if (hasRecentProductContext(ctx)) return false;
 
-  const phrases = new Set([
-    "شنو",
-    "شنو كاين",
-    "شنو كتبيعو",
-    "شنو كتبيعوا",
-    "chno",
-    "chno katbi3o",
-    "chno katbi3ou",
-    "chno kayn",
-  ]);
-
-  return phrases.has(cleaned);
+  return CATALOG_OVERVIEW_PHRASES.has(cleaned);
 }
 
 function catalogOverviewMessage(lang) {
@@ -3496,28 +3535,35 @@ function pickCanonicalClass(classes, tokens) {
   const arr = Array.isArray(classes) ? classes : [];
   if (!arr.length) return null;
   const toks0 = Array.isArray(tokens) ? tokens : [];
-  const toks = toks0.map((t0) => normMatch(t0));
+  
+  // Early return if no tokens
+  if (!toks0.length) return arr[0] || null;
+  
+  // Normalize tokens once
+  const toks = toks0.map((t0) => normMatch(t0)).filter(Boolean);
+  if (!toks.length) return arr[0] || null;
+  
+  // Pre-normalize all classes to avoid repeated normMatch calls
+  const normalizedClasses = arr.map((c) => ({ original: c, normalized: normMatch(c) }));
 
-  for (let i = 0; i < arr.length; i += 1) {
-    const c = arr[i];
-    const nc = normMatch(c);
-    let ok = true;
+  // First pass: find class that contains all tokens
+  for (let i = 0; i < normalizedClasses.length; i += 1) {
+    const { original, normalized } = normalizedClasses[i];
+    let matchesAll = true;
     for (let j = 0; j < toks.length; j += 1) {
-      const t0 = toks[j];
-      if (t0 && nc.indexOf(t0) < 0) {
-        ok = false;
+      if (normalized.indexOf(toks[j]) < 0) {
+        matchesAll = false;
         break;
       }
     }
-    if (ok) return c;
+    if (matchesAll) return original;
   }
 
-  for (let i = 0; i < arr.length; i += 1) {
-    const c = arr[i];
-    const nc = normMatch(c);
+  // Second pass: find class that contains any token
+  for (let i = 0; i < normalizedClasses.length; i += 1) {
+    const { original, normalized } = normalizedClasses[i];
     for (let j = 0; j < toks.length; j += 1) {
-      const t0 = toks[j];
-      if (t0 && nc.indexOf(t0) >= 0) return c;
+      if (normalized.indexOf(toks[j]) >= 0) return original;
     }
   }
 
@@ -3629,6 +3675,9 @@ const BRAND_ONLY_OK_TOKENS = Object.freeze([
   "diall",
 ]);
 
+// Cache the Set for performance - avoid creating on every call
+const BRAND_ONLY_OK_TOKENS_SET = new Set(BRAND_ONLY_OK_TOKENS);
+
 function matchesAnyToken(text, tokens) {
   if (!text) return false;
   const list = Array.isArray(tokens) ? tokens : [];
@@ -3670,8 +3719,8 @@ function isBrandOnlyQuery(text, brand) {
 
   const tokens = normalized.split(/\s+/).filter(Boolean);
   const brandTokens = normMatch(brand || "").split(/\s+/).filter(Boolean);
-  const allowed = new Set(BRAND_ONLY_OK_TOKENS);
-  const remaining = tokens.filter((tok) => !brandTokens.includes(tok) && !allowed.has(tok));
+  // Use pre-cached Set instead of creating new one
+  const remaining = tokens.filter((tok) => !brandTokens.includes(tok) && !BRAND_ONLY_OK_TOKENS_SET.has(tok));
   return remaining.length === 0;
 }
 
@@ -4108,12 +4157,19 @@ function getSizeFromNameSku(p) {
 function getTvSizeFromProduct(p) {
   const clsRaw = getClassFromCategories(p);
   const clsNorm = normMatch(clsRaw || "");
-  const categoryNames = Array.isArray((p && p.categories) || null) ? p.categories.map((c) => c && c.name).filter(Boolean) : [];
+  const cats = Array.isArray((p && p.categories) || null) ? p.categories : [];
+  
+  // Combine map and filter operations into a single pass
+  const categoryNames = [];
+  for (let i = 0; i < cats.length; i += 1) {
+    const name = cats[i] && cats[i].name;
+    if (name) categoryNames.push(name);
+  }
+  
   const hasTvContext =
     clsNorm === normMatch(OFFERS_INDEX.classCanon.tv || "tv") ||
     categoryNames.some((n) => normMatch(n || "").indexOf("tv") >= 0 || /t(é|e)l(é|e)/i.test(String(n || "")));
 
-  const cats = Array.isArray((p && p.categories) || null) ? p.categories : [];
   for (let i = 0; i < cats.length; i += 1) {
     const c = cats[i] || {};
     const size = extractAllowedTvSizeFromString(c.name, { allowNoHint: false, externalTvContext: hasTvContext });
