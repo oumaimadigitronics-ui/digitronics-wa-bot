@@ -10502,22 +10502,21 @@ function tryDirectOfferAnswer(userText, historyMsgs, lang, key, opts = {}) {
         return buildPremiumOffersReply({ title, entries, lang, maxChars: CFG.maxReplyChars });
       }
 
-      const packAll = listOffersForBrand(brand, { cls: cls || null, limit: MAX_OFFERS, withOffers: true, capacityLiters: capacityHint });
+      const packAll = listOffersForBrand(brand, { limit: MAX_OFFERS, withOffers: true });
       if (packAll.offers && packAll.offers.length) {
         const entries = packAll.offers.map((offer) => ({ brand, offer }));
         const offerCtx = buildOfferContextEntries(entries);
         setCtx(key, {
           lastBrand: brand,
-          lastClass: cls || undefined,
-          lastCategory: category || undefined,
+          lastClass: undefined,
+          lastCategory: undefined,
           lastSize: undefined,
-          lastCapacity: capacityHint || undefined,
           lastOffersShown: offerCtx.lastOffersShown,
           lastOfferPicks: offerCtx.lastOfferPicks,
           lastOfferItems: offerCtx.lastOfferItems,
         });
         const intro = brandOnlyNoTvIntro(lang, brand);
-        const title = titleFromHeader(offersHeader(lang, { brand, cls: cls || undefined }));
+        const title = titleFromHeader(offersHeader(lang, { brand }));
         const offerBlock = buildPremiumOffersReply({ title, entries, lang, maxChars: CFG.maxReplyChars });
         return ensureNoQuestion([intro, offerBlock].filter(Boolean).join("\n\n"));
       }
