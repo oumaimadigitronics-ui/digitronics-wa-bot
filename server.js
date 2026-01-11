@@ -618,6 +618,12 @@ function includesToken(text, token) {
   return s.indexOf(t0) >= 0;
 }
 
+function hasSmartToken(text) {
+  const s = normMatch(text || "");
+  if (!s) return false;
+  return s.indexOf("smart") >= 0 || s.indexOf("سمارت") >= 0 || s.indexOf("عامرة") >= 0;
+}
+
 function stripQuestions(text) {
   const s = String(text || "");
   const noTrailing = s.replace(/[؟?]+$/g, "").trimEnd();
@@ -4167,7 +4173,7 @@ function getTypeFromProduct(p) {
     if (cn.indexOf("mini led") >= 0 || cn.indexOf("mini-led") >= 0) return "Mini LED";
     if (cn.indexOf("qled") >= 0) return "QLED";
     if (cn.indexOf("oled") >= 0) return "OLED";
-    if (cn.indexOf("smart tv") >= 0) return "Smart TV";
+    if (cn.indexOf("smart tv") >= 0 || hasSmartToken(cn)) return "Smart TV";
     if (cn.indexOf("led") >= 0) return "LED TV";
   }
 
@@ -4176,7 +4182,7 @@ function getTypeFromProduct(p) {
   if (name.indexOf("mini led") >= 0 || name.indexOf("mini-led") >= 0) return "Mini LED";
   if (name.indexOf("qled") >= 0) return "QLED";
   if (name.indexOf("oled") >= 0) return "OLED";
-  if (name.indexOf("smart") >= 0) return "Smart TV";
+  if (hasSmartToken(name)) return "Smart TV";
   if (name.indexOf("led") >= 0) return "LED TV";
 
   const brandForType = getBrandFromWoo(p);
@@ -7703,7 +7709,7 @@ function normalizeTvTypeName(typeStr) {
   if (t0.indexOf("oled") >= 0) return "OLED";
   if (t0.indexOf("google") >= 0) return "Google TV";
   if (t0.indexOf("android") >= 0) return "Android TV";
-  if (t0.indexOf("smart") >= 0) return "Smart TV";
+  if (hasSmartToken(t0)) return "Smart TV";
   if (t0.indexOf("led") >= 0) return "LED TV";
   return String(typeStr || "").trim();
 }
@@ -8915,7 +8921,7 @@ function tvTypeScore(typeStr) {
   if (t0.indexOf("qled") >= 0) return 40;
   if (t0.indexOf("google") >= 0) return 30;
   if (t0.indexOf("android") >= 0) return 20;
-  if (t0.indexOf("smart") >= 0) return 10;
+  if (hasSmartToken(t0)) return 10;
   if (t0.indexOf("led") >= 0) return 0;
   return 0;
 }
