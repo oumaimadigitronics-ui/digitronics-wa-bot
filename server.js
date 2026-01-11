@@ -9969,25 +9969,7 @@ function tryDirectOfferAnswer(userText, historyMsgs, lang, key, opts = {}) {
       const title = titleFromHeader(offersHeader(lang, { brand, cls: tvCanon }));
       return buildPremiumOffersReply({ title, entries, lang, maxChars: CFG.maxReplyChars });
     }
-
-    const pack = listOffersForBrand(brand, { limit: MAX_OFFERS, withOffers: true, capacityLiters: capacityHint });
-    if (pack.offers && pack.offers.length) {
-      const entries = pack.offers.map((offer) => ({ brand, offer }));
-      const offerCtx = buildOfferContextEntries(entries);
-      setCtx(key, {
-        lastBrand: brand,
-        lastClass: undefined,
-        lastCategory: undefined,
-        lastSize: undefined,
-        lastCapacity: capacityHint || undefined,
-        lastOffersShown: offerCtx.lastOffersShown,
-        lastOfferPicks: offerCtx.lastOfferPicks,
-        lastOfferItems: offerCtx.lastOfferItems,
-      });
-      const title = titleFromHeader(offersHeader(lang, { brand }));
-      const offerBlock = buildPremiumOffersReply({ title, entries, lang, maxChars: CFG.maxReplyChars });
-      return ensureNoQuestion([brandOnlyNoTvIntro(lang, brand), offerBlock].filter(Boolean).join("\n\n"));
-    }
+    return ensureNoQuestion(t(lang, "categoryUnavailable", { category: tvCanon }));
   }
 
   if (brand && Number.isFinite(sizeVal)) {
