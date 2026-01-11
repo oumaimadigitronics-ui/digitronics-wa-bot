@@ -25,6 +25,13 @@ Media:
 Audio pipeline:
 - `AUDIO_MIN_SCORE`: minimum transcript quality score threshold, default `0.45`
 
+Darija (Moroccan Arabic) support:
+- The bot automatically uses Darija-aware prompting to improve transcription of Moroccan dialect
+- Includes common Darija words (salam, labas, kifash, bghit, etc.) and French-Darija mix terms
+- Normalizes Darija product terms (e.g., "telfaza" → "TV", "ghasala" → "machine à laver")
+- Filters Darija-specific filler words for cleaner transcripts
+- `OPENAI_STT_DARIJA_PROMPT`: optional custom prompt override (has sensible default)
+
 Debugging:
 - `LOG_DEBUG=1` enables debug logs and includes short transcript snippets (max 200 chars)
 

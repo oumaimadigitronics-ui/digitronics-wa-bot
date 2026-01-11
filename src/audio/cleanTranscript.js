@@ -25,6 +25,7 @@ const FILLER_WORDS = {
   fr: ["euh", "heu", "hum", "hmm", "mmm", "ben", "genre", "tu vois"],
   ar: ["اه", "ايوه", "امم", "ممم", "ها"],
   dzl: ["euh", "heu", "hmm", "mmm", "wa", "ya3ni", "yak"],
+  darija: ["ya3ni", "yak", "walo", "aji", "hia", "howa", "iwa", "wah", "ewa"],
 };
 
 const NUMBER_WORDS_FR = new Map([
@@ -41,6 +42,21 @@ const NUMBER_WORDS_FR = new Map([
   ["dix", "10"],
 ]);
 
+const DARIJA_PRODUCT_TERMS = new Map([
+  ["tele", "TV"],
+  ["télé", "TV"],
+  ["telfaza", "TV"],
+  ["frigo", "réfrigérateur"],
+  ["frigidaire", "réfrigérateur"],
+  ["telajj", "réfrigérateur"],
+  ["talaja", "réfrigérateur"],
+  ["ghasala", "machine à laver"],
+  ["ghassala", "machine à laver"],
+  ["micro", "micro-ondes"],
+  ["klima", "climatiseur"],
+  ["klimatiseur", "climatiseur"],
+]);
+
 function arabicIndicToAsciiDigits(text) {
   return String(text || "").replace(/[\u0660-\u0669\u06F0-\u06F9]/g, (d) => ARABIC_INDIC_MAP[d] || d);
 }
@@ -54,9 +70,25 @@ function normalizeNumberWordsFr(text) {
   return tokens.join("");
 }
 
+function normalizeDarijaTerms(text) {
+  let result = String(text || "");
+  for (const [key, value] of DARIJA_PRODUCT_TERMS) {
+    // Use unicode word boundaries that work with accented characters
+    const pattern = new RegExp(`(?<![\\p{L}\\p{N}_])${key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![\\p{L}\\p{N}_])`, 'giu');
+    result = result.replace(pattern, value);
+  }
+  return result;
+}
+
 function removeFillers(text, lang) {
   const L = String(lang || "").toLowerCase();
   const fillers = [...(FILLER_WORDS[L] || []), "uh", "um", "erm", "hmm", "mmm"];
+  
+  // Also apply Darija fillers when language suggests Darija/Arabic or is undefined
+  if (L === "ar" || L === "darija" || L === "dzl" || !lang) {
+    fillers.push(...(FILLER_WORDS.darija || []));
+  }
+  
   if (!fillers.length) return text;
   const pattern = new RegExp(
     `\\b(${fillers.map((w) => w.replace(/[-/\\^$*+?.()|[\]{}]/g, "\\$&")).join("|")})\\b`,
@@ -72,6 +104,7 @@ function cleanTranscript(rawTranscript, lang) {
   let cleaned = raw;
   cleaned = arabicIndicToAsciiDigits(cleaned);
   cleaned = normalizeNumberWordsFr(cleaned);
+  cleaned = normalizeDarijaTerms(cleaned);
   cleaned = removeFillers(cleaned, lang);
   cleaned = cleaned.replace(/[\s\u00a0]+/g, " ").replace(/\s+([,.;:!])\s+/g, "$1 ");
   cleaned = cleaned.replace(/([.!]){2,}/g, "$1");
@@ -80,4 +113,4 @@ function cleanTranscript(rawTranscript, lang) {
   return { rawTranscript: raw, cleanTranscript: cleaned };
 }
 
-export { cleanTranscript, arabicIndicToAsciiDigits, normalizeNumberWordsFr, removeFillers };
+export { cleanTranscript, arabicIndicToAsciiDigits, normalizeNumberWordsFr, normalizeDarijaTerms, removeFillers };
