@@ -53,6 +53,7 @@ const FEATURE_OFFERS_BOX_HEADER = String(process.env.FEATURE_OFFERS_BOX_HEADER |
 const FEATURE_WA_HARD_CAP_4096 = String(process.env.FEATURE_WA_HARD_CAP_4096 || "0") === "1";
 const FEATURE_ALLOW_MAPS_URLS = String(process.env.FEATURE_ALLOW_MAPS_URLS || "0") === "1";
 const FEATURE_CATALOG_OVERVIEW_INTENT = String(process.env.FEATURE_CATALOG_OVERVIEW_INTENT || "0") === "1";
+const FEATURE_ASSUME_TV_ON_BRAND_ONLY = String(process.env.FEATURE_ASSUME_TV_ON_BRAND_ONLY || "1") === "1";
 const WANOTIFIER_FOLLOWUP_FIELD = "followups";
 const IS_TEST = IS_TEST_ENV;
 const ENTRY_FILE = fileURLToPath(import.meta.url);
@@ -10117,26 +10118,64 @@ function tryDirectOfferAnswer(userText, historyMsgs, lang, key, opts = {}) {
       : ctx.lastCapacity || null;
 
   if (brandOnlyQuery || brandOnlyAssumeTv) {
-    const packTv = listOffersForBrand(brand, { cls: tvCanon, limit: MAX_OFFERS, withOffers: true, tvOnly: true });
-    const tvCount = packTv.offers ? packTv.offers.length : 0;
-    logger.info({ msg: "brand_only_tv_first", brand, tvClassCanon: tvCanon, tvOfferCount: tvCount });
+    if (FEATURE_ASSUME_TV_ON_BRAND_ONLY) {
+      const packTv = listOffersForBrand(brand, { cls: tvCanon, limit: MAX_OFFERS, withOffers: true, tvOnly: true });
+      const tvCount = packTv.offers ? packTv.offers.length : 0;
+      logger.info({ msg: "brand_only_tv_first", brand, tvClassCanon: tvCanon, tvOfferCount: tvCount });
 
-    if (packTv.offers && packTv.offers.length) {
-      const entries = packTv.offers.map((offer) => ({ brand, offer }));
-      const offerCtx = buildOfferContextEntries(entries);
-      setCtx(key, {
-        lastBrand: brand,
-        lastClass: tvCanon || undefined,
-        lastCategory: undefined,
-        lastSize: undefined,
-        lastOffersShown: offerCtx.lastOffersShown,
-        lastOfferPicks: offerCtx.lastOfferPicks,
-        lastOfferItems: offerCtx.lastOfferItems,
-      });
-      const title = titleFromHeader(offersHeader(lang, { brand, cls: tvCanon }));
-      return buildPremiumOffersReply({ title, entries, lang, maxChars: CFG.maxReplyChars });
+      if (packTv.offers && packTv.offers.length) {
+        const entries = packTv.offers.map((offer) => ({ brand, offer }));
+        const offerCtx = buildOfferContextEntries(entries);
+        setCtx(key, {
+          lastBrand: brand,
+          lastClass: tvCanon || undefined,
+          lastCategory: undefined,
+          lastSize: undefined,
+          lastOffersShown: offerCtx.lastOffersShown,
+          lastOfferPicks: offerCtx.lastOfferPicks,
+          lastOfferItems: offerCtx.lastOfferItems,
+        });
+        const title = titleFromHeader(offersHeader(lang, { brand, cls: tvCanon }));
+        return buildPremiumOffersReply({ title, entries, lang, maxChars: CFG.maxReplyChars });
+      }
+
+      const packAll = listOffersForBrand(brand, { limit: MAX_OFFERS, withOffers: true });
+      if (packAll.offers && packAll.offers.length) {
+        const entries = packAll.offers.map((offer) => ({ brand, offer }));
+        const offerCtx = buildOfferContextEntries(entries);
+        setCtx(key, {
+          lastBrand: brand,
+          lastClass: undefined,
+          lastCategory: undefined,
+          lastSize: undefined,
+          lastOffersShown: offerCtx.lastOffersShown,
+          lastOfferPicks: offerCtx.lastOfferPicks,
+          lastOfferItems: offerCtx.lastOfferItems,
+        });
+        const intro = brandOnlyNoTvIntro(lang, brand);
+        const title = titleFromHeader(offersHeader(lang, { brand }));
+        const offerBlock = buildPremiumOffersReply({ title, entries, lang, maxChars: CFG.maxReplyChars });
+        return ensureNoQuestion([intro, offerBlock].filter(Boolean).join("\n\n"));
+      }
+      return ensureNoQuestion(t(lang, "categoryUnavailable", { category: tvCanon }));
+    } else {
+      const packAll = listOffersForBrand(brand, { limit: MAX_OFFERS, withOffers: true });
+      if (packAll.offers && packAll.offers.length) {
+        const entries = packAll.offers.map((offer) => ({ brand, offer }));
+        const offerCtx = buildOfferContextEntries(entries);
+        setCtx(key, {
+          lastBrand: brand,
+          lastClass: undefined,
+          lastCategory: undefined,
+          lastSize: undefined,
+          lastOffersShown: offerCtx.lastOffersShown,
+          lastOfferPicks: offerCtx.lastOfferPicks,
+          lastOfferItems: offerCtx.lastOfferItems,
+        });
+        const title = titleFromHeader(offersHeader(lang, { brand }));
+        return buildPremiumOffersReply({ title, entries, lang, maxChars: CFG.maxReplyChars });
+      }
     }
-    return ensureNoQuestion(t(lang, "categoryUnavailable", { category: tvCanon }));
   }
 
   if (brand && Number.isFinite(sizeVal)) {
