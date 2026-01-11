@@ -6508,6 +6508,21 @@ function selectOffersFromVision(hints) {
   const capNum = Number.isFinite(capacity) ? capacity : null;
 
   if (brand) {
+    const isBrandOnlyQuery = !cls && !category && !sizeNum && !capNum;
+    const tvCanon = OFFERS_INDEX.classCanon.tv || "Tv";
+    
+    if (FEATURE_ASSUME_TV_ON_BRAND_ONLY && isBrandOnlyQuery) {
+      const resTv = listOffersForBrand(brand, {
+        cls: tvCanon,
+        limit: MAX_OFFERS,
+        withOffers: true,
+        tvOnly: true,
+      });
+      if (resTv?.offers?.length > 0) {
+        return { offers: resTv.offers.map((offer) => ({ brand, offer })) };
+      }
+    }
+
     const res = listOffersForBrand(brand, {
       cls,
       category,
