@@ -355,13 +355,13 @@ function nowIso() {
 
 function parseWanotifierJson(req, res, next) {
   const MAX_BODY_SIZE = 1024 * 1024; // 1MB limit
-  const raw = Buffer.isBuffer(req.body) ? req.body.toString("utf8") : "";
   
-  // Prevent loop bound injection by limiting input size
-  if (raw.length > MAX_BODY_SIZE) {
+  // Prevent loop bound injection by limiting input size before conversion
+  if (Buffer.isBuffer(req.body) && req.body.length > MAX_BODY_SIZE) {
     return res.status(413).json({ ok: false, error: "Request body too large" });
   }
   
+  const raw = Buffer.isBuffer(req.body) ? req.body.toString("utf8") : "";
   req.rawBody = raw;
   try {
     req.body = JSON.parse(raw);
