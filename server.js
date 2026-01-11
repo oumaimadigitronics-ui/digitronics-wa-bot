@@ -6861,15 +6861,6 @@ function rankOffers(items, opts) {
     if (Number.isInteger(limitVal) && limitVal >= 0) limit = limitVal;
   }
   const tvClassCanon = o.tvClassCanon || OFFERS_INDEX.classCanon.tv || null;
-  const priority = Array.isArray(o.priorityList) && o.priorityList.length ? o.priorityList : TV_BRAND_PRIORITY;
-
-  const priorityRank = new Map(priority.map((b, idx) => [String(b || "").toUpperCase(), idx]));
-  const rankForBrand = (b) => {
-    const r = priorityRank.get(String(b || "").toUpperCase());
-    if (Number.isInteger(r)) return r;
-    const global = brandRank(b, priority);
-    return Number.isInteger(global) ? global : brandRank(b);
-  };
 
   const tvClassNorm = normMatch(tvClassCanon || "");
   const isTvContext = Boolean(className && normMatch(className) === tvClassNorm);
@@ -6889,12 +6880,8 @@ function rankOffers(items, opts) {
     });
   }
 
-  const priorityExists = arr.some((it) => Number.isFinite(rankForBrand(it.brand)));
   if (LOG_DEBUG) {
-    debugLog("rank_offers_priority", { priorityExists, brands: arr.map((it) => it.brand) });
-  }
-  if (priorityExists) {
-    arr = arr.filter((it) => Number.isFinite(rankForBrand(it.brand)));
+    debugLog("rank_offers_priority", { priorityExists: false, brands: arr.map((it) => it.brand) });
   }
 
   // Enforce consistent category/class and size when hints are provided.
@@ -6937,13 +6924,10 @@ function rankOffers(items, opts) {
       return Object.assign({}, it, { sizeScore, capacityScore, idx });
     })
     .sort((a, b) => {
-      const ra = rankForBrand(a.brand);
-      const rb = rankForBrand(b.brand);
       const capCmp = capacityScoreCmp(a, b);
 
       if (hasSize && a.sizeScore !== b.sizeScore) return a.sizeScore - b.sizeScore;
       if (hasCapacity && capCmp !== 0) return capCmp;
-      if (ra !== rb) return ra - rb;
       if (a.price !== b.price) return a.price - b.price;
       const brandCmp = String(a.brand || "").localeCompare(String(b.brand || ""));
       if (brandCmp !== 0) return brandCmp;
@@ -6973,7 +6957,7 @@ function capacityScoreCmp(a, b) {
   return aScore - bScore;
 }
 
-// RULE: max 1 offer per brand, cheapest per brand, priority order
+// RULE: max 1 offer per brand, cheapest per brand, price order
 function pickCheapestPerBrand(items) {
   const arr = Array.isArray(items) ? items : [];
   const brandMap = new Map();
@@ -7024,9 +7008,6 @@ function pickCheapestPerBrand(items) {
   }
 
   return picks.sort((a, b) => {
-    const ra = brandRank(a.brand || "", BRAND_PRIORITY);
-    const rb = brandRank(b.brand || "", BRAND_PRIORITY);
-    if (ra !== rb) return ra - rb;
     const pa = priceInfo(a);
     const pb = priceInfo(b);
     if (pa.hasPrice && pb.hasPrice && pa.price !== pb.price) return pa.price - pb.price;
@@ -7157,8 +7138,6 @@ async function tryWebsiteCatalogAnswer(userText, lang, key) {
   const matches = [];
   const fetchJson = wcFetchJsonOverride || wcFetchJson;
 
-  const brandPriorityRank = new Map(TV_BRAND_PRIORITY.map((b, idx) => [normMatch(b), idx]));
-
   const brandMatches = [];
 
   for (let page = 1; page <= maxPages; page += 1) {
@@ -7229,9 +7208,6 @@ async function tryWebsiteCatalogAnswer(userText, lang, key) {
   if (!pool.length) return null;
 
   const sortTv = (a, b) => {
-    const ra = brandPriorityRank.has(normMatch(a.brand)) ? brandPriorityRank.get(normMatch(a.brand)) : Number.POSITIVE_INFINITY;
-    const rb = brandPriorityRank.has(normMatch(b.brand)) ? brandPriorityRank.get(normMatch(b.brand)) : Number.POSITIVE_INFINITY;
-    if (ra !== rb) return ra - rb;
     if (a.price !== b.price) return a.price - b.price;
     return a.model.localeCompare(b.model);
   };
@@ -7242,11 +7218,6 @@ async function tryWebsiteCatalogAnswer(userText, lang, key) {
   };
 
   let sorted = isTvContext ? pool.sort(sortTv) : pool.sort(sortNonTv);
-
-  if (isTvContext) {
-    const priorityOnly = sorted.filter((it) => brandPriorityRank.has(normMatch(it.brand)));
-    if (priorityOnly.length) sorted = priorityOnly.sort(sortTv);
-  }
 
   const picks = pickCheapestPerBrand(sorted).slice(0, MAX_OFFERS);
   if (!picks.length) return null;
@@ -9792,9 +9763,7 @@ function handleTvSizePriceFlow(parsed, lang, key) {
   const maxPrice = prices.length ? Math.max(...prices) : null;
 
   const top = pickCheapestPerBrand(matches).slice(0, MAX_OFFERS);
-  const orderedTop = [...top].sort(
-    (a, b) => brandRank(a.brand, TV_BRAND_PRIORITY) - brandRank(b.brand, TV_BRAND_PRIORITY) || Number(a.offer.price) - Number(b.offer.price)
-  );
+  const orderedTop = [...top].sort((a, b) => Number(a.offer.price) - Number(b.offer.price));
   const wantPrice = priceIntent || cheapIntent || Number.isFinite(budget);
 
   const orderedOfferCtx = buildOfferContextEntries(orderedTop);
@@ -9969,8 +9938,6 @@ function tryDirectOfferAnswer(userText, historyMsgs, lang, key, opts = {}) {
 
   if (category) resetCtxForCategoryChange(key, category, cls);
 
-  const tvPriorityRank = new Map(TV_BRAND_PRIORITY.map((b, idx) => [normMatch(b), idx]));
-
   const cls2 = Number.isFinite(sizeVal)
     ? tvCanon
     : tvHint && !isTvClass && !isTvCategory
@@ -10143,13 +10110,6 @@ function tryDirectOfferAnswer(userText, historyMsgs, lang, key, opts = {}) {
         return pickCheapestPerBrand(items)
           .map((it, idx) => Object.assign({}, it, { originalIdx: idx }))
           .sort((a, b) => {
-            const ra = tvPriorityRank.has(normMatch(a.brand))
-              ? tvPriorityRank.get(normMatch(a.brand))
-              : Number.POSITIVE_INFINITY;
-            const rb = tvPriorityRank.has(normMatch(b.brand))
-              ? tvPriorityRank.get(normMatch(b.brand))
-              : Number.POSITIVE_INFINITY;
-            if (ra !== rb) return ra - rb;
             const pa = Number((a.offer || {}).price) || Number.POSITIVE_INFINITY;
             const pb = Number((b.offer || {}).price) || Number.POSITIVE_INFINITY;
             if (pa !== pb) return pa - pb;
@@ -10214,13 +10174,6 @@ function tryDirectOfferAnswer(userText, historyMsgs, lang, key, opts = {}) {
       ? pickCheapestPerBrand(items)
           .map((it, idx) => Object.assign({}, it, { originalIdx: idx }))
           .sort((a, b) => {
-            const ra = tvPriorityRank.has(normMatch(a.brand))
-              ? tvPriorityRank.get(normMatch(a.brand))
-              : Number.POSITIVE_INFINITY;
-            const rb = tvPriorityRank.has(normMatch(b.brand))
-              ? tvPriorityRank.get(normMatch(b.brand))
-              : Number.POSITIVE_INFINITY;
-            if (ra !== rb) return ra - rb;
             const pa = Number((a.offer || {}).price) || Number.POSITIVE_INFINITY;
             const pb = Number((b.offer || {}).price) || Number.POSITIVE_INFINITY;
             if (pa !== pb) return pa - pb;
@@ -10432,34 +10385,27 @@ function bestGuessOffers(lang, key, limit = MAX_OFFERS) {
     }
   }
 
-  const items = [];
-  const offersObj = (OFFERS && OFFERS.offers) || {};
-  const brands = Object.keys(offersObj);
-  for (let i = 0; i < brands.length; i += 1) {
-    const b = brands[i];
-    const arr = Array.isArray(offersObj[b]) ? offersObj[b] : [];
-    for (let j = 0; j < arr.length; j += 1) {
-      const offer = arr[j];
-      if (Number((offer && offer.stock) || 0) <= 0) continue;
-      items.push({ brand: b, offer, originalIdx: j });
-    }
-  }
+  const tvCanonNorm = normMatch(tvCanon || "tv");
+  const items0 = OFFERS_INDEX.classToOffers.get(tvCanonNorm) || [];
+  const items = items0
+    .map((it, idx) => Object.assign({}, it, { originalIdx: typeof it.originalIdx === "number" ? it.originalIdx : idx }))
+    .filter((it) => Number(((it.offer || {}).stock) || 0) > 0);
 
-  const ranked = rankOffers(items, { limit: null, className: null, tvClassCanon: null });
+  const ranked = rankOffers(items, { limit: null, className: tvCanon, tvClassCanon: tvCanon });
   const picked = pickCheapestPerBrand(ranked).slice(0, max);
   if (picked.length) {
     const entries = picked.map((it) => ({ brand: it.brand, offer: it.offer }));
     const offerCtx = buildOfferContextEntries(entries);
     setCtx(key, {
       lastBrand: undefined,
-      lastClass: undefined,
+      lastClass: tvCanon || undefined,
       lastCategory: undefined,
       lastSize: undefined,
       lastOffersShown: offerCtx.lastOffersShown,
       lastOfferPicks: offerCtx.lastOfferPicks,
       lastOfferItems: offerCtx.lastOfferItems,
     });
-    const title = titleFromHeader(offersHeader(L, {}));
+    const title = titleFromHeader(offersHeader(L, { cls: tvCanon }));
     return buildPremiumOffersReply({ title, entries, lang: L, maxChars: CFG.maxReplyChars });
   }
 
