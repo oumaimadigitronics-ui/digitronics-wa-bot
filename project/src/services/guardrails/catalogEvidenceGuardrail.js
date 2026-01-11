@@ -2,6 +2,7 @@ import { normalizeDarijaLatin } from '../lang/normalizeDarijaLatin.js';
 import { extractDemand } from '../nlp/extractDemand.js';
 import { isPriceQuery } from '../nlp/extractPriceQuery.js';
 import { findMatchingProducts } from '../search/productMatch.js';
+import { STRONG_CATEGORY_KEYWORDS } from '../../knowledge/catalog.js';
 
 function isSizeQuery(text = '') {
   return /\b\d{2,3}\s*(?:"|in|inch|pouce)\b/i.test(text);
@@ -10,6 +11,11 @@ function isSizeQuery(text = '') {
 function resolveMatchLimit() {
   const value = Number(process.env.CATALOG_MATCH_LIMIT || 3);
   return Number.isFinite(value) && value > 0 ? value : 3;
+}
+
+function hasCategoryKeyword(text = '') {
+  const normalized = text.toLowerCase();
+  return STRONG_CATEGORY_KEYWORDS.some((keyword) => normalized.includes(keyword));
 }
 
 function formatPrice(value) {
@@ -69,23 +75,31 @@ export function maybeAnswerFromCatalogOrEscalate({ userText, preferredLang, offe
   if (!userText) return null;
   if (!offersIndex?.productsIndex) return null;
 
-  if (isPriceQuery(userText) || isSizeQuery(userText)) {
+  const priceQuery = isPriceQuery(userText);
+  const sizeQuery = isSizeQuery(userText);
+  if (priceQuery || sizeQuery) {
     return null;
   }
 
-  const { signals } = normalizeDarijaLatin(userText);
-  if (signals?.wantsBrand || signals?.brandMentioned) {
-    return null;
-  }
-
+  const { signals, normalizedText } = normalizeDarijaLatin(userText);
   const demand = extractDemand(userText);
+  const isBrandOnlyQuery =
+    !hasCategoryKeyword(normalizedText) && !priceQuery && !sizeQuery && demand.tokens.length > 0;
+  if ((signals?.wantsBrand || signals?.brandMentioned) && !isBrandOnlyQuery) {
+    return null;
+  }
+
   if (demand.isTooGeneric) {
     return { type: 'clarify', reply: buildClarifyReply(preferredLang || 'dz') };
   }
 
+  const demandTokens =
+    process.env.FEATURE_ASSUME_TV_ON_BRAND_ONLY === '1' && isBrandOnlyQuery
+      ? [...demand.tokens, 'tv']
+      : demand.tokens;
   const matches = findMatchingProducts({
     productsIndex: offersIndex.productsIndex,
-    demandTokens: demand.tokens,
+    demandTokens,
     limit: resolveMatchLimit(),
   }).filter((product) => product.inStock !== false);
 

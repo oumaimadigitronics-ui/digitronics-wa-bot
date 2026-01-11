@@ -44,7 +44,6 @@ export function buildOffersIndex(offersByBrand = {}) {
 
   const classes = Object.keys(classToOffers);
   const categories = Object.keys(categoryToOffers);
-  tvOffersSortedByPrice.sort((a, b) => a.price - b.price);
 
   return {
     brands,
