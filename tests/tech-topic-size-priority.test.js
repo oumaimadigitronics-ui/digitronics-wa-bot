@@ -46,20 +46,12 @@ for (const test of shouldNotTrigger) {
 console.log("\nTesting: Pure comparison queries SHOULD trigger tech guide...");
 for (const test of shouldTrigger) {
   const key = detectTechTopic(test.text);
-  if (test.expected === null) {
-    // This is a case we expect NOT to trigger
-    if (key !== null) {
-      fail(`"${test.text}" (${test.reason}) should return null but got "${key}"`);
-    } else {
-      console.log(`✓ "${test.text}" correctly returns null`);
-    }
+  const passed = key === test.expected;
+  
+  if (!passed) {
+    fail(`"${test.text}" (${test.reason}) expected "${test.expected}" but got "${key}"`);
   } else {
-    // This should trigger a specific topic
-    if (key !== test.expected) {
-      fail(`"${test.text}" (${test.reason}) expected "${test.expected}" but got "${key}"`);
-    } else {
-      console.log(`✓ "${test.text}" correctly triggers "${key}"`);
-    }
+    console.log(`✓ "${test.text}" correctly triggers "${key}"`);
   }
 }
 

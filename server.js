@@ -2453,15 +2453,18 @@ function hasTvSizeInQuery(raw) {
   if (!s) return false;
   
   // Check for explicit size with unit (e.g., "55 pouce", "65 inch", "43\"")
+  // Character class includes: " (straight), ' (curly single), ′ (prime), ″ (double prime)
   const sizeWithUnitRe = /(\d{2,3})\s*([\"\''″]|pouce|pouces|inch|inches|بوصة|بوص|بوس)/i;
   if (sizeWithUnitRe.test(s)) return true;
   
   // Check for bare TV size numbers from ALLOWED_TV_SIZES (e.g., "55", "65", "43")
   // Using the same list defined at module level
   const tvSizes = ALLOWED_TV_SIZES;
+  
+  // Match 2-3 digit numbers not adjacent to other digits (lookbehind/lookahead used elsewhere in codebase)
   const sizeRe = /(?<!\d)(\d{2,3})(?!\d)/g;
   
-  // Consolidated exclusion pattern for non-TV-size contexts
+  // Consolidated exclusion pattern for non-TV-size contexts (Hz, resolution, capacity, etc.)
   const excludePattern = /\b(hz|khz|w|kw|kva|va|mah|wh|v|4k|8k|720p|1080p|hdr|uhd|fhd|120hz|144hz|165hz|l|litre|litres|liter|liters|لتر)\b/i;
   
   let match;
