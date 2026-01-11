@@ -303,13 +303,13 @@ function brandRank(name, priority = BRAND_PRIORITY) {
   // Use cached map if using default priority
   if (priority === BRAND_PRIORITY) {
     const rank = getBrandRankMap().get(normalized);
-    return rank !== undefined ? rank : Number.POSITIVE_INFINITY;
+    return Number.isInteger(rank) ? rank : Number.POSITIVE_INFINITY;
   }
   
   // Fallback for custom priority (rare case)
   const customMap = new Map(priority.map((b, idx) => [normMatch(b), idx]));
   const rank = customMap.get(normalized);
-  return rank !== undefined ? rank : Number.POSITIVE_INFINITY;
+  return Number.isInteger(rank) ? rank : Number.POSITIVE_INFINITY;
 }
 
 function getOpenAIClient() {
