@@ -32,17 +32,6 @@ export function extractTvSize(name = '') {
   return match ? match[1] : null;
 }
 
-// Extract class from WooCommerce attributes
-export function extractClassFromAttributes(attributes = []) {
-  const classAttr = attributes.find(attr => 
-    attr.name?.toLowerCase() === 'class'
-  );
-  if (classAttr && classAttr.options?.length > 0) {
-    return classAttr.options[0];
-  }
-  return null;
-}
-
 export function offerFromWooProduct(product = {}) {
   const model = product.sku || detectModel(product.name || '');
   if (!model) return null;
@@ -52,11 +41,7 @@ export function offerFromWooProduct(product = {}) {
   const price = priceStr ? Number(priceStr) : NaN;
   if (!Number.isFinite(price)) return null;
   const category = detectCategory(product.categories || []);
-  
-  // Extract class from WooCommerce attributes first, then fall back to detectClass
-  const wooClass = extractClassFromAttributes(product.attributes || []);
-  const cls = wooClass || detectClass(product.name || category);
-  
+  const cls = detectClass(product.name || category);
   const size = extractTvSize(product.name || '') || null;
   const stock = product.stock_status === 'instock' ? Number(product.stock_quantity ?? 1) : 0;
   const link = product.permalink || '';

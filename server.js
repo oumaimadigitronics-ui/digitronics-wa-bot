@@ -4331,17 +4331,6 @@ function getCapacityFromProduct(p) {
   return 0;
 }
 
-function extractClassFromAttributes(p) {
-  // Try to extract the "Class" attribute from WooCommerce attributes array
-  const classAttr = getAttr(p, "Class") || getAttr(p, "class") || getAttr(p, "pa_class");
-  if (classAttr) {
-    const normalized = String(classAttr).trim();
-    // Return the class value as-is from the attribute
-    if (normalized) return normalized;
-  }
-  return "";
-}
-
 function getClassFromCategories(p) {
   const cats = Array.isArray((p && p.categories) || null) ? p.categories : [];
   const names = [];
@@ -4427,24 +4416,8 @@ function offerFromWooProduct(p) {
   const price = wcPrice(p);
   if (!Number.isFinite(price)) return null;
 
-  // Extract class from WooCommerce attributes first, then fall back to categories
-  const wooClass = extractClassFromAttributes(p);
-  const cls = wooClass || getClassFromCategories(p);
+  const cls = getClassFromCategories(p);
   const capacity = cls && normMatch(cls) === normMatch(OFFERS_INDEX.classCanon.tv || "tv") ? 0 : getCapacityFromProduct(p);
-
-  // Debug logging to track WooCommerce data being parsed
-  if (LOG_DEBUG) {
-    logger.info({
-      msg: "woo_product_parsed",
-      name: p && p.name,
-      sku: p && p.sku,
-      categories: p && p.categories,
-      attributes: p && p.attributes,
-      extractedClass: cls,
-      wooClassAttribute: wooClass,
-      categoryClass: getClassFromCategories(p),
-    });
-  }
 
   return {
     model,
