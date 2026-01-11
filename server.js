@@ -10385,34 +10385,27 @@ function bestGuessOffers(lang, key, limit = MAX_OFFERS) {
     }
   }
 
-  const items = [];
-  const offersObj = (OFFERS && OFFERS.offers) || {};
-  const brands = Object.keys(offersObj);
-  for (let i = 0; i < brands.length; i += 1) {
-    const b = brands[i];
-    const arr = Array.isArray(offersObj[b]) ? offersObj[b] : [];
-    for (let j = 0; j < arr.length; j += 1) {
-      const offer = arr[j];
-      if (Number((offer && offer.stock) || 0) <= 0) continue;
-      items.push({ brand: b, offer, originalIdx: j });
-    }
-  }
+  const tvCanonNorm = normMatch(tvCanon || "tv");
+  const items0 = OFFERS_INDEX.classToOffers.get(tvCanonNorm) || [];
+  const items = items0
+    .map((it, idx) => Object.assign({}, it, { originalIdx: typeof it.originalIdx === "number" ? it.originalIdx : idx }))
+    .filter((it) => Number(((it.offer || {}).stock) || 0) > 0);
 
-  const ranked = rankOffers(items, { limit: null, className: null, tvClassCanon: null });
+  const ranked = rankOffers(items, { limit: null, className: tvCanon, tvClassCanon: tvCanon });
   const picked = pickCheapestPerBrand(ranked).slice(0, max);
   if (picked.length) {
     const entries = picked.map((it) => ({ brand: it.brand, offer: it.offer }));
     const offerCtx = buildOfferContextEntries(entries);
     setCtx(key, {
       lastBrand: undefined,
-      lastClass: undefined,
+      lastClass: tvCanon || undefined,
       lastCategory: undefined,
       lastSize: undefined,
       lastOffersShown: offerCtx.lastOffersShown,
       lastOfferPicks: offerCtx.lastOfferPicks,
       lastOfferItems: offerCtx.lastOfferItems,
     });
-    const title = titleFromHeader(offersHeader(L, {}));
+    const title = titleFromHeader(offersHeader(L, { cls: tvCanon }));
     return buildPremiumOffersReply({ title, entries, lang: L, maxChars: CFG.maxReplyChars });
   }
 
