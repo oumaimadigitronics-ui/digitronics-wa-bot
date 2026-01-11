@@ -2448,11 +2448,48 @@ function isProductAdviceIntent(text) {
   return hasAdvice;
 }
 
+function hasTvSizeInQuery(raw) {
+  const s = arabicIndicToAsciiDigits(String(raw || "")).toLowerCase();
+  if (!s) return false;
+  
+  // Check for explicit size with unit (e.g., "55 pouce", "65 inch", "43\"")
+  // Character class includes: " (straight), ' (curly single), ′ (prime), ″ (double prime)
+  const sizeWithUnitRe = /(\d{2,3})\s*([\"\''″]|pouce|pouces|inch|inches|بوصة|بوص|بوس)/i;
+  if (sizeWithUnitRe.test(s)) return true;
+  
+  // Check for bare TV size numbers from ALLOWED_TV_SIZES (e.g., "55", "65", "43")
+  // Using the same list defined at module level
+  const tvSizes = ALLOWED_TV_SIZES;
+  
+  // Match 2-3 digit numbers not adjacent to other digits (lookbehind/lookahead used elsewhere in codebase)
+  const sizeRe = /(?<!\d)(\d{2,3})(?!\d)/g;
+  
+  // Consolidated exclusion pattern for non-TV-size contexts (Hz, resolution, capacity, etc.)
+  const excludePattern = /\b(hz|khz|w|kw|kva|va|mah|wh|v|4k|8k|720p|1080p|hdr|uhd|fhd|120hz|144hz|165hz|l|litre|litres|liter|liters|لتر)\b/i;
+  
+  let match;
+  while ((match = sizeRe.exec(s))) {
+    const num = Number(match[1]);
+    if (tvSizes.includes(num)) {
+      // Make sure it's not a year, Hz, or other non-size number
+      const before = s.slice(Math.max(0, match.index - 8), match.index);
+      const after = s.slice(match.index + match[1].length, match.index + match[1].length + 8);
+      if (excludePattern.test(before + after)) continue;
+      return true;
+    }
+  }
+  
+  return false;
+}
+
 function detectTechTopic(raw) {
   const s = normMatch(arabicIndicToAsciiDigits(String(raw || ""))).toLowerCase();
   if (!s) return null;
   const normalized = s.replace(/[’']/g, " ").replace(/\s+/g, " ").trim();
   const noSpace = normalized.replace(/\s+/g, "");
+
+  // If query contains a TV size, prioritize product search over tech guide
+  if (hasTvSizeInQuery(raw)) return null;
 
   const priceTokens = ["price", "prix", "ثمن", "سعر"];
   const compareTokens = [
@@ -2761,11 +2798,14 @@ function resolveAdvice(text, ctxData) {
   const ctx = ctxData && typeof ctxData === "object" ? ctxData : {};
   const knowledgeProduct = detectProductModel(raw);
 
+  // If query contains a TV size, don't return tech explanations - let product search handle it
+  const hasSize = hasTvSizeInQuery(raw);
+
   const hasGoogle = s.includes("google");
   const hasAndroid = s.includes("android");
-  if (hasGoogle && hasAndroid) return TECH_EXPLAIN_TEMPLATE("google_vs_android");
-  if (s.includes("qled") && s.includes("led")) return TECH_EXPLAIN_TEMPLATE("qled_vs_led");
-  if (s.includes("4k") && (s.includes("fhd") || s.includes("full hd") || s.includes("1080"))) return TECH_EXPLAIN_TEMPLATE("4k_vs_fhd");
+  if (!hasSize && hasGoogle && hasAndroid) return TECH_EXPLAIN_TEMPLATE("google_vs_android");
+  if (!hasSize && s.includes("qled") && s.includes("led")) return TECH_EXPLAIN_TEMPLATE("qled_vs_led");
+  if (!hasSize && s.includes("4k") && (s.includes("fhd") || s.includes("full hd") || s.includes("1080"))) return TECH_EXPLAIN_TEMPLATE("4k_vs_fhd");
 
   const isGoodSignal =
     includesToken(s, "good") ||
