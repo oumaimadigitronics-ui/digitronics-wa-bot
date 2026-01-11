@@ -5324,6 +5324,15 @@ function buildOfferContextEntries(entries) {
 }
 
 function buildPremiumOffersReply({ title, entries, lang, maxChars }) {
+  // DEBUG: Log all offers being built into response
+  const offerSummary = entries.slice(0, 3).map(e => ({ 
+    brand: e.brand, 
+    name: (e.offer && e.offer.name) || '', 
+    model: (e.offer && e.offer.model) || '',
+    price: (e.offer && e.offer.price) || 0
+  }));
+  logger.info({ msg: "buildPremiumOffersReply_called", title, offerCount: entries.length, offers: offerSummary });
+  
   const subtitles = defaultOfferSubtitles();
   const lines = buildOfferItemsFromEntries(entries, lang);
   return offersTemplate({
@@ -10045,6 +10054,9 @@ function tryDirectOfferAnswer(userText, historyMsgs, lang, key, opts = {}) {
 
   const ctx = getCtx(key);
   const parsed = parseUserQuery(text, { ctx, key, logContext: opts.logContext || null });
+  
+  // DEBUG: Log entry to track which code path is being hit
+  logger.info({ msg: "tryDirectOfferAnswer_entry", userText: text, brand: parsed.brand, flagValue: FEATURE_ASSUME_TV_ON_BRAND_ONLY });
   const tvCanon = OFFERS_INDEX.classCanon.tv || "Tv";
   const tvCanonNorm = normMatch(tvCanon || "tv");
   const hasForced = Boolean(parsed.intentCategory || parsed.intentClass);
