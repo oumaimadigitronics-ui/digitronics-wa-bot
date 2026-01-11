@@ -3533,6 +3533,18 @@ const BRAND_ONLY_CATEGORY_KEYWORDS = Object.freeze([
 ]);
 
 const BRAND_ONLY_OK_TOKENS = Object.freeze([
+  "option",
+  "options",
+  "choix",
+  "selection",
+  "sélection",
+  "catalog",
+  "catalogue",
+  "liste",
+  "list",
+  "menu",
+  "show",
+  "display",
   "prix",
   "price",
   "promo",
@@ -3547,6 +3559,13 @@ const BRAND_ONLY_OK_TOKENS = Object.freeze([
   "discount",
   "sale",
   "soldes",
+  "svp",
+  "stp",
+  "please",
+  "pls",
+  "dyal",
+  "dial",
+  "diall",
 ]);
 
 function matchesAnyToken(text, tokens) {
@@ -9897,13 +9916,15 @@ function tryDirectOfferAnswer(userText, historyMsgs, lang, key, opts = {}) {
   let brand = tivoliIntent ? tivoliBrand || parsed.brand || null : parsed.brand || null;
   let category = tivoliIntent ? ovenCategory || parsed.category || null : parsed.category || null;
   let cls = tivoliIntent ? ovenClass || parsed.cls || null : parsed.cls || null;
-  const tvHint = hasTvIntentTokens(text) || Number.isFinite(sizeVal);
+  let tvHint = hasTvIntentTokens(text) || Number.isFinite(sizeVal);
   const categoryNorm = normMatch(category || "");
   const clsNorm = normMatch(cls || "");
   const isTvCategory = categoryNorm === tvCanonNorm || categoryNorm === "tv";
   const isTvClass = clsNorm === tvCanonNorm;
   const isNonTvSignal = Boolean((category && !isTvCategory) || (cls && !isTvClass));
   const brandOnlyQuery = Boolean(brand && isBrandOnlyQuery(text, brand));
+  const brandOnlyAssumeTv = Boolean(brand && !category && !cls && !Number.isFinite(sizeVal) && !capacityVal);
+  if (brandOnlyQuery || brandOnlyAssumeTv) tvHint = true;
   if (brandOnlyQuery && FEATURE_STRICT_CATEGORY_SWITCH) {
     const brandOffers = ((OFFERS && OFFERS.offers && OFFERS.offers[brand]) || []).filter((offer) => Number((offer && offer.stock) || 0) > 0);
     const hasTvOffer = brandOffers.some((offer) => isTvOffer(offer));
@@ -9969,25 +9990,7 @@ function tryDirectOfferAnswer(userText, historyMsgs, lang, key, opts = {}) {
       const title = titleFromHeader(offersHeader(lang, { brand, cls: tvCanon }));
       return buildPremiumOffersReply({ title, entries, lang, maxChars: CFG.maxReplyChars });
     }
-
-    const pack = listOffersForBrand(brand, { limit: MAX_OFFERS, withOffers: true, capacityLiters: capacityHint });
-    if (pack.offers && pack.offers.length) {
-      const entries = pack.offers.map((offer) => ({ brand, offer }));
-      const offerCtx = buildOfferContextEntries(entries);
-      setCtx(key, {
-        lastBrand: brand,
-        lastClass: undefined,
-        lastCategory: undefined,
-        lastSize: undefined,
-        lastCapacity: capacityHint || undefined,
-        lastOffersShown: offerCtx.lastOffersShown,
-        lastOfferPicks: offerCtx.lastOfferPicks,
-        lastOfferItems: offerCtx.lastOfferItems,
-      });
-      const title = titleFromHeader(offersHeader(lang, { brand }));
-      const offerBlock = buildPremiumOffersReply({ title, entries, lang, maxChars: CFG.maxReplyChars });
-      return ensureNoQuestion([brandOnlyNoTvIntro(lang, brand), offerBlock].filter(Boolean).join("\n\n"));
-    }
+    return ensureNoQuestion(t(lang, "categoryUnavailable", { category: tvCanon }));
   }
 
   if (brand && Number.isFinite(sizeVal)) {
@@ -10202,10 +10205,14 @@ function tryDirectOfferAnswer(userText, historyMsgs, lang, key, opts = {}) {
   }
 
   if (brand && !sizeVal) {
-    const packTv = tvHint ? listOffersForBrand(brand, { cls: tvCanon, limit: MAX_OFFERS, withOffers: true }) : { lines: [], offers: [] };
-    const pack =
-      packTv.lines && packTv.lines.length
-        ? packTv
+    const preferTvOnly = brandOnlyQuery || brandOnlyAssumeTv;
+    const packTv = (preferTvOnly || tvHint)
+      ? listOffersForBrand(brand, { cls: tvCanon, limit: MAX_OFFERS, withOffers: true })
+      : { lines: [], offers: [] };
+    const pack = packTv.lines && packTv.lines.length
+      ? packTv
+      : preferTvOnly
+        ? { lines: [], offers: [] }
         : listOffersForBrand(brand, { cls: cls || null, limit: MAX_OFFERS, withOffers: true, capacityLiters: capacityHint });
     if (pack.lines && pack.lines.length) {
       const entries = (pack.offers || []).map((offer) => ({ brand, offer }));
@@ -10223,6 +10230,7 @@ function tryDirectOfferAnswer(userText, historyMsgs, lang, key, opts = {}) {
       const title = titleFromHeader(offersHeader(lang, { brand, cls: tvHint ? tvCanon : cls || undefined }));
       return buildPremiumOffersReply({ title, entries, lang, maxChars: CFG.maxReplyChars });
     }
+    if (preferTvOnly) return ensureNoQuestion(t(lang, "categoryUnavailable", { category: tvCanon }));
   }
 
   if (capacityHint && ctx.lastCategory) {
