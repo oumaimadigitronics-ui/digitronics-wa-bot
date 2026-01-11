@@ -3218,23 +3218,20 @@ function isCatalogOverviewIntent(text, ctx) {
 }
 
 function catalogOverviewMessage(lang) {
+  const message = [
+    "update the bot knowledge that we have : tvs  HD, Full HD, 4K, QLED, Mini LED TVs",
+    "",
+    "- Refrigerators and Washing Machines",
+    "",
+    "- Small Home Appliances",
+    "",
+    "Tell me what you're looking for, your budget, and the size if it's a TV.",
+  ].join("\n");
   if (lang === "fr") {
-    return [
-      "Bienvenue chez Digitronics.ma",
-      "- TVs HD, Full HD, 4K, QLED, Mini LED",
-      "- Réfrigérateurs et machines à laver",
-      "- Petits appareils ménagers",
-      "Écris moi ce que tu veux avec budget et taille si TV",
-    ].join("\n");
+    return message;
   }
 
-  return [
-    "مرحبا بيك ف Digitronics.ma",
-    "- تلفازات HD, Full HD, 4K, QLED, Mini LED",
-    "- ثلاجات و غسالات",
-    "- أجهزة منزلية صغيرة",
-    "كتب ليا شنو بغيتي و الميزانية و المقاس الى كان TV",
-  ].join("\n");
+  return message;
 }
 
 function isSupportIntent(text) {
