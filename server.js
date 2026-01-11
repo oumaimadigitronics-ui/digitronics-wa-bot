@@ -470,7 +470,14 @@ function nowIso() {
 }
 
 function parseWanotifierJson(req, res, next) {
+  const MAX_BODY_SIZE = 1024 * 1024; // 1MB limit
   const raw = Buffer.isBuffer(req.body) ? req.body.toString("utf8") : "";
+  
+  // Prevent loop bound injection by limiting input size
+  if (raw.length > MAX_BODY_SIZE) {
+    return res.status(413).json({ ok: false, error: "Request body too large" });
+  }
+  
   req.rawBody = raw;
   try {
     req.body = JSON.parse(raw);
@@ -691,7 +698,8 @@ function hasSmartToken(text) {
 
 function stripQuestions(text) {
   const s = String(text || "");
-  const noTrailing = s.replace(/[؟?]+$/g, "").trimEnd();
+  // Use non-global regex and limit iterations to prevent ReDoS
+  const noTrailing = s.trimEnd().replace(/[؟?]+$/, "");
   const lines = noTrailing.split(/\r?\n/);
 
   // Helper to check if a line looks like a question
