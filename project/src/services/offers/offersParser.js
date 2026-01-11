@@ -1,6 +1,13 @@
+import { detectBrand as detectBrandFromText, detectCategory as detectCategoryFromText } from '../../../../src/knowledge/productKnowledge.js';
+
 const KNOWN_BRANDS = ['Samsung', 'Sony', 'LG'];
 
 export function detectBrand(name = '') {
+  // Try the robust implementation first
+  const brandFromText = detectBrandFromText(name);
+  if (brandFromText) return brandFromText;
+  
+  // Fallback to simple matching for backwards compatibility
   const lower = name.toLowerCase();
   const match = KNOWN_BRANDS.find((b) => lower.includes(b.toLowerCase()));
   return match || 'UNKNOWN';
@@ -22,7 +29,13 @@ export function detectClass(name = '') {
 export function detectCategory(categories = []) {
   if (Array.isArray(categories) && categories.length > 0) {
     const names = categories.map((c) => (typeof c === 'string' ? c : c.name)).filter(Boolean);
-    return names[0];
+    if (names.length > 0) {
+      // Try to detect category from the first name using the robust implementation
+      const categoryFromText = detectCategoryFromText(names[0]);
+      if (categoryFromText) return categoryFromText;
+      // Fallback to returning the first name
+      return names[0];
+    }
   }
   return 'General';
 }

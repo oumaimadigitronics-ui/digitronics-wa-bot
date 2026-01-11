@@ -1,3 +1,5 @@
+import { TV_KEYWORDS, FRIDGE_KEYWORDS, WASHING_MACHINE_KEYWORDS, AC_KEYWORDS } from '../../../../src/utils/categoryKeywords.js';
+
 const TV_REGEX =
   /(^|[^\p{L}\p{N}])(tv(?:s)?|tele|télé|television|télévision|talfaza|smart\s*tv|google\s*tv|android\s*tv|تلفاز|تلفزة|شاشة)([^\p{L}\p{N}]|$)/iu;
 
@@ -21,13 +23,13 @@ export function normalizeOfferCategory(offer = {}) {
   if (TV_REGEX.test(combined)) {
     return 'tv';
   }
-  if (matchesAny(combined, ['fridge', 'frigo', 'réfrigérateur', 'refrigerateur', 'refrigerator', 'ثلاجة', 'ثلاجات'])) {
+  if (matchesAny(combined, FRIDGE_KEYWORDS)) {
     return 'fridge';
   }
-  if (matchesAny(combined, ['washing machine', 'machine a laver', 'machine à laver', 'lave-linge', 'lave linge', 'غسالة', 'غسالات'])) {
+  if (matchesAny(combined, WASHING_MACHINE_KEYWORDS)) {
     return 'washing';
   }
-  if (matchesAny(combined, ['climatiseur', 'clim', 'climatisation', 'air conditioner', 'air condition', 'ac', 'مكيف', 'مكيفات'])) {
+  if (matchesAny(combined, AC_KEYWORDS)) {
     return 'ac';
   }
   return 'other';

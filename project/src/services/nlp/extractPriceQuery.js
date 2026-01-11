@@ -1,3 +1,5 @@
+import { TV_KEYWORDS, FRIDGE_KEYWORDS, WASHING_MACHINE_KEYWORDS, AC_KEYWORDS } from '../../../../src/utils/categoryKeywords.js';
+
 const BUDGET_REGEX = /(\d{2,6}(?:[\s.,]\d{3})*)\s*(dh|dhs|mad|درهم|د\.?م\.?)/i;
 const BUDGET_PREFIX_REGEX = /(dh|dhs|mad|درهم|د\.?م\.?)\s*(\d{2,6}(?:[\s.,]\d{3})*)/i;
 
@@ -38,16 +40,16 @@ export function detectCategory(text = '') {
   const value = String(text);
   const lower = value.toLowerCase();
 
-  if (matchesAny(lower, ['tv', 'tele', 'télé', 'television', 'télévision', 'talfaza', 'شاشة', 'تلفاز', 'تلفزة'])) {
+  if (matchesAny(lower, TV_KEYWORDS)) {
     return 'tv';
   }
-  if (matchesAny(lower, ['frigo', 'fridge', 'réfrigérateur', 'refrigerateur', 'réfrigérateurs', 'ثلاجة', 'ثلاجات'])) {
+  if (matchesAny(lower, FRIDGE_KEYWORDS)) {
     return 'fridge';
   }
-  if (matchesAny(lower, ['machine a laver', 'machine à laver', 'lave-linge', 'lave linge', 'washing machine', 'غسالة', 'غسالات'])) {
+  if (matchesAny(lower, WASHING_MACHINE_KEYWORDS)) {
     return 'washing';
   }
-  if (matchesAny(lower, ['climatiseur', 'clim', 'climatisation', 'air conditioner', 'air condition', 'ac', 'مكيف', 'مكيفات'])) {
+  if (matchesAny(lower, AC_KEYWORDS)) {
     return 'ac';
   }
   return null;

@@ -1,31 +1,9 @@
 import { replaceArabicDigits } from '../../../../src/utils/arabicDigits.js';
+import { TV_KEYWORDS, OTHER_CATEGORY_KEYWORDS } from '../../../../src/utils/categoryKeywords.js';
 
 const BUDGET_REGEX = /(\d{2,6}(?:[\s.,]\d{3})*)\s*(dh|dhs|mad|درهم)(?=\s|$)/i;
 const BUDGET_PREFIX_REGEX = /(dh|dhs|mad|درهم)\s*(\d{2,6}(?:[\s.,]\d{3})*)(?=\s|$)/i;
 const INCH_REGEX = /(\d{2,3})\s*(?:"|''|inch|inches|pouce|بوصة|بول)(?=\s|$)/i;
-
-const TV_KEYWORDS = ['tv', 'tele', 'télé', 'television', 'télévision', 'talfaza', 'televiseur', 'تلفاز', 'تلفزة', 'تلفزيون'];
-const OTHER_CATEGORY_KEYWORDS = [
-  'frigo',
-  'fridge',
-  'réfrigérateur',
-  'refrigerateur',
-  'ثلاجة',
-  'غسالة',
-  'lave-linge',
-  'washing',
-  'machine a laver',
-  'machine à laver',
-  'chauffe-eau',
-  'chauffe eau',
-  'boiler',
-  'water heater',
-  'سخان',
-  'climatiseur',
-  'clim',
-  'climatisation',
-  'مكيف',
-];
 
 function normalizeDigits(text = '') {
   return replaceArabicDigits(text);
