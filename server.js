@@ -18,6 +18,26 @@ import {
   updateContextFromMessage,
 } from "./src/knowledge/productKnowledge.js";
 import { toFile } from "openai/uploads";
+import {
+  arabicIndicToAsciiDigits,
+  stripDiacritics,
+  normMatch,
+  escapeRegExp,
+  includesToken,
+  hasArabicScript,
+  hasSmartToken,
+  parseMenuSelection,
+  stripQuestions,
+  ensureNoQuestion,
+  sanitizeUrlNoQuestion,
+  stripUrlQueriesInText,
+  stripNonPurchaseUrls,
+  nowIso,
+  debugLog,
+  logger,
+  stableHash,
+  redactLogId,
+} from "./src/utils/index.js";
 
 let toFileImpl = toFile;
 
@@ -65,35 +85,7 @@ let systemPromptLoaded = false;
 let systemPromptValue = "";
 const DEFAULT_SYSTEM_PROMPT = "You are DigiBot for Digitronics.ma.";
 
-function debugLog(event, payload) {
-  if (!LOG_DEBUG) return;
-  const base = typeof payload === "object" && payload !== null ? payload : { detail: payload };
-  try {
-    console.log(JSON.stringify({ level: "debug", event, ...base }));
-  } catch {
-    // Fallback to simple logging if JSON serialization fails
-    console.log("[DEBUG]", event, typeof base === "object" ? "[Object]" : base);
-  }
-}
-
-const logger = {
-  info(payload) {
-    try {
-      console.log(JSON.stringify({ level: "info", ...payload }));
-    } catch {
-      // Fallback to simple logging if JSON serialization fails
-      console.log("[INFO]", typeof payload === "object" ? "[Object]" : payload);
-    }
-  },
-  warn(payload) {
-    try {
-      console.warn(JSON.stringify({ level: "warn", ...payload }));
-    } catch {
-      // Fallback to simple logging if JSON serialization fails
-      console.warn("[WARN]", typeof payload === "object" ? "[Object]" : payload);
-    }
-  },
-};
+// debugLog and logger now imported from ./src/utils/index.js
 
 const DEFAULT_ORDER_FORM_URL =
   "https://docs.google.com/forms/d/e/1FAIpQLScmDNagYSpUPfsIT2s2t35KH7U1OWSNkUCIWmcJJm1R_aITQQ/viewform?usp=header";
@@ -465,9 +457,7 @@ app.use((err, _req, res, next) => {
   return next(err);
 });
 
-function nowIso() {
-  return new Date().toISOString();
-}
+// nowIso now imported from ./src/utils/index.js
 
 function parseWanotifierJson(req, res, next) {
   const raw = Buffer.isBuffer(req.body) ? req.body.toString("utf8") : "";
@@ -559,164 +549,35 @@ function shorten(text, max, logContext) {
   return t0;
 }
 
-function stripDiacritics(s) {
-  try {
-    return String(s || "")
-      .normalize("NFD")
-      .replace(/[\u0300-\u036f]/g, "");
-  } catch {
-    return String(s || "");
-  }
-}
+// stripDiacritics now imported from ./src/utils/index.js
 
-function arabicIndicToAsciiDigits(s) {
-  const str = String(s || "");
-  const map = {
-    "٠": "0",
-    "١": "1",
-    "٢": "2",
-    "٣": "3",
-    "٤": "4",
-    "٥": "5",
-    "٦": "6",
-    "٧": "7",
-    "٨": "8",
-    "٩": "9",
-    "۰": "0",
-    "۱": "1",
-    "۲": "2",
-    "۳": "3",
-    "۴": "4",
-    "۵": "5",
-    "۶": "6",
-    "۷": "7",
-    "۸": "8",
-    "۹": "9",
-  };
-  return str.replace(/[٠-٩۰-۹]/g, (d) => {
-    const v = map[d];
-    if (v) return v;
-    return d;
-  });
-}
 
-// Simple LRU cache for normMatch to avoid repeated normalization
-const normMatchCache = new Map();
-const NORM_MATCH_CACHE_SIZE = 500;
+// arabicIndicToAsciiDigits now imported from ./src/utils/index.js
 
-function normMatch(text) {
-  const key = String(text || "");
-  
-  // Check cache first
-  if (normMatchCache.has(key)) {
-    // Move to end for LRU (re-insert)
-    const value = normMatchCache.get(key);
-    normMatchCache.delete(key);
-    normMatchCache.set(key, value);
-    return value;
-  }
-  
-  // Compute normalized value
-  const t = arabicIndicToAsciiDigits(key);
-  const result = stripDiacritics(t).toLowerCase().trim();
-  
-  // Add to cache - evict oldest entry if full (more efficient than batch removal)
-  if (normMatchCache.size >= NORM_MATCH_CACHE_SIZE) {
-    // Map iterator gives insertion order; first key is oldest
-    const firstKey = normMatchCache.keys().next().value;
-    normMatchCache.delete(firstKey);
-  }
-  normMatchCache.set(key, result);
-  
-  return result;
-}
 
-function parseMenuSelection(text) {
-  let s = arabicIndicToAsciiDigits(String(text || ""));
-  if (!s) return null;
-  s = s.replace(/[\uFE0F\u20E3]/g, "");
-  s = s.replace(/[０-９]/g, (d) => String(d.charCodeAt(0) - 0xff10));
-  s = s.trim();
+// normMatch now imported from ./src/utils/index.js
 
-  const cleaned = s
-    .replace(/^[\s.,\-–—_:;!؟?'“”"‘’`~(){}\[\]<>|+*=\/\\]+/g, "")
-    .replace(/[\s.,\-–—_:;!؟?'“”"‘’`~(){}\[\]<>|+*=\/\\]+$/g, "")
-    .trim();
 
-  if (!/^[1-6]$/.test(cleaned)) return null;
-  return cleaned;
-}
+// parseMenuSelection now imported from ./src/utils/index.js
 
-function hasArabicScript(text) {
-  return /[\u0600-\u06FF]/.test(String(text || ""));
-}
 
-function escapeRegExp(str) {
-  return String(str || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
+// hasArabicScript now imported from ./src/utils/index.js
 
-// Cache compiled regular expressions for includesToken to avoid recompiling
-const includesTokenRegExpCache = new Map();
-const INCLUDES_TOKEN_CACHE_SIZE = 200;
 
-function includesToken(text, token) {
-  const s = normMatch(text);
-  const t0 = normMatch(token);
-  if (!t0) return false;
+// escapeRegExp now imported from ./src/utils/index.js
 
-  if (t0.length <= 3) {
-    // Check cache for compiled regex
-    let re = includesTokenRegExpCache.get(t0);
-    if (!re) {
-      const escaped = escapeRegExp(t0);
-      re = new RegExp(`(^|[^a-z0-9])${escaped}(?=($|[^a-z0-9]|\\d))`, "i");
-      
-      // Add to cache - evict oldest entry if full (LRU behavior)
-      if (includesTokenRegExpCache.size >= INCLUDES_TOKEN_CACHE_SIZE) {
-        const firstKey = includesTokenRegExpCache.keys().next().value;
-        includesTokenRegExpCache.delete(firstKey);
-      }
-      includesTokenRegExpCache.set(t0, re);
-    }
-    return re.test(s);
-  }
-  return s.indexOf(t0) >= 0;
-}
 
-function hasSmartToken(text) {
-  const s = normMatch(text || "");
-  if (!s) return false;
-  return s.indexOf("smart") >= 0 || s.indexOf("سمارت") >= 0 || s.indexOf("عامرة") >= 0;
-}
+// includesToken now imported from ./src/utils/index.js
 
-function stripQuestions(text) {
-  const s = String(text || "");
-  const noTrailing = s.replace(/[؟?]+$/g, "").trimEnd();
-  const lines = noTrailing.split(/\r?\n/);
 
-  // Helper to check if a line looks like a question
-  const looksLikeQuestionLine = (line) => {
-    const trimmed = String(line || "").trim();
-    if (!trimmed) return true;
-    if (/[؟?]\s*$/.test(trimmed)) return true;
-    // Check for question-starting words in French, Arabic, and Darija
-    return /^(wach|wash|chno|chnou|shno|kayen|fin|quel|quelle|quels|quelles|combien)/i.test(trimmed);
-  };
+// hasSmartToken now imported from ./src/utils/index.js
 
-  // Remove trailing question lines
-  while (lines.length > 0 && looksLikeQuestionLine(lines[lines.length - 1])) {
-    lines.pop();
-  }
 
-  return lines.join("\n").trim();
-}
+// stripQuestions now imported from ./src/utils/index.js
 
-function ensureNoQuestion(text) {
-  const s = String(text || "");
-  // Remove question mark characters: ? (63), ¿ (191), ؟ (1567), ？ (65311)
-  const cleaned = s.replace(/[\u003F\u00BF\u061F\uFF1F]/g, "");
-  return stripQuestions(cleaned);
-}
+
+// ensureNoQuestion now imported from ./src/utils/index.js
+
 
 function shortenNoQuestion(text, max, logContext) {
   const cleaned = stripUrlQueriesInText(stripQuestions(text));
@@ -753,44 +614,18 @@ function formatSize(lang, size) {
   return `${num}″`;
 }
 
-function sanitizeUrlNoQuestion(urlStr) {
-  try {
-    const u = new URL(String(urlStr || ""));
-    return u.origin + u.pathname;
-  } catch (_e) {
-    const s = String(urlStr || "");
-    const idx = s.search(/[؟?]/);
-    if (idx >= 0) return s.slice(0, idx);
-    return s;
-  }
-}
+// sanitizeUrlNoQuestion now imported from ./src/utils/index.js
 
-function stripUrlQueriesInText(text) {
-  const s = String(text || "");
-  return s.replace(/https?:\/\/\S+/g, (m) => sanitizeUrlNoQuestion(m));
-}
+
+// stripUrlQueriesInText now imported from ./src/utils/index.js
+
 
 const ORDER_FORM_URL_SAFE = sanitizeUrlNoQuestion(ORDER_FORM_URL);
 const MAPS_URL_RAW = "https://maps.app.goo.gl/sLuZQCt74KVkq39H7?g_st=aw";
 const MAPS_URL_SAFE = sanitizeUrlNoQuestion(MAPS_URL_RAW);
 
-function stripNonPurchaseUrls(text) {
-  const s = String(text || "");
-  return s
-    .replace(/https?:\/\/\S+/g, (m) => {
-      const safe = sanitizeUrlNoQuestion(m);
-      const isAllowedMaps =
-        FEATURE_ALLOW_MAPS_URLS &&
-        (safe.startsWith("https://maps.app.goo.gl") ||
-          safe.startsWith("https://www.google.com/maps") ||
-          safe.startsWith("https://goo.gl/maps"));
-      if (safe.startsWith("https://digitronics.ma") || safe === ORDER_FORM_URL_SAFE || isAllowedMaps) return m;
-      return "";
-    })
-    .replace(/[ \t]{2,}/g, " ")
-    .replace(/\n{3,}/g, "\n\n")
-    .trim();
-}
+// stripNonPurchaseUrls now imported from ./src/utils/index.js
+
 
 function looksLikeFallback(reply) {
   const r = normMatch(reply);
@@ -1268,23 +1103,11 @@ function agentWillFinalize(lang) {
   return "وكيل بشري غادي يكمل معاك التفاصيل ويعطيك أحسن اختيار متوفر.";
 }
 
-function stableHash(input) {
-  try {
-    return crypto.createHash("sha256").update(String(input || "")).digest("hex").slice(0, 18);
-  } catch {
-    try {
-      return crypto.randomBytes(9).toString("hex");
-    } catch {
-      return String(Date.now());
-    }
-  }
-}
+// stableHash now imported from ./src/utils/index.js
 
-function redactLogId(value) {
-  const s = String(value || "").trim();
-  if (!s) return null;
-  return stableHash(s);
-}
+
+// redactLogId now imported from ./src/utils/index.js
+
 
 function safeGet(obj, pathArr) {
   let cur = obj;
