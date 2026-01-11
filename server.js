@@ -7854,10 +7854,10 @@ function listOffersForBrand(brand, opts) {
   const withOffers = Boolean(o.withOffers);
   const useTvFilter = Boolean(o.tvOnly) || (cls && normMatch(cls) === normMatch(OFFERS_INDEX.classCanon.tv || ""));
 
-  // Find the actual brand key in OFFERS.offers (case-sensitive lookup)
+  // Find the actual brand key in OFFERS.offers using case-insensitive matching
   let actualBrandKey = brand;
   
-  // If no offers found with exact brand, try to find the correct key
+  // If no offers found with exact brand, try to find the correct key using normalized matching
   if (brand && OFFERS && OFFERS.offers && !OFFERS.offers[brand]) {
     const brandNorm = normMatch(brand);
     const keys = Object.keys(OFFERS.offers);
