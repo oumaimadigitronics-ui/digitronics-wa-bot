@@ -9968,7 +9968,7 @@ function tryDirectOfferAnswer(userText, historyMsgs, lang, key, opts = {}) {
       ? capacityVal
       : ctx.lastCapacity || null;
 
-  if (brandOnlyQuery) {
+  if (brandOnlyQuery || brandOnlyAssumeTv) {
     const packTv = listOffersForBrand(brand, { cls: tvCanon, limit: MAX_OFFERS, withOffers: true, tvOnly: true });
     const tvCount = packTv.offers ? packTv.offers.length : 0;
     logger.info({ msg: "brand_only_tv_first", brand, tvClassCanon: tvCanon, tvOfferCount: tvCount });
