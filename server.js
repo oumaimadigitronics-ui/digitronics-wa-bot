@@ -11584,6 +11584,16 @@ app.post("/wanotifier", express.raw({ type: "*/*", limit: "2mb" }), parseWanotif
       return res.json({ ok: true, reply });
     }
 
+    if (isTvReceiverIntent(userTextRaw)) {
+      const receiverMsg = tvReceiverAnswerText(lang);
+      const offerReply = defaultTvOffersForReceiver(lang, key);
+      const combined = [receiverMsg, offerReply].filter(Boolean).join("\n\n");
+      const reply = finalizeReply(ensureNoQuestion(combined || receiverMsg), 520);
+      memory.push(key, "assistant", reply);
+      resetStrikes(key);
+      return res.json({ ok: true, reply });
+    }
+
     if (wantsProductDetails(userTextRaw, lang)) {
       const optionNumber = parseSelectedOptionNumber(userTextRaw);
       const ctx = getCtx(key);
