@@ -644,14 +644,29 @@ function escapeRegExp(str) {
   return String(str || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
+// Cache compiled regular expressions for includesToken to avoid recompiling
+const includesTokenRegExpCache = new Map();
+const INCLUDES_TOKEN_CACHE_SIZE = 200;
+
 function includesToken(text, token) {
   const s = normMatch(text);
   const t0 = normMatch(token);
   if (!t0) return false;
 
-  const escaped = escapeRegExp(t0);
   if (t0.length <= 3) {
-    const re = new RegExp(`(^|[^a-z0-9])${escaped}(?=($|[^a-z0-9]|\\d))`, "i");
+    // Check cache for compiled regex
+    let re = includesTokenRegExpCache.get(t0);
+    if (!re) {
+      const escaped = escapeRegExp(t0);
+      re = new RegExp(`(^|[^a-z0-9])${escaped}(?=($|[^a-z0-9]|\\d))`, "i");
+      
+      // Add to cache with size limit
+      if (includesTokenRegExpCache.size >= INCLUDES_TOKEN_CACHE_SIZE) {
+        const firstKey = includesTokenRegExpCache.keys().next().value;
+        includesTokenRegExpCache.delete(firstKey);
+      }
+      includesTokenRegExpCache.set(t0, re);
+    }
     return re.test(s);
   }
   return s.indexOf(t0) >= 0;
@@ -824,6 +839,12 @@ function warrantyTextForBrand(lang, brand, cls) {
   return rules.warranty;
 }
 
+// Cache language detection tokens to avoid recreating arrays on every call
+const LANG_DETECT_FR_STRONG = Object.freeze(["bonjour", "salut", "merci"]);
+const LANG_DETECT_FR_TOKENS = Object.freeze(["merci", "livraison", "garantie", "prix", "commande", "commander", "svp", "s'il", "sil", "s'il"]);
+const LANG_DETECT_EN_STRONG = Object.freeze(["hello", "hi", "hey"]);
+const LANG_DETECT_EN_TOKENS = Object.freeze(["thanks", "please", "delivery", "warranty", "price", "order", "buy", "purchase"]);
+
 function detectUserLanguage(text) {
   const raw = String(text || "");
   const t0 = raw.trim();
@@ -838,7 +859,7 @@ function detectUserLanguage(text) {
 
   if (/[éèêàçùôî]/i.test(t0)) frScore += 2;
 
-  const frStrong = ["bonjour", "salut", "merci"];
+  const frStrong = LANG_DETECT_FR_STRONG;
   const frTokens = ["merci", "livraison", "garantie", "prix", "commande", "commander", "svp", "s'il", "sil", "s’il"];
   const enStrong = ["hello", "hi", "hey"];
   const enTokens = ["thanks", "please", "delivery", "warranty", "price", "order", "buy", "purchase"];
