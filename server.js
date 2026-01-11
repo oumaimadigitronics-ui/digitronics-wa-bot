@@ -11016,8 +11016,10 @@ function formatVoiceAnswer(structured, lang) {
   const payload = structured || {};
   const direct = String(payload.direct || "").trim();
   const bullets = Array.isArray(payload.bullets) ? payload.bullets.map((b) => String(b || "").trim()).filter(Boolean) : [];
-  // Note: confirmed and assumed fields are parsed but not displayed to customers
-  // These are internal debug fields that should not appear in customer-facing responses
+  // Note: confirmed and assumed fields are parsed from LLM response but not displayed to customers.
+  // - confirmed: facts explicitly stated in the voice transcript
+  // - assumed: minor assumptions made by the bot
+  // These are internal debug fields used during development and should not appear in customer-facing responses.
 
   const lines = [];
   if (direct) lines.push(direct);
