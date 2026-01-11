@@ -7856,10 +7856,9 @@ function listOffersForBrand(brand, opts) {
 
   // Find the actual brand key in OFFERS.offers (case-sensitive lookup)
   let actualBrandKey = brand;
-  const allOffers = (OFFERS && OFFERS.offers && OFFERS.offers[brand]) || [];
   
   // If no offers found with exact brand, try to find the correct key
-  if (!allOffers.length && brand && OFFERS && OFFERS.offers) {
+  if (brand && OFFERS && OFFERS.offers && !OFFERS.offers[brand]) {
     const brandNorm = normMatch(brand);
     const keys = Object.keys(OFFERS.offers);
     for (let i = 0; i < keys.length; i += 1) {
@@ -7870,7 +7869,8 @@ function listOffersForBrand(brand, opts) {
     }
   }
 
-  const filtered = ((OFFERS && OFFERS.offers && OFFERS.offers[actualBrandKey]) || [])
+  const brandOffers = (OFFERS && OFFERS.offers && OFFERS.offers[actualBrandKey]) || [];
+  const filtered = brandOffers
     .map((offer, idx) => ({ brand: actualBrandKey, offer, originalIdx: idx }))
     .filter((it) => {
       const o1 = it.offer || {};
@@ -7899,9 +7899,6 @@ function listOffersForBrand(brand, opts) {
   const lines = picked.map((r) => formatOfferLine(r.brand, r.offer || r));
   
   // Debug logging to track brand lookup and filtering
-  // Store offers array to avoid redundant lookups
-  const brandOffers = (OFFERS && OFFERS.offers && OFFERS.offers[actualBrandKey]) || [];
-  const totalOffersForBrand = brandOffers.length;
   // Count TV offers during initial filtering if needed, avoiding extra pass
   let tvOffersCount = 0;
   if (useTvFilter) {
@@ -7918,7 +7915,7 @@ function listOffersForBrand(brand, opts) {
     msg: "listOffersForBrand_debug",
     inputBrand: brand,
     foundKey: actualBrandKey,
-    totalOffersForBrand: totalOffersForBrand,
+    totalOffersForBrand: brandOffers.length,
     tvOnlyParam: o.tvOnly,
     tvOffersCount: tvOffersCount,
     offersReturned: picked.length
