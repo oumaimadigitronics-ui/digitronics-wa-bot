@@ -7330,8 +7330,8 @@ function outOfStockTemplate(model, brand, size, alternativesEntries, lang) {
   const lines = [];
   lines.push(header);
   lines.push("");
-  lines.push(`🇫🇷 Le modèle ${modelSafe}${sizeTxt}${brandTxt ? " (" + brandTxt + ")" : ""} est actuellement indisponible (rupture de stock).`);
-  lines.push(`🇲🇦 الموديل ${modelSafe}${sizeTxt} ما متوفرش دابا (غير متوفر / نفاذ المخزون).`);
+  lines.push(`🇫🇷 Le modèle ${modelSafe}${sizeTxt}${brandTxt ? " (" + brandTxt + ")" : ""} est actuellement indisponible (rupture de stock). Voici d'autres options disponibles.`);
+  lines.push(`🇲🇦 الموديل ${modelSafe}${sizeTxt} ما متوفرش دابا (غير متوفر / نفاذ المخزون). ولكن كاينين بدائل متوفرة.`);
   lines.push("");
   lines.push("✅ Alternatives disponibles");
   lines.push("🔒 Produits originaux, service fiable, livraison rapide.");
