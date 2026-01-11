@@ -10502,6 +10502,9 @@ function tryDirectOfferAnswer(userText, historyMsgs, lang, key, opts = {}) {
         return buildPremiumOffersReply({ title, entries, lang, maxChars: CFG.maxReplyChars });
       }
 
+      // Fallback: no TVs found, show ALL products for brand
+      // Don't filter by cls or capacityHint to avoid incorrectly classified products
+      // This matches the behavior at line 10229 in the first brand-only path
       const packAll = listOffersForBrand(brand, { limit: MAX_OFFERS, withOffers: true });
       if (packAll.offers && packAll.offers.length) {
         const entries = packAll.offers.map((offer) => ({ brand, offer }));
