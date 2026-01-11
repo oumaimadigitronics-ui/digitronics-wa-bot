@@ -602,18 +602,27 @@ function normMatch(text) {
   
   // Check cache first
   if (normMatchCache.has(key)) {
-    return normMatchCache.get(key);
+    // Move to end for LRU (re-insert)
+    const value = normMatchCache.get(key);
+    normMatchCache.delete(key);
+    normMatchCache.set(key, value);
+    return value;
   }
   
   // Compute normalized value
   const t = arabicIndicToAsciiDigits(key);
   const result = stripDiacritics(t).toLowerCase().trim();
   
-  // Add to cache (with simple size limit)
+  // Add to cache - clear oldest entries if full
   if (normMatchCache.size >= NORM_MATCH_CACHE_SIZE) {
-    // Remove oldest entry (first key)
-    const firstKey = normMatchCache.keys().next().value;
-    normMatchCache.delete(firstKey);
+    // Clear 20% of cache when full (batch removal is more efficient)
+    const entriesToRemove = Math.floor(NORM_MATCH_CACHE_SIZE * 0.2);
+    let removed = 0;
+    for (const k of normMatchCache.keys()) {
+      if (removed >= entriesToRemove) break;
+      normMatchCache.delete(k);
+      removed++;
+    }
   }
   normMatchCache.set(key, result);
   
@@ -660,10 +669,16 @@ function includesToken(text, token) {
       const escaped = escapeRegExp(t0);
       re = new RegExp(`(^|[^a-z0-9])${escaped}(?=($|[^a-z0-9]|\\d))`, "i");
       
-      // Add to cache with size limit
+      // Add to cache - batch remove when full
       if (includesTokenRegExpCache.size >= INCLUDES_TOKEN_CACHE_SIZE) {
-        const firstKey = includesTokenRegExpCache.keys().next().value;
-        includesTokenRegExpCache.delete(firstKey);
+        // Clear 20% of cache for better performance
+        const entriesToRemove = Math.floor(INCLUDES_TOKEN_CACHE_SIZE * 0.2);
+        let removed = 0;
+        for (const k of includesTokenRegExpCache.keys()) {
+          if (removed >= entriesToRemove) break;
+          includesTokenRegExpCache.delete(k);
+          removed++;
+        }
       }
       includesTokenRegExpCache.set(t0, re);
     }
@@ -860,9 +875,9 @@ function detectUserLanguage(text) {
   if (/[éèêàçùôî]/i.test(t0)) frScore += 2;
 
   const frStrong = LANG_DETECT_FR_STRONG;
-  const frTokens = ["merci", "livraison", "garantie", "prix", "commande", "commander", "svp", "s'il", "sil", "s’il"];
-  const enStrong = ["hello", "hi", "hey"];
-  const enTokens = ["thanks", "please", "delivery", "warranty", "price", "order", "buy", "purchase"];
+  const frTokens = LANG_DETECT_FR_TOKENS;
+  const enStrong = LANG_DETECT_EN_STRONG;
+  const enTokens = LANG_DETECT_EN_TOKENS;
 
   for (const token of frStrong) {
     if (includesToken(s, token)) frScore += 2;
