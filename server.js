@@ -69,8 +69,9 @@ function debugLog(event, payload) {
   const base = typeof payload === "object" && payload !== null ? payload : { detail: payload };
   try {
     console.log(JSON.stringify({ level: "debug", event, ...base }));
-  } catch {
-    console.log("[DEBUG]", event, base);
+  } catch (err) {
+    // Fallback to simple logging if JSON serialization fails
+    console.log("[DEBUG]", event, typeof base === "object" ? "[Object]" : base);
   }
 }
 
@@ -78,15 +79,17 @@ const logger = {
   info(payload) {
     try {
       console.log(JSON.stringify({ level: "info", ...payload }));
-    } catch {
-      console.log("[INFO]", payload);
+    } catch (err) {
+      // Fallback to simple logging if JSON serialization fails
+      console.log("[INFO]", typeof payload === "object" ? "[Object]" : payload);
     }
   },
   warn(payload) {
     try {
       console.warn(JSON.stringify({ level: "warn", ...payload }));
-    } catch {
-      console.warn("[WARN]", payload);
+    } catch (err) {
+      // Fallback to simple logging if JSON serialization fails
+      console.warn("[WARN]", typeof payload === "object" ? "[Object]" : payload);
     }
   },
 };
@@ -295,15 +298,18 @@ function getBrandRankMap() {
 }
 
 function brandRank(name, priority = BRAND_PRIORITY) {
+  const normalized = normMatch(name || "");
+  
   // Use cached map if using default priority
   if (priority === BRAND_PRIORITY) {
-    const r = getBrandRankMap().get(normMatch(name || ""));
-    return Number.isInteger(r) ? r : Number.POSITIVE_INFINITY;
+    const rank = getBrandRankMap().get(normalized);
+    return rank !== undefined ? rank : Number.POSITIVE_INFINITY;
   }
+  
   // Fallback for custom priority (rare case)
-  const m = new Map(priority.map((b, idx) => [normMatch(b), idx]));
-  const r = m.get(normMatch(name || ""));
-  return Number.isInteger(r) ? r : Number.POSITIVE_INFINITY;
+  const customMap = new Map(priority.map((b, idx) => [normMatch(b), idx]));
+  const rank = customMap.get(normalized);
+  return rank !== undefined ? rank : Number.POSITIVE_INFINITY;
 }
 
 function getOpenAIClient() {
@@ -596,7 +602,6 @@ function arabicIndicToAsciiDigits(s) {
 // Simple LRU cache for normMatch to avoid repeated normalization
 const normMatchCache = new Map();
 const NORM_MATCH_CACHE_SIZE = 500;
-const CACHE_EVICTION_RATIO = 0.2; // Remove 20% of entries when cache is full
 
 function normMatch(text) {
   const key = String(text || "");
@@ -614,16 +619,11 @@ function normMatch(text) {
   const t = arabicIndicToAsciiDigits(key);
   const result = stripDiacritics(t).toLowerCase().trim();
   
-  // Add to cache - clear oldest entries if full
+  // Add to cache - evict oldest entry if full (more efficient than batch removal)
   if (normMatchCache.size >= NORM_MATCH_CACHE_SIZE) {
-    // Clear portion of cache when full (batch removal is more efficient)
-    const entriesToRemove = Math.floor(NORM_MATCH_CACHE_SIZE * CACHE_EVICTION_RATIO);
-    let removed = 0;
-    for (const k of normMatchCache.keys()) {
-      if (removed >= entriesToRemove) break;
-      normMatchCache.delete(k);
-      removed++;
-    }
+    // Map iterator gives insertion order; first key is oldest
+    const firstKey = normMatchCache.keys().next().value;
+    normMatchCache.delete(firstKey);
   }
   normMatchCache.set(key, result);
   
@@ -670,16 +670,10 @@ function includesToken(text, token) {
       const escaped = escapeRegExp(t0);
       re = new RegExp(`(^|[^a-z0-9])${escaped}(?=($|[^a-z0-9]|\\d))`, "i");
       
-      // Add to cache - batch remove when full
+      // Add to cache - evict oldest entry if full (LRU behavior)
       if (includesTokenRegExpCache.size >= INCLUDES_TOKEN_CACHE_SIZE) {
-        // Clear portion of cache for better performance
-        const entriesToRemove = Math.floor(INCLUDES_TOKEN_CACHE_SIZE * CACHE_EVICTION_RATIO);
-        let removed = 0;
-        for (const k of includesTokenRegExpCache.keys()) {
-          if (removed >= entriesToRemove) break;
-          includesTokenRegExpCache.delete(k);
-          removed++;
-        }
+        const firstKey = includesTokenRegExpCache.keys().next().value;
+        includesTokenRegExpCache.delete(firstKey);
       }
       includesTokenRegExpCache.set(t0, re);
     }
@@ -699,30 +693,28 @@ function stripQuestions(text) {
   const noTrailing = s.replace(/[؟?]+$/g, "").trimEnd();
   const lines = noTrailing.split(/\r?\n/);
 
+  // Helper to check if a line looks like a question
   const looksLikeQuestionLine = (line) => {
-    const t = String(line || "").trim();
-    if (!t) return true;
-    if (/[؟?]\s*$/.test(t)) return true;
-    return /^(wach|wash|chno|chnou|shno|kayen|fin|quel|quelle|quels|quelles|combien)/i.test(t);
+    const trimmed = String(line || "").trim();
+    if (!trimmed) return true;
+    if (/[؟?]\s*$/.test(trimmed)) return true;
+    // Check for question-starting words in French, Arabic, and Darija
+    return /^(wach|wash|chno|chnou|shno|kayen|fin|quel|quelle|quels|quelles|combien)/i.test(trimmed);
   };
 
-  while (lines.length > 0 && looksLikeQuestionLine(lines[lines.length - 1])) lines.pop();
+  // Remove trailing question lines
+  while (lines.length > 0 && looksLikeQuestionLine(lines[lines.length - 1])) {
+    lines.pop();
+  }
 
   return lines.join("\n").trim();
 }
 
 function ensureNoQuestion(text) {
   const s = String(text || "");
-  let out = "";
-  for (let i = 0; i < s.length; i += 1) {
-    const c = s.charCodeAt(i);
-    if (c === 63) continue;
-    if (c === 191) continue;
-    if (c === 1567) continue;
-    if (c === 65311) continue;
-    out += s[i];
-  }
-  return stripQuestions(out);
+  // Remove question mark characters: ? (63), ¿ (191), ؟ (1567), ？ (65311)
+  const cleaned = s.replace(/[\u003F\u00BF\u061F\uFF1F]/g, "");
+  return stripQuestions(cleaned);
 }
 
 function shortenNoQuestion(text, max, logContext) {
@@ -866,6 +858,7 @@ function detectUserLanguage(text) {
   const t0 = raw.trim();
   if (!t0) return "dzl";
 
+  // Early return for Arabic script
   if (hasArabicScript(raw)) return "ar";
 
   const s = normMatch(t0);
@@ -873,26 +866,24 @@ function detectUserLanguage(text) {
   let frScore = 0;
   let enScore = 0;
 
+  // Check for French diacritics
   if (/[éèêàçùôî]/i.test(t0)) frScore += 2;
 
-  const frStrong = LANG_DETECT_FR_STRONG;
-  const frTokens = LANG_DETECT_FR_TOKENS;
-  const enStrong = LANG_DETECT_EN_STRONG;
-  const enTokens = LANG_DETECT_EN_TOKENS;
-
-  for (const token of frStrong) {
+  // Score based on token matching - use frozen arrays directly
+  for (const token of LANG_DETECT_FR_STRONG) {
     if (includesToken(s, token)) frScore += 2;
   }
-  for (const token of frTokens) {
+  for (const token of LANG_DETECT_FR_TOKENS) {
     if (includesToken(s, token)) frScore += 1;
   }
-  for (const token of enStrong) {
+  for (const token of LANG_DETECT_EN_STRONG) {
     if (includesToken(s, token)) enScore += 2;
   }
-  for (const token of enTokens) {
+  for (const token of LANG_DETECT_EN_TOKENS) {
     if (includesToken(s, token)) enScore += 1;
   }
 
+  // Determine language based on scores
   if (frScore >= 2 && frScore >= enScore) return "fr";
   if (enScore >= 2) return "en";
   if (frScore >= 1 && hasLatin && enScore === 0) return "fr";
@@ -909,25 +900,42 @@ function resolvePreferredLang({ key, text }) {
   const detected = detectUserLanguage(text);
   const ctx = getCtx(k);
   const current = ctx.preferredLang;
-  let next = current;
-
-  if (!current) next = detected;
-  else if (detected === "ar") next = "ar";
-  else if (current !== "fr" && detected === "fr") next = "fr";
-  else if (current === "dzl" && detected === "en") next = "en";
-
-  if (next && next !== current) setCtx(k, { preferredLang: next });
-  return next || detected;
+  
+  // Determine next language based on current and detected
+  let next = current || detected;
+  
+  if (detected === "ar") {
+    // Arabic always takes precedence
+    next = "ar";
+  } else if (detected === "fr" && current !== "fr") {
+    // Upgrade to French if not already French
+    next = "fr";
+  } else if (detected === "en" && current === "dzl") {
+    // Upgrade from dzl to English
+    next = "en";
+  }
+  
+  // Update context only if language changed
+  if (next !== current) {
+    setCtx(k, { preferredLang: next });
+  }
+  
+  return next;
 }
 
 function normalizeLanguageHint(lang) {
-  const L = String(lang || "").trim().toLowerCase();
-  if (!L) return null;
-  if (L === "dz" || L === "dzl" || L === "darija") return "ar";
-  if (L.startsWith("ar")) return "ar";
-  if (L.startsWith("fr")) return "fr";
-  if (L.startsWith("en")) return "en";
-  if (/^[a-z]{2}$/.test(L)) return L;
+  const normalized = String(lang || "").trim().toLowerCase();
+  if (!normalized) return null;
+  
+  // Map known variants to standard codes
+  if (normalized === "dz" || normalized === "dzl" || normalized === "darija") return "ar";
+  if (normalized.startsWith("ar")) return "ar";
+  if (normalized.startsWith("fr")) return "fr";
+  if (normalized.startsWith("en")) return "en";
+  
+  // Return two-letter language codes as-is
+  if (/^[a-z]{2}$/.test(normalized)) return normalized;
+  
   return null;
 }
 
