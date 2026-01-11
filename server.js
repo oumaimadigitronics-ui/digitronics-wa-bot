@@ -52,6 +52,7 @@ const FEATURE_OFFER_ITEM_EMOJI_FORMAT = String(process.env.FEATURE_OFFER_ITEM_EM
 const FEATURE_OFFERS_BOX_HEADER = String(process.env.FEATURE_OFFERS_BOX_HEADER || (IS_TEST_ENV ? "1" : "0")) === "1";
 const FEATURE_WA_HARD_CAP_4096 = String(process.env.FEATURE_WA_HARD_CAP_4096 || "0") === "1";
 const FEATURE_ALLOW_MAPS_URLS = String(process.env.FEATURE_ALLOW_MAPS_URLS || "0") === "1";
+const FEATURE_CATALOG_OVERVIEW_INTENT = String(process.env.FEATURE_CATALOG_OVERVIEW_INTENT || "0") === "1";
 const WANOTIFIER_FOLLOWUP_FIELD = "followups";
 const IS_TEST = IS_TEST_ENV;
 const ENTRY_FILE = fileURLToPath(import.meta.url);
@@ -3177,6 +3178,63 @@ function isConfusedIntent(text) {
   ];
 
   return hasAnyToken(s, tokens);
+}
+
+function hasRecentProductContext(ctx) {
+  if (!ctx) return false;
+  return Boolean(
+    ctx.lastBrand ||
+      ctx.lastCategory ||
+      ctx.lastClass ||
+      ctx.lastProductName ||
+      ctx.lastModel ||
+      ctx.lastSize ||
+      ctx.lastOffersShown
+  );
+}
+
+function isCatalogOverviewIntent(text, ctx) {
+  const raw = String(text || "");
+  const s = normalizeIntentText(raw);
+  if (!s) return false;
+  if (isConfusedIntent(raw)) return false;
+  const cleaned = s.replace(/[?؟!.,;:]/g, "").replace(/\s+/g, " ").trim();
+  if (!cleaned) return false;
+  if (cleaned.length > 12) return false;
+  if (hasRecentProductContext(ctx)) return false;
+
+  const phrases = new Set([
+    "شنو",
+    "شنو كاين",
+    "شنو كتبيعو",
+    "شنو كتبيعوا",
+    "chno",
+    "chno katbi3o",
+    "chno katbi3ou",
+    "chno kayn",
+  ]);
+
+  return phrases.has(cleaned);
+}
+
+function catalogOverviewMessage(lang) {
+  if (lang === "fr") {
+    return [
+      "Bienvenue chez Digitronics.ma",
+      "- TVs HD, Full HD, 4K, QLED, Mini LED",
+      "- Réfrigérateurs et machines à laver",
+      "- Petits appareils ménagers",
+      "Écris moi ce que tu veux avec budget et taille si TV",
+    ].join("\n");
+  }
+
+  return [
+    "مرحبا بيك ف Digitronics.ma",
+    "- تلفازات HD, Full HD, 4K, QLED, Mini LED",
+    "- ثلاجات و غسالات",
+    "- أجهزة منزلية صغيرة",
+    "كتب ليا شنو بغيتي و الميزانية و المقاس الى كان TV",
+  ].join("\n");
 }
 
 function isSupportIntent(text) {
@@ -11352,6 +11410,13 @@ app.post("/wanotifier", express.raw({ type: "*/*", limit: "2mb" }), parseWanotif
         }
       }
       return res.json(response);
+    }
+
+    if (FEATURE_CATALOG_OVERVIEW_INTENT && isCatalogOverviewIntent(userTextRaw, ctxData)) {
+      const reply = finalizeReply(catalogOverviewMessage(lang), 520);
+      memory.push(key, "assistant", reply);
+      resetStrikes(key);
+      return res.json({ ok: true, reply });
     }
 
     const topicKey = detectTechTopic(userTextRaw);
