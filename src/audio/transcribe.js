@@ -18,9 +18,11 @@ async function transcribeAudio({ filePath, mimeType, language, model, filename }
   const safeName = ext ? baseName : `${baseName || "audio"}.wav`;
   const file = await toFile(fs.createReadStream(filePath), safeName, mimeType ? { type: mimeType } : undefined);
   
-  // Use Darija prompt from env or default, and default to Arabic language for better Darija recognition
-  const darijaPrompt = process.env.OPENAI_STT_DARIJA_PROMPT || DEFAULT_DARIJA_PROMPT;
-  const effectiveLanguage = language || "ar";
+  // Use Darija prompt when language is Arabic/Darija or not specified (for Moroccan context)
+  const languageHint = language ? language.toLowerCase() : null;
+  const isDarijaContext = !languageHint || languageHint === "ar" || languageHint === "darija" || languageHint === "dzl";
+  const darijaPrompt = isDarijaContext ? (process.env.OPENAI_STT_DARIJA_PROMPT || DEFAULT_DARIJA_PROMPT) : undefined;
+  const effectiveLanguage = language || (isDarijaContext ? "ar" : undefined);
   
   let resp;
   try {
@@ -28,7 +30,7 @@ async function transcribeAudio({ filePath, mimeType, language, model, filename }
       file,
       model: chosenModel,
       language: effectiveLanguage,
-      prompt: darijaPrompt,
+      ...(darijaPrompt ? { prompt: darijaPrompt } : {}),
       response_format: "verbose_json",
     });
   } catch (_err) {
@@ -36,7 +38,7 @@ async function transcribeAudio({ filePath, mimeType, language, model, filename }
       file,
       model: chosenModel,
       language: effectiveLanguage,
-      prompt: darijaPrompt,
+      ...(darijaPrompt ? { prompt: darijaPrompt } : {}),
     });
   }
   const latencyMs = getNowMs() - start;
