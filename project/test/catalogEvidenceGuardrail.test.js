@@ -79,3 +79,63 @@ test('catalog guardrail skips price queries', () => {
 
   assert.strictEqual(result, null);
 });
+
+test('catalog guardrail assumes TVs for brand-only queries when flag is enabled', () => {
+  const previousFlag = process.env.FEATURE_ASSUME_TV_ON_BRAND_ONLY;
+  process.env.FEATURE_ASSUME_TV_ON_BRAND_ONLY = '1';
+
+  try {
+    const offersIndex = buildOffersIndex({
+      DAIKO: [
+        {
+          brand: 'Daiko',
+          model: 'DTV-55',
+          name: 'Daiko TV 55 inch',
+          category: 'TV',
+          class: 'TV',
+          price: 1999,
+          stock: 3,
+          link: 'https://example.com/daiko-55',
+        },
+        {
+          brand: 'Daiko',
+          model: 'DTV-65',
+          name: 'Daiko TV 65 inch',
+          category: 'TV',
+          class: 'TV',
+          price: 2499,
+          stock: 2,
+          link: 'https://example.com/daiko-65',
+        },
+        {
+          brand: 'Daiko',
+          model: 'DFR-200',
+          name: 'Daiko Fridge 200L',
+          category: 'Refrigerator',
+          class: 'Refrigerator',
+          price: 2999,
+          stock: 4,
+          link: 'https://example.com/daiko-fridge',
+        },
+      ],
+    });
+
+    const result = maybeAnswerFromCatalogOrEscalate({
+      userText: 'daiko',
+      preferredLang: 'fr',
+      offersIndex,
+    });
+
+    assert.ok(result);
+    assert.match(result.reply, /Daiko TV 55 inch/i);
+    assert.match(result.reply, /Daiko TV 65 inch/i);
+    assert.doesNotMatch(result.reply, /Daiko Fridge/i);
+    assert.ok(result.reply.indexOf('Daiko TV 55 inch') < result.reply.indexOf('Daiko TV 65 inch'));
+  } finally {
+    if (previousFlag === undefined) {
+      delete process.env.FEATURE_ASSUME_TV_ON_BRAND_ONLY;
+    } else {
+      process.env.FEATURE_ASSUME_TV_ON_BRAND_ONLY = previousFlag;
+    }
+  }
+});
