@@ -7668,17 +7668,8 @@ function listOffersForSizeAcrossBrands(size, opts) {
   }
 
   const ranked = rankOffers(items, { size: Number(size), className: cls, limit: null });
-  const uniqueRanked = pickCheapestPerBrand(ranked);
-  debugLog("rank_offers_across_brands", { size, cls, count: uniqueRanked.length });
-
-  if (hasFocusBrand() && FOCUS.mode === "preferred") {
-    const focus = uniqueRanked.filter((x) => x.brand === FOCUS.brand);
-    const combined = focus.concat(uniqueRanked.filter((x) => x.brand !== FOCUS.brand));
-    const picks = pickCheapestPerBrand(combined).slice(0, limit);
-    if (picks.length) return picks;
-  }
-
-  return uniqueRanked.slice(0, limit);
+  debugLog("rank_offers_across_brands", { size, cls, count: ranked.length });
+  return ranked.slice(0, limit);
 }
 
 function collectTvOffers({ brand, size, budget }) {
@@ -7700,7 +7691,8 @@ function collectTvOffers({ brand, size, budget }) {
       items.push({ brand: b, offer: o });
     }
   }
-  return pickCheapestPerBrand(items).slice(0, MAX_OFFERS);
+  const ranked = rankOffers(items, { size: Number(size), className: tvCanon, tvClassCanon: tvCanon, limit: null });
+  return ranked.slice(0, MAX_OFFERS);
 }
 
 function normalizeTvTypeName(typeStr) {
@@ -9755,7 +9747,7 @@ function handleTvSizePriceFlow(parsed, lang, key) {
     }
 
     const ranked = rankOffers(fallbackItems, { size: sizeVal, className: tvCanon, limit: null });
-    const limited = pickCheapestPerBrand(ranked).slice(0, MAX_OFFERS);
+    const limited = ranked.slice(0, MAX_OFFERS);
     if (limited.length) {
       const offerCtx = buildOfferContextEntries(limited);
       setCtx(key, {
@@ -9781,7 +9773,7 @@ function handleTvSizePriceFlow(parsed, lang, key) {
   const minPrice = prices.length ? Math.min(...prices) : null;
   const maxPrice = prices.length ? Math.max(...prices) : null;
 
-  const top = pickCheapestPerBrand(matches).slice(0, MAX_OFFERS);
+  const top = matches.slice(0, MAX_OFFERS);
   const orderedTop = [...top].sort((a, b) => Number(a.offer.price) - Number(b.offer.price));
   const wantPrice = priceIntent || cheapIntent || Number.isFinite(budget);
 
@@ -9864,7 +9856,7 @@ function tryDirectOfferAnswer(userText, historyMsgs, lang, key, opts = {}) {
       }
     }
     const ranked = rankOffers(tvItems, { className: tvCanon, tvClassCanon: tvCanon, limit: null });
-    const picked = pickCheapestPerBrand(ranked).slice(0, MAX_OFFERS);
+    const picked = ranked.slice(0, MAX_OFFERS);
     const entries = picked.map((it) => ({ brand: it.brand, offer: it.offer }));
     const hasEurope = picked.some((it) => {
       const name = normMatch((it.offer && (it.offer.name || it.offer.model)) || "");
@@ -10400,7 +10392,7 @@ function bestGuessOffers(lang, key, limit = MAX_OFFERS) {
     .filter((it) => Number(((it.offer || {}).stock) || 0) > 0);
 
   const ranked = rankOffers(items, { limit: null, className: tvCanon, tvClassCanon: tvCanon });
-  const picked = pickCheapestPerBrand(ranked).slice(0, max);
+  const picked = ranked.slice(0, max);
   if (picked.length) {
     const entries = picked.map((it) => ({ brand: it.brand, offer: it.offer }));
     const offerCtx = buildOfferContextEntries(entries);
@@ -10435,7 +10427,7 @@ function defaultTvOffersForReceiver(lang, key) {
     .filter((it) => Number(((it.offer || {}).stock) || 0) > 0);
 
   const ranked = rankOffers(items, { limit: null, className: tvCanon, tvClassCanon: tvCanon });
-  const picked = pickCheapestPerBrand(ranked).slice(0, MAX_OFFERS);
+  const picked = ranked.slice(0, MAX_OFFERS);
   if (!picked.length) return null;
 
   const offerCtx = buildOfferContextEntries(picked);
