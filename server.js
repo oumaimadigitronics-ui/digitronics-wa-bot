@@ -3884,6 +3884,18 @@ function isTvOffer(offer, info = null) {
   if (clsNorm && clsNorm === ctx.tvNorm) return true;
   if (ctx.tvCategoryNorm && catNorm === ctx.tvCategoryNorm) return true;
   if (matchTvSynonym(o.class || "") || matchTvSynonym(o.category || "")) return true;
+  
+  // Enhanced TV detection: Check product name with explicit regex pattern
+  // This catches TVs even if token-based matching has edge cases
+  const name = String(o.name || "");
+  if (name) {
+    // Match TV keywords with word boundaries (case-insensitive)
+    // Matches: "TV", "Tv", "tv", "Google TV", "Smart TV", "QLED", "OLED", etc.
+    const tvPattern = /\b(tv|tele|télé|television|télévision|google\s*tv|android\s*tv|smart\s*tv|qled|oled|mini\s*led)\b/i;
+    if (tvPattern.test(name)) return true;
+  }
+  
+  // Fallback to existing title hint matching for model/sku
   const title = [o.name, o.model, o.sku].filter(Boolean).join(" ");
   return matchTvTitleHint(title);
 }
