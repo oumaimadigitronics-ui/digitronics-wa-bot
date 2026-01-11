@@ -10175,6 +10175,7 @@ function tryDirectOfferAnswer(userText, historyMsgs, lang, key, opts = {}) {
         const title = titleFromHeader(offersHeader(lang, { brand }));
         return buildPremiumOffersReply({ title, entries, lang, maxChars: CFG.maxReplyChars });
       }
+      return ensureNoQuestion(t(lang, "categoryUnavailable", { category: brand }));
     }
   }
 
