@@ -2453,12 +2453,17 @@ function hasTvSizeInQuery(raw) {
   if (!s) return false;
   
   // Check for explicit size with unit (e.g., "55 pouce", "65 inch", "43\"")
-  const sizeWithUnitRe = /(\d{2,3})\s*(\"|''|"|″|pouce|pouces|inch|inches|بوصة|بوص|بوس)/i;
+  const sizeWithUnitRe = /(\d{2,3})\s*([\"\''″]|pouce|pouces|inch|inches|بوصة|بوص|بوس)/i;
   if (sizeWithUnitRe.test(s)) return true;
   
   // Check for bare TV size numbers from ALLOWED_TV_SIZES (e.g., "55", "65", "43")
-  const tvSizes = [24, 27, 32, 40, 42, 43, 49, 50, 55, 58, 60, 65, 70, 75, 77, 82, 83, 85, 95, 98, 100, 115];
+  // Using the same list defined at module level
+  const tvSizes = ALLOWED_TV_SIZES;
   const sizeRe = /(?<!\d)(\d{2,3})(?!\d)/g;
+  
+  // Consolidated exclusion pattern for non-TV-size contexts
+  const excludePattern = /\b(hz|khz|w|kw|kva|va|mah|wh|v|4k|8k|720p|1080p|hdr|uhd|fhd|120hz|144hz|165hz|l|litre|litres|liter|liters|لتر)\b/i;
+  
   let match;
   while ((match = sizeRe.exec(s))) {
     const num = Number(match[1]);
@@ -2466,9 +2471,7 @@ function hasTvSizeInQuery(raw) {
       // Make sure it's not a year, Hz, or other non-size number
       const before = s.slice(Math.max(0, match.index - 8), match.index);
       const after = s.slice(match.index + match[1].length, match.index + match[1].length + 8);
-      if (/\b(hz|khz|w|kw|kva|va|mah|wh|v)\b/i.test(before + after)) continue;
-      if (/\b(4k|8k|720p|1080p|hdr|uhd|fhd|120hz|144hz|165hz)\b/i.test(before + after)) continue;
-      if (/\b(l|litre|litres|liter|liters|لتر)\b/i.test(before + after)) continue;
+      if (excludePattern.test(before + after)) continue;
       return true;
     }
   }
