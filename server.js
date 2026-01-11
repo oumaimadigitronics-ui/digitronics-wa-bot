@@ -2792,11 +2792,14 @@ function resolveAdvice(text, ctxData) {
   const ctx = ctxData && typeof ctxData === "object" ? ctxData : {};
   const knowledgeProduct = detectProductModel(raw);
 
+  // If query contains a TV size, don't return tech explanations - let product search handle it
+  const hasSize = hasTvSizeInQuery(raw);
+
   const hasGoogle = s.includes("google");
   const hasAndroid = s.includes("android");
-  if (hasGoogle && hasAndroid) return TECH_EXPLAIN_TEMPLATE("google_vs_android");
-  if (s.includes("qled") && s.includes("led")) return TECH_EXPLAIN_TEMPLATE("qled_vs_led");
-  if (s.includes("4k") && (s.includes("fhd") || s.includes("full hd") || s.includes("1080"))) return TECH_EXPLAIN_TEMPLATE("4k_vs_fhd");
+  if (!hasSize && hasGoogle && hasAndroid) return TECH_EXPLAIN_TEMPLATE("google_vs_android");
+  if (!hasSize && s.includes("qled") && s.includes("led")) return TECH_EXPLAIN_TEMPLATE("qled_vs_led");
+  if (!hasSize && s.includes("4k") && (s.includes("fhd") || s.includes("full hd") || s.includes("1080"))) return TECH_EXPLAIN_TEMPLATE("4k_vs_fhd");
 
   const isGoodSignal =
     includesToken(s, "good") ||
