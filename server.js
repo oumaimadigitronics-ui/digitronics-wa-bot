@@ -7899,15 +7899,28 @@ function listOffersForBrand(brand, opts) {
   const lines = picked.map((r) => formatOfferLine(r.brand, r.offer || r));
   
   // Debug logging to track brand lookup and filtering
-  const totalOffersForBrand = (OFFERS && OFFERS.offers && OFFERS.offers[actualBrandKey]) ? OFFERS.offers[actualBrandKey].length : 0;
-  const tvFilteredOffers = filtered.filter((it) => isTvOffer(it.offer || {}));
+  // Store offers array to avoid redundant lookups
+  const brandOffers = (OFFERS && OFFERS.offers && OFFERS.offers[actualBrandKey]) || [];
+  const totalOffersForBrand = brandOffers.length;
+  // Count TV offers during initial filtering if needed, avoiding extra pass
+  let tvOffersCount = 0;
+  if (useTvFilter) {
+    // When TV filter is active, filtered already contains only TV offers
+    tvOffersCount = filtered.length;
+  } else {
+    // Only count TV offers if TV filter wasn't used (for debugging mixed results)
+    for (let i = 0; i < filtered.length; i += 1) {
+      if (isTvOffer(filtered[i].offer || {})) tvOffersCount += 1;
+    }
+  }
+  
   logger.info({
     msg: "listOffersForBrand_debug",
     inputBrand: brand,
     foundKey: actualBrandKey,
     totalOffersForBrand: totalOffersForBrand,
     tvOnlyParam: o.tvOnly,
-    tvOffersCount: tvFilteredOffers.length,
+    tvOffersCount: tvOffersCount,
     offersReturned: picked.length
   });
   
