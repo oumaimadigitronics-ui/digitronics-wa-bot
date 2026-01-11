@@ -2448,11 +2448,42 @@ function isProductAdviceIntent(text) {
   return hasAdvice;
 }
 
+function hasTvSizeInQuery(raw) {
+  const s = arabicIndicToAsciiDigits(String(raw || "")).toLowerCase();
+  if (!s) return false;
+  
+  // Check for explicit size with unit (e.g., "55 pouce", "65 inch", "43\"")
+  const sizeWithUnitRe = /(\d{2,3})\s*(\"|''|"|″|pouce|pouces|inch|inches|بوصة|بوص|بوس)/i;
+  if (sizeWithUnitRe.test(s)) return true;
+  
+  // Check for bare TV size numbers from ALLOWED_TV_SIZES (e.g., "55", "65", "43")
+  const tvSizes = [24, 27, 32, 40, 42, 43, 49, 50, 55, 58, 60, 65, 70, 75, 77, 82, 83, 85, 95, 98, 100, 115];
+  const sizeRe = /(?<!\d)(\d{2,3})(?!\d)/g;
+  let match;
+  while ((match = sizeRe.exec(s))) {
+    const num = Number(match[1]);
+    if (tvSizes.includes(num)) {
+      // Make sure it's not a year, Hz, or other non-size number
+      const before = s.slice(Math.max(0, match.index - 8), match.index);
+      const after = s.slice(match.index + match[1].length, match.index + match[1].length + 8);
+      if (/\b(hz|khz|w|kw|kva|va|mah|wh|v)\b/i.test(before + after)) continue;
+      if (/\b(4k|8k|720p|1080p|hdr|uhd|fhd|120hz|144hz|165hz)\b/i.test(before + after)) continue;
+      if (/\b(l|litre|litres|liter|liters|لتر)\b/i.test(before + after)) continue;
+      return true;
+    }
+  }
+  
+  return false;
+}
+
 function detectTechTopic(raw) {
   const s = normMatch(arabicIndicToAsciiDigits(String(raw || ""))).toLowerCase();
   if (!s) return null;
   const normalized = s.replace(/[’']/g, " ").replace(/\s+/g, " ").trim();
   const noSpace = normalized.replace(/\s+/g, "");
+
+  // If query contains a TV size, prioritize product search over tech guide
+  if (hasTvSizeInQuery(raw)) return null;
 
   const priceTokens = ["price", "prix", "ثمن", "سعر"];
   const compareTokens = [
