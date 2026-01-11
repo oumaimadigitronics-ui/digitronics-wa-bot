@@ -11841,6 +11841,9 @@ app.post("/wanotifier", express.raw({ type: "*/*", limit: "2mb" }), parseWanotif
   }
 });
 
+// Alias for tests
+const ORDER_FORM_URL = ORDER_FORM_URL_VALUE;
+
 export {
   rankOffers,
   trimOffersForPrompt,
