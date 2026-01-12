@@ -62,7 +62,6 @@ import {
   getAttr as getAttrImpl,
   getBrandFromWoo as getBrandFromWooImpl,
   getTvSizeFromProduct as getTvSizeFromProductImpl,
-  getSizeFromNameSku as getSizeFromNameSkuImpl,
   getCapacityFromProduct as getCapacityFromProductImpl,
   extractClassFromAttributes as extractClassFromAttributesImpl,
   getClassFromCategories as getClassFromCategoriesImpl,
@@ -316,10 +315,6 @@ function getTvSizeFromProduct(p) {
   return getTvSizeFromProductImpl(p, getOffersIndex());
 }
 
-function getSizeFromNameSku(p) {
-  return getSizeFromNameSkuImpl(p);
-}
-
 function getCapacityFromProduct(p) {
   return getCapacityFromProductImpl(p);
 }
@@ -341,25 +336,19 @@ function offerFromWooProduct(p) {
 }
 
 function rebuildOffersIndex() {
-  rebuildOffersIndexImpl(logger);
-  updateOffersReferences();
+  return rebuildOffersIndexImpl(logger);
 }
 
 function setOffersForTest(offersObj) {
-  setOffersForTestImpl(offersObj, logger, LOG_DEBUG);
-  updateOffersReferences();
+  return setOffersForTestImpl(offersObj, logger, LOG_DEBUG);
 }
 
 async function syncOffersFromWoo() {
-  const result = await syncOffersFromWooImpl(CFG, logger, LOG_DEBUG);
-  updateOffersReferences();
-  return result;
+  return syncOffersFromWooImpl(CFG, logger, LOG_DEBUG);
 }
 
 async function refreshOffersSafe() {
-  const result = await refreshOffersSafeImpl(CFG, logger, LOG_DEBUG);
-  updateOffersReferences();
-  return result;
+  return refreshOffersSafeImpl(CFG, logger, LOG_DEBUG);
 }
 
 // Convenience accessors for OFFERS and OFFERS_INDEX
@@ -3097,6 +3086,516 @@ function rebuildModelPrefixIndex(modelLookup) {
     mp.set(k, arr);
   }
   return mp;
+}
+
+function rebuildOffersIndex() {
+  const offersObj = (OFFERS && OFFERS.offers) || {};
+  const brands = Object.keys(offersObj).sort();
+  const classesSet = new Set();
+  const categoriesSet = new Set();
+  const modelLookup = new Map();
+  const linkLookup = new Map();
+  const brandNorm = new Map();
+  const classNorm = new Map();
+  const categoryNorm = new Map();
+  const classToOffers = new Map();
+  const categoryToOffers = new Map();
+
+  for (let i = 0; i < brands.length; i += 1) {
+    const b = brands[i];
+    brandNorm.set(normMatch(b), b);
+
+    const arr = offersObj[b] || [];
+    for (let j = 0; j < arr.length; j += 1) {
+      const o = arr[j];
+      if (o && o.model) modelLookup.set(normMatch(o.model), { brand: b, offer: o });
+
+      const link = sanitizeUrlNoQuestion((o && (o.link || o.url)) || "");
+      const linkKey = String(link || "").replace(/\/$/, "").toLowerCase();
+      if (linkKey) {
+        linkLookup.set(linkKey, { brand: b, offer: o });
+        if (!linkKey.endsWith("/")) linkLookup.set(`${linkKey}/`, { brand: b, offer: o });
+      }
+
+      const cls = String((o && o.class) || "").trim();
+      if (cls) {
+        classesSet.add(cls);
+        classNorm.set(normMatch(cls), cls);
+        const k = normMatch(cls);
+        const bucket = classToOffers.get(k) || [];
+        bucket.push({ brand: b, offer: o });
+        classToOffers.set(k, bucket);
+      }
+
+      const cat = String((o && o.category) || "").trim();
+      if (cat) {
+        categoriesSet.add(cat);
+        categoryNorm.set(normMatch(cat), cat);
+        const k2 = normMatch(cat);
+        const bucket2 = categoryToOffers.get(k2) || [];
+        bucket2.push({ brand: b, offer: o });
+        categoryToOffers.set(k2, bucket2);
+      }
+    }
+  }
+
+  const classes = Array.from(classesSet).sort((a, b) => a.localeCompare(b));
+  const categories = Array.from(categoriesSet).sort((a, b) => a.localeCompare(b));
+
+  const tvInference = inferTvCanonFromOffers(offersObj);
+  const tvCanon =
+    tvInference.tvClass ||
+    tvInference.tvCategory ||
+    pickCanonicalClass(classes, ["tv"]) ||
+    pickCanonicalClass(classes, ["tele"]) ||
+    pickCanonicalClass(classes, ["télé"]) ||
+    "Tv";
+  const tvCategory = tvInference.tvCategory || null;
+
+  OFFERS_INDEX = {
+    brands,
+    classes,
+    categories,
+    modelLookup,
+    linkLookup,
+    brandNorm,
+    classNorm,
+    categoryNorm,
+    classToOffers,
+    categoryToOffers,
+    classCanon: { tv: tvCanon, tvCategory },
+    modelPrefix4: rebuildModelPrefixIndex(modelLookup),
+  };
+
+  logger.info({
+    msg: "inferred_tv_classCanon",
+    tvClassCanon: tvCanon,
+    tvCategoryCanon: tvCategory,
+    classCandidates: tvInference.classCandidates.slice(0, 5),
+    categoryCandidates: tvInference.categoryCandidates.slice(0, 5),
+    titleCandidates: tvInference.titleCandidates.slice(0, 5),
+  });
+}
+
+function setOffersForTest(offersObj) {
+  OFFERS = { offers: offersObj || {} };
+  rebuildOffersIndex();
+  const hasOffers = Boolean(offersObj && Object.keys(offersObj).length);
+  lastOffersSync = { ok: hasOffers, at: nowIso(), error: hasOffers ? null : "No offers set" };
+  if (LOG_DEBUG) {
+    debugLog("set_offers_for_test", {
+      brands: (OFFERS_INDEX.brands || []).length,
+      categories: (OFFERS_INDEX.categories || []).length,
+      catBuckets: OFFERS_INDEX.categoryToOffers ? OFFERS_INDEX.categoryToOffers.size : 0,
+    });
+  }
+}
+
+
+function firstCategoryName(product) {
+  const cats = Array.isArray((product && product.categories) || null) ? product.categories : [];
+  if (cats.length && cats[0] && cats[0].name) return String(cats[0].name).trim();
+  return "";
+}
+
+function wcPrice(product) {
+  const p = (product && (product.sale_price || product.regular_price || product.price)) || "";
+  return parsePrice(p);
+}
+
+function wcInStock(product) {
+  const status = String(((product && product.stock_status) || "")).toLowerCase();
+  if (status === "instock") return 1;
+  const qty = Number(product && product.stock_quantity);
+  if (Number.isFinite(qty) && qty > 0) return 1;
+  return 0;
+}
+
+function getAttr(p, nameOrSlug) {
+  const attrs = Array.isArray((p && p.attributes) || null) ? p.attributes : [];
+  const target = normMatch(nameOrSlug || "");
+  for (let i = 0; i < attrs.length; i += 1) {
+    const a = attrs[i] || {};
+    const n1 = normMatch(a.name || "");
+    const n2 = normMatch(a.slug || "");
+    if (n1 === target || n2 === target) {
+      const opts = Array.isArray(a.options || null) ? a.options : [];
+      const v = opts.length ? String(opts[0]).trim() : "";
+      if (v) return v;
+    }
+  }
+  return "";
+}
+
+function getBrandFromWoo(p) {
+  if (Array.isArray((p && p.brands) || null) && p.brands.length) {
+    const b = String(((p.brands[0] && p.brands[0].name) || "")).trim();
+    if (b) return b.toUpperCase();
+  }
+
+  const brandAttr = getAttr(p, "Brand") || getAttr(p, "Marque") || getAttr(p, "pa_brand");
+  if (brandAttr) return String(brandAttr).trim().toUpperCase();
+
+   const inferenceText = [p && p.name, p && p.sku]
+     .map((val) => normMatch(val || ""))
+     .filter(Boolean)
+     .join(" ");
+
+   const brandsForInference = Array.from(new Set([...BRAND_PRIORITY, "Morsat"]));
+   for (let i = 0; i < brandsForInference.length; i += 1) {
+     const candidate = String(brandsForInference[i] || "").trim();
+     if (candidate && includesToken(inferenceText, candidate)) return candidate.toUpperCase();
+   }
+
+  return "UNKNOWN";
+}
+
+const MIN_TV_SIZE = 24;
+const MAX_TV_SIZE = 120;
+const ALLOWED_TV_SIZES = Object.freeze([24, 27, 32, 40, 42, 43, 49, 50, 55, 58, 60, 65, 70, 75, 77, 82, 83, 85, 95, 98, 100, 115]);
+const TV_SIZE_HINTS = new Set(ALLOWED_TV_SIZES);
+const SIZE_ATTR_KEYS = ["size", "taille", "pouces", "inch", "screen size", "diagonale", "pa_size"];
+
+function isSizeAttrKey(name) {
+  const n = normMatch(name || "");
+  for (let i = 0; i < SIZE_ATTR_KEYS.length; i += 1) {
+    if (n === normMatch(SIZE_ATTR_KEYS[i])) return true;
+  }
+  return false;
+}
+
+function extractAllowedTvSizeFromString(str, opts = {}) {
+  const s0 = arabicIndicToAsciiDigits(String(str || ""));
+  if (!s0) return 0;
+  const s = s0.toLowerCase();
+  const requireTvHint = opts.requireTvHint === true;
+  const allowNoHint = opts.allowNoHint === true;
+  const attrKey = opts.attrKey || "";
+  const externalTvContext = opts.externalTvContext === true;
+
+  const globalTvHint = /(tv|tele|télé|television|télévision|بوصة|smart\s*tv|google\s*tv|android\s*tv)/i.test(s);
+  const tvUnitRe = /(pouce|pouces|inch|inches|in\b|\"|''|”|po\b|diagonale)/i;
+  const moroccanSizeHintRe = /(النمرة|نمرة|رقم|num(?:ero)?|numero|taille)/i;
+
+  const re = /(?<!\d)(\d{2,3})(?!\d)/g;
+  let m = null;
+  while ((m = re.exec(s0))) {
+    const num = Number(m[1]);
+    if (num < MIN_TV_SIZE || num > MAX_TV_SIZE) continue;
+    if (!ALLOWED_TV_SIZES.includes(num)) continue;
+
+    const before = s.slice(Math.max(0, m.index - 8), m.index);
+    const after = s.slice(m.index + m[1].length, m.index + m[1].length + 8);
+    if (/\b(l|litre|litres|liter|liters|لتر)\b/i.test(before + after)) continue;
+    const immediate = s.slice(m.index, Math.min(s.length, m.index + m[1].length + 2));
+    if (/^\d{2,3}\s*l(?![a-z])/i.test(immediate)) continue;
+    if (/\b(hz|khz|w|kw|kva|va|mah|wh|v)\b/i.test(before + after)) continue;
+    if (/\b(4k|8k|720p|1080p|hdr|uhd|fhd|120hz|144hz|165hz)\b/i.test(before + after)) continue;
+
+    const context = s.slice(Math.max(0, m.index - 12), Math.min(s.length, m.index + m[1].length + 12));
+    const hasBareSizeHint = TV_SIZE_HINTS.has(num);
+    const hasUnit = tvUnitRe.test(context);
+    const hasTvWord = /(tv|tele|télé|television|télévision|تلفاز|تلفزيون)/i.test(context) || globalTvHint;
+    const hasSizeCue = moroccanSizeHintRe.test(context);
+    const hasAttrHint = isSizeAttrKey(attrKey);
+    const hasExternal = externalTvContext === true;
+    const hasAnyHint = hasUnit || hasTvWord || hasAttrHint || hasExternal || hasSizeCue || hasBareSizeHint;
+
+    if (requireTvHint && !hasAnyHint) continue;
+    if (!allowNoHint && !hasAnyHint) continue;
+    return num;
+  }
+  return 0;
+}
+
+function getSizeFromNameSku(p) {
+  const name = String((p && p.name) || "");
+  const sku = String((p && p.sku) || "");
+  const combined = arabicIndicToAsciiDigits((name + " " + sku).trim());
+  if (!combined) return 0;
+
+  const allowed = ALLOWED_TV_SIZES;
+  const re = new RegExp(`\\b(${allowed.join("|")})(\\s*(\"|''|”|″|pouce|pouces|inch|inches|inch\\b|inch-|inchs|بوصة|بوص|بوس))?`, "gi");
+  let match = null;
+  while ((match = re.exec(combined))) {
+    const num = Number(match[1]);
+    if (allowed.includes(num)) return num;
+  }
+  return 0;
+}
+
+function getTvSizeFromProduct(p) {
+  const clsRaw = getClassFromCategories(p);
+  const clsNorm = normMatch(clsRaw || "");
+  const cats = Array.isArray((p && p.categories) || null) ? p.categories : [];
+  
+  // Combine map and filter operations into a single pass
+  const categoryNames = [];
+  for (let i = 0; i < cats.length; i += 1) {
+    const name = cats[i] && cats[i].name;
+    if (name) categoryNames.push(name);
+  }
+  
+  const hasTvContext =
+    clsNorm === normMatch(OFFERS_INDEX.classCanon.tv || "tv") ||
+    categoryNames.some((n) => normMatch(n || "").indexOf("tv") >= 0 || /t(é|e)l(é|e)/i.test(String(n || "")));
+
+  for (let i = 0; i < cats.length; i += 1) {
+    const c = cats[i] || {};
+    const size = extractAllowedTvSizeFromString(c.name, { allowNoHint: false, externalTvContext: hasTvContext });
+    if (size) return size;
+  }
+
+  const nameSkuSize = getSizeFromNameSku(p);
+  if (nameSkuSize) return nameSkuSize;
+
+  const nameHit = extractAllowedTvSizeFromString(p && p.name, { allowNoHint: false, externalTvContext: hasTvContext });
+  if (nameHit) return nameHit;
+
+  const attrs = Array.isArray((p && p.attributes) || null) ? p.attributes : [];
+  for (let i = 0; i < attrs.length; i += 1) {
+    const a = attrs[i] || {};
+    if (!isSizeAttrKey(a.name) && !isSizeAttrKey(a.slug)) continue;
+    const opts = Array.isArray(a.options || null) ? a.options : [];
+    if (!opts.length) continue;
+    const size = extractAllowedTvSizeFromString(opts[0], {
+      allowNoHint: true,
+      attrKey: a.name || a.slug,
+      externalTvContext: true,
+    });
+    if (size) return size;
+  }
+
+  return 0;
+}
+
+function getCapacityFromProduct(p) {
+  const name = String((p && p.name) || "");
+  const sku = String((p && p.sku) || "");
+  const attrNames = ["capacity", "capacite", "capacité", "litres", "volume", "pa_capacity"];
+  for (let i = 0; i < attrNames.length; i += 1) {
+    const v = getAttr(p, attrNames[i]);
+    const parsed = extractCapacityLiters(v);
+    if (parsed) return parsed;
+  }
+
+  const catHit = (() => {
+    const cats = Array.isArray((p && p.categories) || null) ? p.categories : [];
+    for (let i = 0; i < cats.length; i += 1) {
+      const c = cats[i] || {};
+      const n = String(c.name || "");
+      const m = n.match(/(\d{2,4})\s*l/gi);
+      if (m && m[0]) {
+        const parsed = extractCapacityLiters(m[0]);
+        if (parsed) return parsed;
+      }
+    }
+    return null;
+  })();
+  if (catHit) return catHit;
+
+  const nameSku = [name, sku];
+  for (let i = 0; i < nameSku.length; i += 1) {
+    const parsed = extractCapacityLiters(nameSku[i]);
+    if (parsed) return parsed;
+  }
+
+  return 0;
+}
+
+function extractClassFromAttributes(p) {
+  // Try to extract the "Class" attribute from WooCommerce attributes array
+  const classAttr = getAttr(p, "Class") || getAttr(p, "class") || getAttr(p, "pa_class");
+  if (classAttr) {
+    const normalized = String(classAttr).trim();
+    // Return the class value as-is from the attribute
+    if (normalized) return normalized;
+  }
+  return "";
+}
+
+function getClassFromCategories(p) {
+  const cats = Array.isArray((p && p.categories) || null) ? p.categories : [];
+  const names = [];
+  for (let i = 0; i < cats.length; i += 1) names.push(normMatch((cats[i] && cats[i].name) || ""));
+
+  function hit(arr) {
+    for (let i = 0; i < names.length; i += 1) {
+      const n = names[i];
+      for (let j = 0; j < arr.length; j += 1) {
+        if (n.indexOf(arr[j]) >= 0) return true;
+      }
+    }
+    return false;
+  }
+
+  if (hit(["tv", "tele", "télé", "google tv", "smart tv"])) return "Tv";
+  if (hit(["machine a laver", "lave linge", "washing"])) return "Machine A Laver";
+  if (hit(["frigo", "refrigerateur", "réfrigérateur"])) return "Refrigerateur";
+  if (hit(["clim", "climatiseur", "air conditioner"])) return "Climatiseur";
+  if (hit(["chauffe", "chauffe-eau", "chauffe eau", "water heater"])) return "Chauffe-eau";
+  if (hit(["congelateur", "congélateur", "freezer"])) return "Congelateur";
+  if (hit(["micro", "micro-ondes", "microwave"])) return "Micro-ondes";
+  if (hit(["lave vaisselle", "dishwasher"])) return "Lave Vaisselle";
+  return "";
+}
+
+function getTypeFromProduct(p) {
+  // Fix: always respect catalog type
+  const typeRaw = String((p && p.type) || "").trim();
+  if (typeRaw) return typeRaw;
+
+  const sku = normMatch((p && p.sku) || "");
+  const name = normMatch((p && p.name) || "");
+  const brand = normMatch(getBrandFromWoo(p) || "");
+
+  const exceptions = {
+    "visio|32vb23e": "LED TV",
+  };
+
+  const key = brand + "|" + sku;
+  if (exceptions[key]) return exceptions[key];
+
+  const cats = Array.isArray((p && p.categories) || null) ? p.categories : [];
+  for (let i = 0; i < cats.length; i += 1) {
+    const c = cats[i] || {};
+    const cn = normMatch(c.name || "");
+    if (cn.indexOf("google tv") >= 0) return "Google TV";
+    if (cn.indexOf("android") >= 0) return "Android TV";
+    if (cn.indexOf("mini led") >= 0 || cn.indexOf("mini-led") >= 0) return "Mini LED";
+    if (cn.indexOf("qled") >= 0) return "QLED";
+    if (cn.indexOf("oled") >= 0) return "OLED";
+    if (cn.indexOf("smart tv") >= 0 || hasSmartToken(cn)) return "Smart TV";
+    if (cn.indexOf("led") >= 0) return "LED TV";
+  }
+
+  if (name.indexOf("google tv") >= 0) return "Google TV";
+  if (name.indexOf("android") >= 0) return "Android TV";
+  if (name.indexOf("mini led") >= 0 || name.indexOf("mini-led") >= 0) return "Mini LED";
+  if (name.indexOf("qled") >= 0) return "QLED";
+  if (name.indexOf("oled") >= 0) return "OLED";
+  if (hasSmartToken(name)) return "Smart TV";
+  if (name.indexOf("led") >= 0) return "LED TV";
+
+  const brandForType = getBrandFromWoo(p);
+  const brandModelKey = normMatch((brandForType || "") + " " + (p && p.sku ? p.sku : p && p.name ? p.name : ""));
+  const BRAND_TYPE_DEFAULTS = {
+    VISIO: () => (brandModelKey.indexOf("32vb23e") >= 0 ? "LED TV" : "Google TV"),
+    MORSAT: () => "Android TV",
+  };
+
+  const typeFn = BRAND_TYPE_DEFAULTS[brandForType];
+  if (typeof typeFn === "function") return typeFn();
+  return "";
+}
+
+function offerFromWooProduct(p) {
+  const model = String(((p && p.sku) || "")).trim();
+  if (!model) return null;
+
+  const brand = getBrandFromWoo(p);
+  if (!brand || brand === "UNKNOWN") return null;
+
+  const price = wcPrice(p);
+  if (!Number.isFinite(price)) return null;
+
+  // Extract class from WooCommerce attributes first, then fall back to categories
+  const wooClass = extractClassFromAttributes(p);
+  const cls = wooClass || getClassFromCategories(p);
+  const capacity = cls && normMatch(cls) === normMatch(OFFERS_INDEX.classCanon.tv || "tv") ? 0 : getCapacityFromProduct(p);
+
+  // Debug logging to track WooCommerce data being parsed
+  if (LOG_DEBUG) {
+    logger.info({
+      msg: "woo_product_parsed",
+      name: p && p.name,
+      sku: p && p.sku,
+      categories: p && p.categories,
+      attributes: p && p.attributes,
+      extractedClass: cls,
+      wooClassAttribute: wooClass,
+      categoryClass: getClassFromCategories(p),
+    });
+  }
+
+  return {
+    model,
+    name: String(((p && p.name) || "")).trim(),
+    category: cls || firstCategoryName(p),
+    size: getTvSizeFromProduct(p),
+    capacity_l: capacity,
+    type: getTypeFromProduct(p),
+    price,
+    class: cls,
+    stock: wcInStock(p),
+    link: String(((p && p.permalink) || "")).trim(),
+  };
+}
+
+let offersRefreshInFlight = null;
+
+async function syncOffersFromWoo() {
+  const perPage = CFG.wcPerPage;
+  const status = CFG.wcStatus;
+
+  let page = 1;
+  const offers = {};
+  let kept = 0;
+
+  for (;;) {
+    const url = buildWooUrl("/wp-json/wc/v3/products", { per_page: perPage, page, status });
+    const items = await wcFetchJson(url);
+    if (!Array.isArray(items) || items.length === 0) break;
+
+    for (let i = 0; i < items.length; i += 1) {
+      const p = items[i];
+      const o = offerFromWooProduct(p);
+      if (!o) continue;
+
+      const brand = getBrandFromWoo(p);
+      if (!offers[brand]) offers[brand] = [];
+      offers[brand].push(Object.assign({ brand }, o));
+      kept += 1;
+    }
+
+    if (items.length < perPage) break;
+    page += 1;
+    if (page > 80) break;
+  }
+
+  OFFERS = { offers };
+  rebuildOffersIndex();
+
+  return {
+    kept,
+    brands: OFFERS_INDEX.brands.length,
+    classes: OFFERS_INDEX.classes.length,
+    categories: OFFERS_INDEX.categories.length,
+  };
+}
+
+async function refreshOffersSafe() {
+  if (offersRefreshInFlight) return offersRefreshInFlight;
+
+  offersRefreshInFlight = (async () => {
+    try {
+      const info = await syncOffersFromWoo();
+      const ok = info && Number(info.kept) > 0;
+      lastOffersSync = { ok, at: nowIso(), error: ok ? null : "No offers fetched" };
+      const payload = Object.assign({ level: ok ? "info" : "warn", msg: "offers_refresh" }, info, { ok });
+      if (ok) console.log(JSON.stringify(payload));
+      else console.error(JSON.stringify(payload));
+    } catch (e) {
+      lastOffersSync = { ok: false, at: nowIso(), error: (e && e.message) || String(e) };
+      console.error(
+        JSON.stringify({ level: "error", msg: "offers_refresh_failed", error: lastOffersSync.error })
+      );
+    } finally {
+      offersRefreshInFlight = null;
+    }
+  })();
+
+  return offersRefreshInFlight;
 }
 
 function tokenizeAlnum(s) {
