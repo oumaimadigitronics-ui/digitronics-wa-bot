@@ -110,6 +110,37 @@ import {
   parseUserQuery as parseUserQueryImpl
 } from './project/src/services/nlp/index.js';
 
+import {
+  BRAND_PRIORITY as BRAND_PRIORITY_IMPL,
+  MAX_OFFERS as MAX_OFFERS_IMPL,
+  brandRank as brandRankImpl,
+  rankOffers as rankOffersImpl,
+  pickCheapestPerBrand as pickCheapestPerBrandImpl,
+  pickFirstPerBrand as pickFirstPerBrandImpl,
+  normalizeOfferItem as normalizeOfferItemImpl,
+  isTvOffer as isTvOfferImpl,
+  matchTvSynonym as matchTvSynonymImpl,
+  matchTvTitleHint as matchTvTitleHintImpl,
+  inferTvCanonFromOffers as inferTvCanonFromOffersImpl,
+  getTvFilterInfo as getTvFilterInfoImpl,
+  formatSize as formatSizeImpl,
+  buildOfferDisplayName as buildOfferDisplayNameImpl,
+  formatOfferLine as formatOfferLineImpl,
+  offersHeader as offersHeaderImpl,
+  offersTemplate as offersTemplateImpl,
+  buildPremiumOffersReply as buildPremiumOffersReplyImpl,
+  listOffersForBrand as listOffersForBrandImpl,
+  listOffersForSizeAcrossBrands as listOffersForSizeAcrossBrandsImpl,
+  collectTvOffers as collectTvOffersImpl,
+  bestGuessOffers as bestGuessOffersImpl,
+  defaultTvOffersForReceiver as defaultTvOffersForReceiverImpl,
+  setFormattingConfig,
+  setFormattingHelpers,
+  setServiceConfig,
+  setServiceHelpers,
+  refreshOffersReference,
+} from './project/src/services/offers/index.js';
+
 let toFileImpl = toFile;
 
 const app = express();
@@ -308,6 +339,11 @@ const FOCUS = {
   mode: String(FOCUS_MODE || "preferred").trim().toLowerCase(),
 };
 
+// Initialize offers service modules with configuration
+// (This needs to be after CFG, logger, debugLog are defined but before wrapper functions)
+// Note: Some helper functions like ensureNoQuestion are defined later in the file,
+// so we'll set those up after they're defined
+
 // Wrapper functions that call the WooCommerce service with necessary parameters
 function wcAuthHeader() {
   return wcAuthHeaderImpl(CFG);
@@ -409,6 +445,8 @@ function updateOffersReferences() {
   OFFERS = getOffers();
   OFFERS_INDEX = getOffersIndex();
   lastOffersSync = getLastOffersSync();
+  // Update offers module reference
+  refreshOffersReference();
 }
 
 const CONTACTS = {
@@ -417,20 +455,10 @@ const CONTACTS = {
 };
 
 // RULE #1 no questions
-const BRAND_PRIORITY = [
-  "TCL",
-  "Daiko",
-  "Haier",
-  "Samsung",
-  "LG",
-  "Elexia",
-  "Revolution",
-  "Visio",
-  "Echolink",
-  "Hisense",
-  "Tivoli",
-];
-const MAX_OFFERS = 3;
+// Brand priority and max offers are now defined in offersRanking.js
+// but we keep constants here for backward compatibility
+const BRAND_PRIORITY = BRAND_PRIORITY_IMPL;
+const MAX_OFFERS = MAX_OFFERS_IMPL;
 
 const COMPANY = {
   name: "Digitronics",
@@ -476,29 +504,14 @@ function offersFallbackMessage() {
 // Removed BRAND_KNOWLEDGE - tech knowledge functionality removed
 
 // RULE #1 no questions
-// Cache brand rank map for performance - initialized lazily to avoid circular dependency
-let BRAND_RANK_MAP = null;
-
+// brandRank and getBrandRankMap now delegated to offersRanking module
 function getBrandRankMap() {
-  if (!BRAND_RANK_MAP) {
-    BRAND_RANK_MAP = new Map(BRAND_PRIORITY.map((b, idx) => [normMatch(b), idx]));
-  }
-  return BRAND_RANK_MAP;
+  // This function is now handled by the offers module, but we keep a wrapper for compatibility
+  return new Map(BRAND_PRIORITY.map((b, idx) => [normMatch(b), idx]));
 }
 
 function brandRank(name, priority = BRAND_PRIORITY) {
-  const normalized = normMatch(name || "");
-  
-  // Use cached map if using default priority
-  if (priority === BRAND_PRIORITY) {
-    const rank = getBrandRankMap().get(normalized);
-    return Number.isInteger(rank) ? rank : Number.POSITIVE_INFINITY;
-  }
-  
-  // Fallback for custom priority (rare case)
-  const customMap = new Map(priority.map((b, idx) => [normMatch(b), idx]));
-  const rank = customMap.get(normalized);
-  return Number.isInteger(rank) ? rank : Number.POSITIVE_INFINITY;
+  return brandRankImpl(name, priority);
 }
 
 function getOpenAIClient() {
@@ -829,12 +842,7 @@ function sniffImageMime(buf) {
 }
 
 function formatSize(lang, size) {
-  const num = Number(size);
-  if (!Number.isFinite(num) || num <= 0) return "";
-  const L = String(lang || "dzl");
-  if (L === "ar") return `${num} بوصة`;
-  if (L === "fr" || L === "dzl") return `${num}″`;
-  return `${num}″`;
+  return formatSizeImpl(lang, size);
 }
 
 function sanitizeUrlNoQuestion(urlStr) {
@@ -857,6 +865,34 @@ function stripUrlQueriesInText(text) {
 const ORDER_FORM_URL_SAFE = sanitizeUrlNoQuestion(ORDER_FORM_URL);
 const MAPS_URL_RAW = "https://maps.app.goo.gl/sLuZQCt74KVkq39H7?g_st=aw";
 const MAPS_URL_SAFE = sanitizeUrlNoQuestion(MAPS_URL_RAW);
+
+// Initialize offers service modules now that all dependencies are available
+setFormattingConfig({
+  FEATURE_OFFERS_BOX_HEADER,
+  FEATURE_OFFER_TAIL_COMPACT,
+  FEATURE_SHOW_SKU_IN_OFFERS,
+  FEATURE_LEGACY_OFFER_LINE,
+  FEATURE_LEGACY_OFFER_DISPLAY_NAME,
+  FEATURE_OFFER_ITEM_EMOJI_FORMAT,
+  CFG,
+  ORDER_FORM_URL_SAFE,
+});
+
+setFormattingHelpers({
+  ensureNoQuestion,
+  stripUrlQueriesInText,
+});
+
+setServiceConfig({
+  FEATURE_STRICT_STOCK_FILTER,
+  LOG_DEBUG,
+  debugLog,
+  logger,
+  CFG,
+});
+
+// Note: getCtx and setCtx are defined later, so we'll set those in a separate call
+// after they're defined (search for "setServiceHelpers" below)
 
 function stripNonPurchaseUrls(text) {
   const s = String(text || "");
@@ -2013,6 +2049,13 @@ function getCtx(key) {
   return v;
 }
 
+// Now that getCtx and setCtx are defined, initialize offers service helpers
+setServiceHelpers({
+  getCtx,
+  setCtx,
+  ensureNoQuestion,
+});
+
 function normalizeCategoryName(name) {
   return normalizeCategoryNameImpl(name, OFFERS_INDEX);
 }
@@ -2967,93 +3010,23 @@ function isBrandOnlyQuery(text, brand) {
 }
 
 function matchTvSynonym(text) {
-  return matchesAnyToken(text, TV_CLASS_SYNONYMS);
+  return matchTvSynonymImpl(text);
 }
 
 function matchTvTitleHint(text) {
-  if (!text) return false;
-  if (matchesAnyToken(text, TV_TITLE_HINTS)) return true;
-  return /\b\d{2,3}\s*(\"|pouce|pouces|inch|in)\b/i.test(String(text));
+  return matchTvTitleHintImpl(text);
 }
 
 function inferTvCanonFromOffers(offersObj = {}) {
-  const classCounts = new Map();
-  const categoryCounts = new Map();
-  const titleCounts = new Map();
-
-  for (const arr of Object.values(offersObj)) {
-    for (let i = 0; i < arr.length; i += 1) {
-      const offer = arr[i] || {};
-      const cls = String(offer.class || "").trim();
-      const cat = String(offer.category || "").trim();
-      const title = [offer.name, offer.model, offer.sku].filter(Boolean).join(" ").trim();
-
-      if (cls && matchTvSynonym(cls)) {
-        classCounts.set(cls, (classCounts.get(cls) || 0) + 1);
-      }
-      if (cat && matchTvSynonym(cat)) {
-        categoryCounts.set(cat, (categoryCounts.get(cat) || 0) + 1);
-      }
-      if (title && matchTvTitleHint(title)) {
-        titleCounts.set(title, (titleCounts.get(title) || 0) + 1);
-      }
-    }
-  }
-
-  const pickTop = (map) => {
-    const entries = Array.from(map.entries()).sort((a, b) => b[1] - a[1] || String(a[0]).localeCompare(String(b[0])));
-    return entries.length ? entries[0][0] : null;
-  };
-  const topCandidates = (map) =>
-    Array.from(map.entries())
-      .sort((a, b) => b[1] - a[1] || String(a[0]).localeCompare(String(b[0])))
-      .map(([name, count]) => ({ name, count }));
-
-  const tvClass = pickTop(classCounts);
-  const tvCategory = tvClass ? null : pickTop(categoryCounts);
-
-  return {
-    tvClass,
-    tvCategory,
-    classCandidates: topCandidates(classCounts),
-    categoryCandidates: topCandidates(categoryCounts),
-    titleCandidates: topCandidates(titleCounts),
-  };
+  return inferTvCanonFromOffersImpl(offersObj);
 }
 
 function getTvFilterInfo() {
-  const tvCanon = OFFERS_INDEX.classCanon.tv || "Tv";
-  const tvCategory = OFFERS_INDEX.classCanon.tvCategory || null;
-  return {
-    tvCanon,
-    tvCategory,
-    tvNorm: normMatch(tvCanon),
-    tvCategoryNorm: normMatch(tvCategory || ""),
-  };
+  return getTvFilterInfoImpl();
 }
 
 function isTvOffer(offer, info = null) {
-  const o = offer || {};
-  const ctx = info || getTvFilterInfo();
-  const clsNorm = normMatch(o.class || "");
-  const catNorm = normMatch(o.category || "");
-  if (clsNorm && clsNorm === ctx.tvNorm) return true;
-  if (ctx.tvCategoryNorm && catNorm === ctx.tvCategoryNorm) return true;
-  if (matchTvSynonym(o.class || "") || matchTvSynonym(o.category || "")) return true;
-  
-  // Enhanced TV detection: Check product name with explicit regex pattern
-  // This catches TVs even if token-based matching has edge cases
-  const name = String(o.name || "");
-  if (name) {
-    // Match TV keywords with word boundaries (case-insensitive)
-    // Matches: "TV", "Tv", "tv", "Google TV", "Smart TV", "QLED", "OLED", etc.
-    const tvPattern = /\b(tv|tele|télé|television|télévision|google\s*tv|android\s*tv|smart\s*tv|qled|oled|mini\s*led)\b/i;
-    if (tvPattern.test(name)) return true;
-  }
-  
-  // Fallback to existing title hint matching for model/sku
-  const title = [o.name, o.model, o.sku].filter(Boolean).join(" ");
-  return matchTvTitleHint(title);
+  return isTvOfferImpl(offer, info);
 }
 
 function rebuildModelPrefixIndex(modelLookup) {
@@ -3220,32 +3193,7 @@ function buildProductLink(product, fallbackName) {
 }
 
 function buildOfferDisplayName(brand, offer, lang = "dzl") {
-  const safeBrand = String(brand || "").trim();
-  const name = String((offer && offer.name) || "").trim();
-  const model = String((offer && offer.model) || "").trim();
-  const sku = String((offer && offer.sku) || "").trim();
-  const modelOrSku = model || sku;
-  const sizeNum = Number((offer && offer.size) || NaN);
-  const sizeText = Number.isFinite(sizeNum) && sizeNum > 0 ? formatSize(lang, sizeNum) : "";
-  if (FEATURE_LEGACY_OFFER_DISPLAY_NAME) {
-    const identity = [safeBrand, modelOrSku, sizeText].filter(Boolean).join(" ").trim();
-    if (identity) return ensureNoQuestion(identity);
-    if (name) return ensureNoQuestion([safeBrand, name].filter(Boolean).join(" ").trim());
-    return ensureNoQuestion(safeBrand || modelOrSku || "Produit");
-  }
-
-  if (name) {
-    let cleanedName = name;
-    if (safeBrand) {
-      const dupBrand = new RegExp(`^(${escapeRegExp(safeBrand)})\\s+\\1\\b`, "i");
-      cleanedName = cleanedName.replace(dupBrand, safeBrand);
-    }
-    return ensureNoQuestion(cleanedName.trim());
-  }
-
-  const identity = [safeBrand, modelOrSku, sizeText].filter(Boolean).join(" ").trim();
-  if (identity) return ensureNoQuestion(identity);
-  return ensureNoQuestion(safeBrand || modelOrSku || "Produit");
+  return buildOfferDisplayNameImpl(brand, offer, lang);
 }
 
 function boxHeader(title) {
@@ -5018,123 +4966,11 @@ async function deriveMediaText(mediaInput, lang, reqId) {
 }
 
 function normalizeOfferItem(brand, offer, originalIdx) {
-  const priceNum = Number((offer && offer.price) || NaN);
-  const sizeNum = Number((offer && offer.size) || NaN);
-  const capacityNum = Number((offer && offer.capacity_l) || NaN);
-  return {
-    brand: String(brand || "").trim(),
-    offer,
-    price: Number.isFinite(priceNum) ? priceNum : Number.POSITIVE_INFINITY,
-    size: Number.isFinite(sizeNum) ? sizeNum : null,
-    capacity: Number.isFinite(capacityNum) ? capacityNum : null,
-    class: String((offer && offer.class) || ""),
-    category: String((offer && offer.category) || ""),
-    stock: Number((offer && offer.stock) || 0),
-    originalIdx: Number.isInteger(originalIdx) ? originalIdx : 0,
-  };
+  return normalizeOfferItemImpl(brand, offer, originalIdx);
 }
 
 function rankOffers(items, opts) {
-  const o = opts || {};
-  const size = Number(o.size);
-  const hasSize = Number.isFinite(size);
-  const capacityLiters = Number(o.capacityLiters);
-  const hasCapacity = Number.isFinite(capacityLiters);
-  const className = o.className || null;
-  const limitRaw = o.limit;
-  let limit = null;
-  if (limitRaw !== undefined && limitRaw !== null) {
-    const limitVal = Number(limitRaw);
-    if (Number.isInteger(limitVal) && limitVal >= 0) limit = limitVal;
-  }
-  const tvClassCanon = o.tvClassCanon || OFFERS_INDEX.classCanon.tv || null;
-
-  const tvClassNorm = normMatch(tvClassCanon || "");
-  const isTvContext = Boolean(className && normMatch(className) === tvClassNorm);
-
-  let arr = (Array.isArray(items) ? items : [])
-    .map((it, idx) => normalizeOfferItem((it && it.brand) || "", (it && it.offer) || {}, (it && it.originalIdx) ?? idx))
-    .filter((it) => it.brand && it.offer && it.stock > 0);
-  if (LOG_DEBUG) {
-    debugLog("rank_offers_input", {
-      size,
-      hasSize,
-      capacityLiters: hasCapacity ? capacityLiters : null,
-      className,
-      tvClassCanon,
-      itemCount: arr.length,
-      brands: arr.map((it) => it.brand),
-    });
-  }
-
-  if (LOG_DEBUG) {
-    debugLog("rank_offers_priority", { priorityExists: false, brands: arr.map((it) => it.brand) });
-  }
-
-  // Enforce consistent category/class and size when hints are provided.
-  const classNorm = normMatch(className || "");
-  if (classNorm) {
-    arr = arr.filter((it) => normMatch(it.class || "") === classNorm);
-  }
-
-  if (hasSize) {
-    const desiredSize = Number(size);
-    const exact = arr.filter((it) => Number.isFinite(it.size) && Number(it.size) === desiredSize);
-    if (exact.length) {
-      arr = exact;
-    } else {
-      let closestSize = null;
-      let closestDiff = Number.POSITIVE_INFINITY;
-      for (let i = 0; i < arr.length; i += 1) {
-        const s = Number(arr[i].size);
-        if (!Number.isFinite(s)) continue;
-        const diff = Math.abs(s - desiredSize);
-        if (diff < closestDiff) {
-          closestDiff = diff;
-          closestSize = s;
-        }
-      }
-      if (Number.isFinite(closestSize)) {
-        arr = arr.filter((it) => Number.isFinite(it.size) && Number(it.size) === closestSize);
-      }
-    }
-  }
-
-  if (LOG_DEBUG) debugLog("rank_offers_after_priority", { count: arr.length, brands: arr.map((it) => it.brand) });
-
-  const ranked = arr
-    .map((it, idx) => {
-      const sizeScore = hasSize && Number.isFinite(it.size) ? Math.abs(it.size - size) : Number.POSITIVE_INFINITY;
-      const capacityScore = hasCapacity && Number.isFinite(it.capacity)
-        ? Math.abs(it.capacity - capacityLiters)
-        : Number.POSITIVE_INFINITY;
-      return Object.assign({}, it, { sizeScore, capacityScore, idx });
-    })
-    .sort((a, b) => {
-      const capCmp = capacityScoreCmp(a, b);
-
-      if (hasSize && a.sizeScore !== b.sizeScore) return a.sizeScore - b.sizeScore;
-      if (hasCapacity && capCmp !== 0) return capCmp;
-      if (a.price !== b.price) return a.price - b.price;
-      const brandCmp = String(a.brand || "").localeCompare(String(b.brand || ""));
-      if (brandCmp !== 0) return brandCmp;
-      const modelCmp = normMatch((a.offer && a.offer.model) || "").localeCompare(
-        normMatch((b.offer && b.offer.model) || "")
-      );
-      if (modelCmp !== 0) return modelCmp;
-      const nameCmp = normMatch((a.offer && a.offer.name) || "").localeCompare(
-        normMatch((b.offer && b.offer.name) || "")
-      );
-      if (nameCmp !== 0) return nameCmp;
-      return a.originalIdx - b.originalIdx;
-    });
-  if (LOG_DEBUG) {
-    debugLog("rank_offers_ranked", {
-      count: ranked.length,
-      sample: ranked.slice(0, 3).map((it) => ({ brand: it.brand, model: (it.offer && it.offer.model) || "" })),
-    });
-  }
-  return limit !== null ? ranked.slice(0, limit) : ranked;
+  return rankOffersImpl(items, opts);
 }
 
 function capacityScoreCmp(a, b) {
@@ -5146,78 +4982,11 @@ function capacityScoreCmp(a, b) {
 
 // RULE: max 1 offer per brand, cheapest per brand, price order
 function pickCheapestPerBrand(items) {
-  const arr = Array.isArray(items) ? items : [];
-  const brandMap = new Map();
-
-  const brandKey = (b) => normMatch(String(b || "").trim());
-  const modelKey = (it) => {
-    const src = (it && it.offer) || it || {};
-    return normMatch(src.model || src.name || (it && it.model) || (it && it.name) || "");
-  };
-  const priceInfo = (it) => {
-    const src = (it && it.offer) || it || {};
-    const sale = Number(src.salePrice);
-    const base = Number(src.price);
-    const price = Number.isFinite(sale) ? sale : Number.isFinite(base) ? base : null;
-    return { price, hasPrice: Number.isFinite(price) };
-  };
-
-  for (let i = 0; i < arr.length; i += 1) {
-    const item = arr[i] || {};
-    const brandRaw = String(item.brand || "").trim();
-    const key = brandKey(brandRaw);
-    if (!key) continue;
-
-    const price = priceInfo(item);
-    const model = modelKey(item);
-    const record = brandMap.get(key) || { brand: brandRaw, best: null, fallback: null };
-
-    if (price.hasPrice) {
-      if (
-        !record.best ||
-        price.price < record.best.price ||
-        (price.price === record.best.price && model.localeCompare(record.best.model) < 0)
-      ) {
-        record.best = { item, price: price.price, model };
-      }
-    } else if (!record.fallback) {
-      record.fallback = { item, model };
-    }
-
-    if (!record.brand) record.brand = brandRaw;
-    brandMap.set(key, record);
-  }
-
-  const picks = [];
-  for (const record of brandMap.values()) {
-    const choice = record.best || record.fallback;
-    if (choice && choice.item) picks.push(choice.item);
-  }
-
-  return picks.sort((a, b) => {
-    const pa = priceInfo(a);
-    const pb = priceInfo(b);
-    if (pa.hasPrice && pb.hasPrice && pa.price !== pb.price) return pa.price - pb.price;
-    if (pa.hasPrice !== pb.hasPrice) return pa.hasPrice ? -1 : 1;
-    const ba = normMatch(String(a.brand || ""));
-    const bb = normMatch(String(b.brand || ""));
-    if (ba !== bb) return ba.localeCompare(bb);
-    return modelKey(a).localeCompare(modelKey(b));
-  });
+  return pickCheapestPerBrandImpl(items);
 }
 
 function pickFirstPerBrand(items) {
-  const arr = Array.isArray(items) ? items : [];
-  const seen = new Set();
-  const out = [];
-  for (let i = 0; i < arr.length; i += 1) {
-    const it = arr[i];
-    const k = normMatch((it && it.brand) || "");
-    if (seen.has(k)) continue;
-    seen.add(k);
-    out.push(it);
-  }
-  return out;
+  return pickFirstPerBrandImpl(items);
 }
 
 
