@@ -60,7 +60,7 @@ export function arabicIndicToAsciiDigits(s) {
   };
   return str.replace(/[٠-٩۰-۹]/g, (d) => {
     const v = map[d];
-    if (v) return v;
+    if (v !== undefined) return v;
     return d;
   });
 }
