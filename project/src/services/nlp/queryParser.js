@@ -128,7 +128,7 @@ export function parseUserQuery(text, opts = {}, dependencies = {}) {
     modelHit: modelHit
       ? {
           brand: modelHit.brand,
-          model: (modelHit.offer && modelHit.offer.model) || modelHit.offer?.sku || null,
+          model: modelHit.offer?.model || modelHit.offer?.sku || null,
           hasStock: Number(((modelHit.offer || {}).stock) || 0) > 0,
         }
       : null,

@@ -9,7 +9,7 @@ import { normMatch, includesToken } from '../../lib/textUtils.js';
 const BRAND_ALIASES = Object.freeze([
   { brand: "SAMSUNG", tokens: ["سامسونج", "سيمسونج", "سانسونج"] },
   { brand: "TCL", tokens: ["تي سي ال", "تي سي إل", "تكل"] },
-  { brand: "DAIKO", tokens: ["دايكو", "دايكو"] },
+  { brand: "DAIKO", tokens: ["دايكو"] },
   { brand: "HAIER", tokens: ["هاير"] },
   { brand: "LG", tokens: ["ال جي", "الجي"] },
   { brand: "HISENSE", tokens: ["هايسنس", "هاي سينس", "هايسينس"] },
