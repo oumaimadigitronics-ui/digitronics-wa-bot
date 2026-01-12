@@ -10,13 +10,6 @@ import os from "os";
 import assert from "assert";
 import { fileURLToPath } from "url";
 import { getFetch, getOpenAI, getNowMs, setDepsForTests } from "./src/deps.js";
-import { processAudioPipeline, isTranscriptLowQuality } from "./src/audio/index.js";
-import {
-  detectBrand as detectBrandKnowledge,
-  detectCategory as detectCategoryKnowledge,
-  detectProductModel,
-  updateContextFromMessage,
-} from "./src/knowledge/productKnowledge.js";
 import { toFile } from "openai/uploads";
 
 let toFileImpl = toFile;
@@ -279,13 +272,7 @@ function offersFallbackMessage() {
   return OFFERS_FALLBACK_MESSAGE;
 }
 
-const BRAND_KNOWLEDGE_PATH = path.join(process.cwd(), "data", "brand_knowledge.json");
-let BRAND_KNOWLEDGE = { topics: {} };
-try {
-  BRAND_KNOWLEDGE = JSON.parse(fs.readFileSync(BRAND_KNOWLEDGE_PATH, "utf8"));
-} catch {
-  BRAND_KNOWLEDGE = { topics: {} };
-}
+// Removed BRAND_KNOWLEDGE - tech knowledge functionality removed
 
 // RULE #1 no questions
 // Cache brand rank map for performance - initialized lazily to avoid circular dependency
@@ -2482,121 +2469,30 @@ function hasTvSizeInQuery(raw) {
   return false;
 }
 
+// Tech knowledge functionality removed - stub functions for backward compatibility
 function detectTechTopic(raw) {
-  const s = normMatch(arabicIndicToAsciiDigits(String(raw || ""))).toLowerCase();
-  if (!s) return null;
-  const normalized = s.replace(/[’']/g, " ").replace(/\s+/g, " ").trim();
-  const noSpace = normalized.replace(/\s+/g, "");
-
-  // If query contains a TV size, prioritize product search over tech guide
-  if (hasTvSizeInQuery(raw)) return null;
-
-  const priceTokens = ["price", "prix", "ثمن", "سعر"];
-  const compareTokens = [
-    "difference",
-    "différence",
-    "comparaison",
-    "compare",
-    "mieux",
-    "meilleur",
-    "better",
-    "best",
-    "vs",
-    "الفرق",
-    "شنو احسن",
-    "شنو أحسن",
-    "ولا",
-    "مقارنة",
-  ];
-
-  const hasPrice = priceTokens.some((token) => includesToken(normalized, token));
-  const hasCompare =
-    compareTokens.some((token) => normalized.includes(normMatch(token))) ||
-    compareTokens.some((token) => includesToken(normalized, token));
-  if (hasPrice && !hasCompare) return null;
-
-  const hasGoogleTv =
-    normalized.includes("google tv") || noSpace.includes("googletv") || (normalized.includes("google") && normalized.includes("tv"));
-  const hasAndroid =
-    normalized.includes("android tv") || noSpace.includes("androidtv") || normalized.includes("android");
-  const hasArabicGoogle = normalized.includes("قوقل") || normalized.includes("غوغل") || normalized.includes("جوجل");
-  const hasArabicAndroid = normalized.includes("اندرويد") || normalized.includes("أندرويد");
-  if ((hasGoogleTv && hasAndroid) || (hasArabicGoogle && hasArabicAndroid) || (normalized.includes("google") && normalized.includes("android"))) {
-    return "google_tv_vs_android";
-  }
-
-  const hasQled = normalized.includes("qled");
-  const hasOled = normalized.includes("oled");
-  const hasLed = normalized.includes("led");
-  const hasMiniLed =
-    normalized.includes("mini led") || normalized.includes("mini-led") || noSpace.includes("miniled") || (normalized.includes("mini") && normalized.includes("led"));
-
-  if (hasOled && hasQled) return "oled_vs_qled";
-  if (hasQled && hasMiniLed) return "qled_vs_mini_led";
-  if (hasQled && hasLed && !hasMiniLed) return "qled_vs_led";
-
-  const has4k = /\b4k\b/.test(normalized) || noSpace.includes("4k");
-  const hasFhd = normalized.includes("fhd") || normalized.includes("full hd") || normalized.includes("1080");
-  if (has4k && hasFhd) return "4k_vs_fhd";
-
-  const hasHdr = normalized.includes("hdr");
-  const hasDolby = normalized.includes("dolby") || normalized.includes("vision");
-  if (hasHdr && hasDolby) return "hdr_dolby_vision";
-
-  const hasHzNumber = /\b\d{2,3}\s*hz\b/.test(normalized) || /\b\d{2,3}hz\b/.test(noSpace);
-  if (hasHzNumber || normalized.includes("refresh rate")) return "refresh_rate_60_vs_120";
-
   return null;
 }
 
 function buildTechTopicAnswer(topicKey, lang) {
-  const topics = (BRAND_KNOWLEDGE && BRAND_KNOWLEDGE.topics) || {};
-  const topic = topics && topics[topicKey];
-  if (!topic) return null;
+  return "";
+}
 
-  const pickList = (arr) => (Array.isArray(arr) ? arr.filter(Boolean).slice(0, 3) : []);
-  const pointsFr = pickList(topic.points_fr);
-  const pointsAr = pickList(topic.points_ar);
-  const chooseAFr = Array.isArray(topic.choose_a_fr) ? topic.choose_a_fr.filter(Boolean) : [];
-  const chooseBFr = Array.isArray(topic.choose_b_fr) ? topic.choose_b_fr.filter(Boolean) : [];
-  const chooseAAr = Array.isArray(topic.choose_a_ar) ? topic.choose_a_ar.filter(Boolean) : [];
-  const chooseBAr = Array.isArray(topic.choose_b_ar) ? topic.choose_b_ar.filter(Boolean) : [];
+// Product knowledge functionality removed - stub functions for backward compatibility
+function detectBrandKnowledge(text) {
+  return null;
+}
 
-  const build = (frPoints, arPoints, aFr, bFr, aAr, bAr) => {
-    const lines = [
-      "│  🎓 *Tech Guide / دليل*      │",
-      "",
-      `🇫🇷 ${topic.title_fr || ""}`,
-      `🇲🇦 ${topic.title_ar || ""}`,
-      "",
-      ...frPoints.map((p) => `✅ ${p}`),
-      ...arPoints.map((p) => `✅ ${p}`),
-      `✅ Choisir A si: ${aFr.join(" · ")}`.trim(),
-      `✅ Choisir B si: ${bFr.join(" · ")}`.trim(),
-      `✅ اختار A إلا: ${aAr.join(" · ")}`.trim(),
-      `✅ اختار B إلا: ${bAr.join(" · ")}`.trim(),
-      `📌 ${topic.recommendation_fr || ""}`,
-      `📌 ${topic.recommendation_ar || ""}`,
-      "",
-      "🔒 Service pro — conseils clairs & transparents.",
-      "🔒 خدمة احترافية — نصائح واضحة و شفافة.",
-    ].filter((line) => line !== null && line !== undefined);
-    return lines.join("\n");
-  };
+function detectCategoryKnowledge(text) {
+  return null;
+}
 
-  let answer = build(pointsFr, pointsAr, chooseAFr, chooseBFr, chooseAAr, chooseBAr);
-  let frTrim = [...pointsFr];
-  let arTrim = [...pointsAr];
-  while (answer.length > 900 && (frTrim.length > 1 || arTrim.length > 1)) {
-    if (frTrim.length > 1) frTrim.pop();
-    if (arTrim.length > 1) arTrim.pop();
-    answer = build(frTrim, arTrim, chooseAFr, chooseBFr, chooseAAr, chooseBAr);
-  }
-  if (answer.length > 900 && chooseAFr.length > 1) {
-    answer = build(frTrim, arTrim, chooseAFr.slice(0, 1), chooseBFr.slice(0, 1), chooseAAr.slice(0, 1), chooseBAr.slice(0, 1));
-  }
+function detectProductModel(text) {
+  return null;
+}
 
-  return answer;
+function updateContextFromMessage(text, ctx) {
+  return null;
 }
 
 function isContactIntent(text) {
@@ -6856,231 +6752,9 @@ async function deriveMediaText(mediaInput, lang, reqId) {
   const raw = (normalized && normalized.raw) || {};
   const baseKind = normalized.kind || guessMediaKind({ mime: normalized.mime, type: raw.type, kind: raw.kind });
   if (baseKind === "audio") {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "wan-derive-audio-"));
-    const ext = path.extname(normalized.filename || normalized.url || "") || extFromAudioMime(normalized.mime || "");
-    let tmpFile = path.join(dir, `audio${ext || ".mp3"}`);
-    let filename = normalized.filename || `voice${ext || ".mp3"}`;
-    let sizeBytes = 0;
-    const mimeTypeRaw = normalized.mime || "";
-    let mimeType = CFG.featureAudioCleanMime ? cleanMimeType(mimeTypeRaw) : mimeTypeRaw;
-    const downloadStart = Date.now();
-    let pipelineTmpDirs = { preprocess: null, chunk: null };
-    try {
-      if (raw && raw.base64) {
-        const buf = Buffer.from(String(raw.base64 || ""), "base64");
-        sizeBytes = buf.length;
-        if (sizeBytes > CFG.mediaMaxBytesAudio) throw new Error("audio_too_large");
-        fs.writeFileSync(tmpFile, buf);
-        if (!mimeType) mimeType = inferMimeFromPath(tmpFile, "") || "";
-      } else if (normalized.url) {
-        const dl = await downloadToTemp(normalized.url, tmpFile);
-        sizeBytes = dl.sizeBytes || 0;
-        const downloadMimeRaw = String(dl.mimeType || "").trim();
-        const downloadMime = CFG.featureAudioCleanMime ? cleanMimeType(downloadMimeRaw) : downloadMimeRaw;
-        let sniffedMime = "";
-        if (CFG.featureAudioSniffMime) {
-          sniffedMime = sniffAudioMime(fs.readFileSync(tmpFile));
-        }
-        const renameInfo = downloadMime && isAudioMime(downloadMime) ? ensureAudioFileExtMatchesMime(tmpFile, downloadMime) : { filePath: tmpFile, ext: path.extname(tmpFile) };
-        tmpFile = renameInfo.filePath;
-        mimeType = mimeType || downloadMime || "";
-        filename = path.basename(tmpFile) || filename;
-        console.log(
-          JSON.stringify({
-            level: "info",
-            msg: "audio_download",
-            reqId,
-            sizeBytes,
-            mimeType: downloadMime || null,
-            sniffedMime: sniffedMime || null,
-            tmpFile,
-            ext: renameInfo.ext || null,
-          })
-        );
-      } else {
-        throw new Error("audio_url_missing");
-      }
-      const validation = validateDownloadedAudio({ filePath: tmpFile, sizeBytes, url: normalized.url, reqId });
-      if (!validation.ok) {
-        return {
-          ok: false,
-          reason: "invalid_audio_payload",
-          path: "audio",
-          sizeBytes: validation.sizeBytes,
-          mimeType: mimeType || raw.mime || null,
-        };
-      }
-      sizeBytes = validation.sizeBytes;
-      const headerSniffed = CFG.featureAudioSniffMime ? sniffAudioMime(validation.header) : "";
-      const resolved = await resolveAudioMime({
-        filePath: tmpFile,
-        mimeType,
-        filename,
-        url: normalized.url,
-        sniffedMime: headerSniffed,
-        reqId,
-      });
-      let chosenMime = resolved.mimeType ? (CFG.featureAudioCleanMime ? cleanMimeType(resolved.mimeType) : resolved.mimeType) : "";
-      if (chosenMime) {
-        const renameInfo = ensureAudioFileExtMatchesMime(tmpFile, chosenMime);
-        tmpFile = renameInfo.filePath;
-        filename = path.basename(tmpFile) || filename;
-      }
-      const downloadMs = Date.now() - downloadStart;
-      if (shouldConvertAudioToWav(chosenMime)) {
-        const wavPath = path.join(dir, "audio_converted.wav");
-        console.log(
-          JSON.stringify({
-            level: "info",
-            msg: "audio_convert_start",
-            reqId,
-            fromPath: tmpFile,
-            fromMime: chosenMime,
-            toPath: wavPath,
-          })
-        );
-        const conversion = await convertAudioToWav(tmpFile, wavPath, reqId);
-        if (conversion && conversion.ok) {
-          console.log(
-            JSON.stringify({
-              level: "info",
-              msg: "audio_convert_done",
-              reqId,
-              fromPath: tmpFile,
-              fromMime: chosenMime,
-              toPath: wavPath,
-              stderrTail: conversion.stderrTail || null,
-            })
-          );
-          tmpFile = wavPath;
-          chosenMime = "audio/wav";
-          mimeType = "audio/wav";
-          filename = "audio_converted.wav";
-        } else {
-          console.error(
-            JSON.stringify({
-              level: "error",
-              msg: "audio_convert_fail",
-              reqId,
-              fromPath: tmpFile,
-              fromMime: chosenMime,
-              toPath: wavPath,
-              stderrTail: conversion && conversion.stderrTail ? conversion.stderrTail : null,
-            })
-          );
-          return { ok: false, reason: "audio_convert_failed", path: "audio", sizeBytes, mimeType: mimeType || raw.mime || null };
-        }
-      }
-      mimeType = chosenMime;
-      filename = path.basename(tmpFile) || filename;
-      const finalStats = fs.statSync(tmpFile);
-      sizeBytes = finalStats.size || sizeBytes;
-      console.log(
-        JSON.stringify({
-          level: "info",
-          msg: "audio_transcribe_ready",
-          reqId,
-          filePath: tmpFile,
-          mimeType: chosenMime || null,
-          sizeBytes,
-        })
-      );
-      const chosenModel = CFG.openaiTranscribeModel || "gpt-4o-mini-transcribe";
-      console.log(
-        JSON.stringify({
-          level: "info",
-          msg: "audio_transcribe_request",
-          reqId,
-          tmpFile,
-          mimeType: chosenMime,
-          mimeTypeRaw: mimeTypeRaw || null,
-          mimeTypeClean: chosenMime || null,
-          filename,
-          model: chosenModel,
-          sizeBytes,
-        })
-      );
-      const transcribeOverride = buildPipelineTranscriber(reqId);
-      const pipeline = await processAudioPipeline({
-        filePath: tmpFile,
-        mimeType: chosenMime || normalized.mime || raw.mime || "",
-        sizeBytes,
-        languageHint: lang,
-        maxBytes: CFG.mediaMaxBytesAudio,
-        model: chosenModel,
-        minScore: CFG.audioMinScore,
-        allowFfmpeg: true,
-        deps: { transcribe: transcribeOverride },
-      });
-      pipelineTmpDirs = { preprocess: pipeline.preprocessTmpDir, chunk: pipeline.chunkTmpDir };
-
-      const snippet = LOG_DEBUG ? pipeline.cleanTranscript.slice(0, 200) : undefined;
-      console.log(
-        JSON.stringify({
-          level: "info",
-          msg: "audio_pipeline",
-          reqId,
-          durationSec: pipeline.durationSec,
-          sizeBytes: pipeline.sizeBytes,
-          chunksCount: pipeline.chunksCount,
-          modelUsed: pipeline.modelUsed,
-          transcriptChars: pipeline.transcriptChars,
-          transcriptQualityScore: pipeline.transcriptQualityScore,
-          latencyMs: { downloadMs, ...pipeline.timings },
-          transcriptSnippet: snippet,
-          qualityReasons: pipeline.transcriptQualityReasons,
-        })
-      );
-
-      if (!pipeline.cleanTranscript) throw new Error("transcription_empty");
-      if (isTranscriptLowQuality(pipeline)) {
-        return {
-          ok: false,
-          reason: "low_quality",
-          path: "audio",
-          sizeBytes: pipeline.sizeBytes,
-          mimeType: mimeType || raw.mime || null,
-          transcriptChars: pipeline.transcriptChars,
-        };
-      }
-
-      const safe = ensureNoQuestion(sanitizeDerivedText(pipeline.cleanTranscript));
-      if (!safe) throw new Error("transcription_empty");
-      return {
-        ok: true,
-        text: safe,
-        path: "audio",
-        sizeBytes: pipeline.sizeBytes,
-        mimeType: mimeType || raw.mime || null,
-        transcriptChars: pipeline.transcriptChars,
-        durationSec: pipeline.durationSec,
-        chunksCount: pipeline.chunksCount,
-        modelUsed: pipeline.modelUsed,
-        transcriptQualityScore: pipeline.transcriptQualityScore,
-      };
-    } catch (err) {
-      console.error(
-        JSON.stringify({
-          level: "error",
-          msg: "media_audio_derive_fail",
-          reqId,
-          mimeTypeRaw: mimeTypeRaw || null,
-          mimeTypeClean: mimeType || null,
-          error: (err && err.message) || String(err),
-        })
-      );
-      return { ok: false, error: err };
-    } finally {
-      try {
-        fs.rmSync(dir, { recursive: true, force: true });
-      } catch {}
-      try {
-        if (pipelineTmpDirs.preprocess) fs.rmSync(pipelineTmpDirs.preprocess, { recursive: true, force: true });
-      } catch {}
-      try {
-        if (pipelineTmpDirs.chunk) fs.rmSync(pipelineTmpDirs.chunk, { recursive: true, force: true });
-      } catch {}
-    }
+    // Audio functionality removed - return failure so fallback message is used
+    console.log(JSON.stringify({ level: "info", msg: "audio_disabled", reqId }));
+    return { ok: false, reason: "audio_disabled", path: "audio" };
   }
 
   if (baseKind === "image" || baseKind === "unknown") {
