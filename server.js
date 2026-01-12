@@ -167,6 +167,21 @@ import {
   clearOrderAsk as clearOrderAskImpl,
 } from './project/src/services/conversation/index.js';
 
+import {
+  sniffImageMime as sniffImageMimeImpl,
+  toImageUrlString as toImageUrlStringImpl,
+  isVisionCapableModel as isVisionCapableModelImpl,
+  pickVisionModel as pickVisionModelImpl,
+  describeImage as describeImageImpl,
+  parseVisionJson as parseVisionJsonImpl,
+  deriveVisionHintsFromText as deriveVisionHintsFromTextImpl,
+  normalizeVisionResult as normalizeVisionResultImpl,
+  analyzeProductImage as analyzeProductImageImpl,
+  selectOffersFromVision as selectOffersFromVisionImpl,
+  handleVisionMedia as handleVisionMediaImpl,
+  VISION_CATEGORY_MAP as VISION_CATEGORY_MAP_IMPL,
+} from './project/src/services/vision/index.js';
+
 let toFileImpl = toFile;
 
 const app = express();
@@ -819,27 +834,6 @@ function ensureNoQuestion(text) {
 
 function shortenNoQuestion(text, max, logContext) {
   return shortenNoQuestionImpl(text, max, logContext, { CFG, shorten });
-}
-
-function sniffImageMime(buf) {
-  if (!Buffer.isBuffer(buf)) return "";
-  if (buf.length >= 3 && buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff) return "image/jpeg";
-  if (
-    buf.length >= 8 &&
-    buf[0] === 0x89 &&
-    buf[1] === 0x50 &&
-    buf[2] === 0x4e &&
-    buf[3] === 0x47 &&
-    buf[4] === 0x0d &&
-    buf[5] === 0x0a &&
-    buf[6] === 0x1a &&
-    buf[7] === 0x0a
-  )
-    return "image/png";
-  if (buf.length >= 12 && buf.slice(0, 4).toString("ascii") === "RIFF" && buf.slice(8, 12).toString("ascii") === "WEBP")
-    return "image/webp";
-  if (buf.length >= 4 && buf.slice(0, 4).toString("ascii") === "GIF8") return "image/gif";
-  return "";
 }
 
 function formatSize(lang, size) {
@@ -3021,12 +3015,87 @@ function priceSummaryText(lang, min, max) {
  * 3) map the JSON to our offer selection hints (selectOffersFromVision)
  * 4) build a reply using the same ranking/formatting used for text routes
  */
-const VISION_CATEGORY_MAP = {
-  tv: { cls: "Tv", category: "Tv" },
-  refrigerateur: { cls: "Refrigerateur", category: "Refrigerateur" },
-  cuisiniere: { cls: "Cuisiniere", category: "Cuisiniere" },
-  lave_linge: { cls: "Machine A Laver", category: "Machine A Laver" },
-};
+const VISION_CATEGORY_MAP = VISION_CATEGORY_MAP_IMPL;
+
+// Vision service wrappers
+const sniffImageMime = sniffImageMimeImpl;
+const toImageUrlString = toImageUrlStringImpl;
+const isVisionCapableModel = isVisionCapableModelImpl;
+const describeImage = describeImageImpl;
+const parseVisionJson = parseVisionJsonImpl;
+const normalizeVisionResult = normalizeVisionResultImpl;
+
+// Vision functions that need dependency injection
+function pickVisionModel() {
+  return pickVisionModelImpl(CFG, OPENAI_MODEL);
+}
+
+function deriveVisionHintsFromText(rawText) {
+  return deriveVisionHintsFromTextImpl(rawText, {
+    normMatch,
+    includesToken,
+    offersIndex: OFFERS_INDEX,
+    brandPriority: BRAND_PRIORITY,
+  });
+}
+
+function analyzeProductImage(imageBytes, mimeType, opts = {}) {
+  return analyzeProductImageImpl(imageBytes, mimeType, opts, {
+    openaiClient: getOpenAIClient(),
+    cfg: CFG,
+    defaultModel: OPENAI_MODEL,
+    normMatch,
+    includesToken,
+    offersIndex: OFFERS_INDEX,
+    brandPriority: BRAND_PRIORITY,
+  });
+}
+
+function selectOffersFromVision(hints) {
+  return selectOffersFromVisionImpl(hints, {
+    offersIndex: OFFERS_INDEX,
+    offers: OFFERS,
+    featureAssumeTvOnBrandOnly: FEATURE_ASSUME_TV_ON_BRAND_ONLY,
+    listOffersForBrand,
+    maxOffers: MAX_OFFERS,
+    normMatch,
+    rankOffers,
+    pickCheapestPerBrand,
+  });
+}
+
+async function handleVisionMedia(mediaInput, lang, key, opts = {}) {
+  return handleVisionMediaImpl(mediaInput, lang, key, opts, {
+    normalizeMediaInput,
+    downloadMediaBuffer,
+    visionAnalyzer,
+    cfg: CFG,
+    defaultModel: OPENAI_MODEL,
+    openaiClient: getOpenAIClient(),
+    offersHeader,
+    buildPremiumOffersReply,
+    fallbackWithAgent,
+    titleFromHeader,
+    shortenNoQuestion,
+    ensureNoQuestion,
+    sanitizeDerivedText,
+    tryDirectOfferAnswer,
+    t,
+    stripNonPurchaseUrls,
+    setCtx,
+    buildOfferContextEntries,
+    offersIndex: OFFERS_INDEX,
+    offers: OFFERS,
+    featureAssumeTvOnBrandOnly: FEATURE_ASSUME_TV_ON_BRAND_ONLY,
+    listOffersForBrand,
+    maxOffers: MAX_OFFERS,
+    normMatch,
+    rankOffers,
+    pickCheapestPerBrand,
+    includesToken,
+    brandPriority: BRAND_PRIORITY,
+  });
+}
 
 let visionAnalyzer = analyzeProductImage;
 let mediaFetcherOverride = null;
@@ -3867,519 +3936,6 @@ function buildPipelineTranscriber(reqId) {
     }
     return { rawTranscript: String(out || ""), segments: null, modelUsed: model || "openai" };
   };
-}
-
-function parseVisionJson(rawText) {
-  if (rawText && typeof rawText === "object") return { ok: true, obj: rawText };
-  const txt = String(rawText || "").trim();
-  if (!txt) return { ok: false, raw: "" };
-  const cleaned = txt.replace(/^```json\s*/i, "").replace(/```$/g, "").trim();
-  try {
-    const obj = JSON.parse(cleaned);
-    return { ok: true, obj };
-  } catch {}
-
-  const start = cleaned.indexOf("{");
-  const end = cleaned.lastIndexOf("}");
-  if (start >= 0 && end > start) {
-    const slice = cleaned.slice(start, end + 1);
-    try {
-      const obj = JSON.parse(slice);
-      return { ok: true, obj };
-    } catch {}
-  }
-
-  return { ok: false, raw: cleaned };
-}
-
-function deriveVisionHintsFromText(rawText) {
-  const txt = String(rawText || "").trim();
-  if (!txt) return null;
-
-  const normalized = normMatch(txt);
-  const out = {
-    category: "other",
-    brand: null,
-    model: null,
-    size_inches: null,
-    capacity_liters: null,
-    confidence: 0.15,
-  };
-
-  const brandsPool = [...new Set([...(OFFERS_INDEX.brands || []), ...(BRAND_PRIORITY || [])])];
-  for (let i = 0; i < brandsPool.length; i += 1) {
-    const b = brandsPool[i];
-    if (includesToken(txt, b)) {
-      out.brand = b;
-      break;
-    }
-  }
-
-  const sizeMatch = txt.match(/(\d{2,3})\s*(?:"|pouce|pouces|inch|inches|po|in)?/i);
-  if (sizeMatch) {
-    const sizeNum = Number(sizeMatch[1]);
-    if (Number.isFinite(sizeNum) && sizeNum >= 14 && sizeNum <= 120) {
-      out.size_inches = sizeNum;
-      out.category = out.category === "other" ? "tv" : out.category;
-    }
-  }
-
-  const capMatch = txt.match(/(\d{2,4})\s*(?:l|litre|litres)/i);
-  if (capMatch) {
-    const capNum = Number(capMatch[1]);
-    if (Number.isFinite(capNum) && capNum >= 20 && capNum <= 1200) {
-      out.capacity_liters = capNum;
-      out.category = out.category === "other" ? "refrigerateur" : out.category;
-    }
-  }
-
-  if (/\btv\b|tele|écran|ecran|screen|qled|oled/.test(normalized)) out.category = "tv";
-  else if (/frigo|refrigerateur|réfrigérateur/.test(normalized)) out.category = "refrigerateur";
-  else if (/cuisiniere|four/.test(normalized)) out.category = "cuisiniere";
-  else if (/lave\s*linge|machine\s*a\s*laver/.test(normalized)) out.category = "lave_linge";
-  else if (/clim|climatiseur|ac/.test(normalized)) out.category = "climatiseur";
-
-  if (!out.brand && txt.length <= 80) out.model = txt;
-
-  return out;
-}
-
-function normalizeVisionResult(obj) {
-  const o = obj && typeof obj === "object" ? obj : {};
-  const category = String(o.category || "").toLowerCase();
-  const brand = String(o.brand || "").trim();
-  const model = String(o.model || "").trim();
-  const sizeInches = Number(o.size_inches);
-  const capacityLiters = Number(o.capacity_liters);
-  const confidence = Number(o.confidence);
-
-  return {
-    category,
-    brand: brand || null,
-    model: model || null,
-    size_inches: Number.isFinite(sizeInches) ? sizeInches : null,
-    capacity_liters: Number.isFinite(capacityLiters) ? capacityLiters : null,
-    confidence: Number.isFinite(confidence) && confidence >= 0 && confidence <= 1 ? confidence : 0,
-  };
-}
-
-function toImageUrlString(image, mime = "image/jpeg") {
-  if (typeof image === "string") {
-    if (/^(https?:|data:)/i.test(image)) return image;
-    throw new Error("Image string must start with http or data:");
-  }
-
-  if (Buffer.isBuffer(image) || image instanceof Uint8Array) {
-    const buf = Buffer.isBuffer(image) ? image : Buffer.from(image);
-    const b64 = buf.toString("base64");
-    return `data:${mime};base64,${b64}`;
-  }
-
-  if (image && typeof image === "object") {
-    if (typeof image.url === "string") return toImageUrlString(image.url, mime);
-    console.error("Invalid image object keys:", Object.keys(image || {}));
-    throw new Error("Unsupported image object for vision: expected string, Buffer/Uint8Array, or { url }");
-  }
-
-  throw new Error("Unsupported image type for vision input");
-}
-
-async function describeImage({ image, model }, openaiClient) {
-  const client = openaiClient || getOpenAIClient();
-  const imageUrl = toImageUrlString(image);
-  console.log("vision image typeof:", typeof image, "isBuffer:", Buffer.isBuffer(image));
-  if (typeof imageUrl === "string" && /^(data:|https?:)/i.test(imageUrl)) {
-    console.log("vision image_url preview:", imageUrl.slice(0, 80));
-  }
-  const resp = await client.responses.create({
-    model: model || pickVisionModel(),
-    input: [
-      {
-        role: "user",
-        content: [
-          {
-            type: "input_text",
-            text: "Extract brand/model/size/category + any visible text. Return ONE compact line. No URLs. No question marks.",
-          },
-          { type: "input_image", image_url: imageUrl },
-        ],
-      },
-    ],
-  });
-
-  const outText =
-    (resp && (resp.output_text || resp.text)) ||
-    (resp &&
-      resp.output &&
-      Array.isArray(resp.output) &&
-      resp.output[0] &&
-      (resp.output[0].content || resp.output[0].text)) ||
-    "";
-  return String(outText || "").trim();
-}
-
-function isVisionCapableModel(modelName) {
-  const m = String(modelName || "").toLowerCase();
-  return /gpt-4o|gpt-4\.1|o3|vision/.test(m);
-}
-
-function pickVisionModel() {
-  if (CFG.openaiVisionModel && isVisionCapableModel(CFG.openaiVisionModel)) return CFG.openaiVisionModel;
-  if (OPENAI_MODEL && isVisionCapableModel(OPENAI_MODEL)) return OPENAI_MODEL;
-  // Default to a known vision-capable model if none provided
-  return "gpt-4o-mini";
-}
-
-async function analyzeProductImage(imageBytes, mimeType, opts = {}) {
-  const imgBuf = Buffer.isBuffer(imageBytes) ? imageBytes : Buffer.from(imageBytes || []);
-  const safeMime = sniffImageMime(imgBuf) || String(mimeType || "image/jpeg");
-  const model = pickVisionModel();
-  const client = getOpenAIClient();
-  const formattingInstruction =
-    "Identify the product and output strict JSON only with keys: category (tv|refrigerateur|cuisiniere|lave_linge|other), brand, model, size_inches, capacity_liters, confidence (0..1).";
-
-  let resp = null;
-  let formattingEnabled = true;
-  let lastError = null;
-
-  for (let attempt = 0; attempt < 2; attempt += 1) {
-    const enforceJsonNote = formattingEnabled
-      ? ""
-      : " Respond with JSON only. Do not add explanations, code fences, or non-JSON text.";
-    const imageUrl = toImageUrlString(imgBuf, safeMime);
-    console.log("vision image typeof:", typeof imageBytes, "isBuffer:", Buffer.isBuffer(imageBytes));
-    if (typeof imageUrl === "string" && /^(data:|https?:)/i.test(imageUrl)) {
-      console.log("vision image_url preview:", imageUrl.slice(0, 80));
-    }
-    const payload = {
-      model,
-      temperature: 0,
-      input: [
-        {
-          role: "user",
-          content: [
-            {
-              type: "input_text",
-              text: formattingInstruction + enforceJsonNote,
-            },
-            { type: "input_image", image_url: imageUrl },
-          ],
-        },
-      ],
-    };
-
-    if (formattingEnabled) {
-      payload.text = { format: { type: "json_object" } };
-    }
-
-    try {
-      resp = await client.responses.create(payload);
-      break;
-    } catch (err) {
-      lastError = err;
-      const msg = (err && (err.message || err.toString())) || "unknown_error";
-      console.error(
-        JSON.stringify({
-          level: "error",
-          msg: "vision_openai_call_failed",
-          reqId: opts.reqId || null,
-          model,
-          formatting: formattingEnabled,
-          error: msg,
-        })
-      );
-
-      const lowerMsg = String(msg || "").toLowerCase();
-      const formattingUnsupported =
-        formattingEnabled &&
-        (lowerMsg.includes("text.format") || lowerMsg.includes("response_format") || lowerMsg.includes("unsupported"));
-
-      if (formattingUnsupported && attempt === 0) {
-        formattingEnabled = false;
-        continue;
-      }
-
-      throw err;
-    }
-  }
-
-  if (!resp) throw lastError || new Error("vision_no_response");
-
-  let rawOut = "";
-  if (resp && typeof resp.output_text === "string") rawOut = resp.output_text;
-  else if (resp && typeof resp.text === "string") rawOut = resp.text;
-  else if (resp && Array.isArray(resp.output)) rawOut = resp.output.map((it) => (typeof it === "string" ? it : it?.content || it?.text || "")).join("\n");
-
-  const parsed = parseVisionJson(rawOut);
-  if (!parsed.ok) {
-    const fallback = deriveVisionHintsFromText(parsed.raw || rawOut);
-    console.error(
-      JSON.stringify({
-        level: fallback ? "warn" : "error",
-        msg: "vision_invalid_json",
-        reqId: opts.reqId || null,
-        model,
-        formatting: formattingEnabled,
-        raw: rawOut,
-      })
-    );
-    if (!fallback) {
-      const e = new Error("vision_invalid_json");
-      e.rawOutput = rawOut;
-      throw e;
-    }
-    const normFallback = normalizeVisionResult(fallback);
-    console.log(
-      JSON.stringify({
-        level: "info",
-        msg: "vision_analyzed_fallback",
-        modelUsed: model,
-        confidence: normFallback.confidence,
-      })
-    );
-    return normFallback;
-  }
-
-  const norm = normalizeVisionResult(parsed.obj);
-
-  console.log(
-    JSON.stringify({
-      level: "info",
-      msg: "vision_analyzed",
-      modelUsed: model,
-      confidence: norm.confidence,
-    })
-  );
-
-  return norm;
-}
-
-function selectOffersFromVision(hints) {
-  const h = hints || {};
-  const mapped = VISION_CATEGORY_MAP[h.category] || { cls: null, category: null };
-  const cls = mapped.cls || h.cls || null;
-  const category = mapped.category || h.categoryReadable || null;
-  const brand = String(h.brand || "").toUpperCase();
-  const size = Number(h.size_inches);
-  const capacity = Number(h.capacity_liters);
-  const sizeNum = Number.isFinite(size) ? size : null;
-  const capNum = Number.isFinite(capacity) ? capacity : null;
-
-  if (brand) {
-    const isBrandOnlyQuery = !cls && !category && !sizeNum && !capNum;
-    const tvCanon = OFFERS_INDEX.classCanon.tv || "Tv";
-    
-    if (FEATURE_ASSUME_TV_ON_BRAND_ONLY && isBrandOnlyQuery) {
-      const resTv = listOffersForBrand(brand, {
-        cls: tvCanon,
-        limit: MAX_OFFERS,
-        withOffers: true,
-        tvOnly: true,
-      });
-      if (resTv?.offers?.length > 0) {
-        return { offers: resTv.offers.map((offer) => ({ brand, offer })) };
-      }
-    }
-
-    const res = listOffersForBrand(brand, {
-      cls,
-      category,
-      size: sizeNum,
-      capacityLiters: capNum,
-      limit: MAX_OFFERS,
-      withOffers: true,
-    });
-    if (res && Array.isArray(res.offers) && res.offers.length) {
-      return { offers: res.offers.map((offer) => ({ brand, offer })) };
-    }
-  }
-
-  const items = [];
-  const brands = OFFERS_INDEX.brands || [];
-  for (let i = 0; i < brands.length; i += 1) {
-    const b = brands[i];
-    const arr = ((OFFERS && OFFERS.offers && OFFERS.offers[b]) || [])
-      .map((offer, idx) => ({ brand: b, offer, originalIdx: idx }))
-      .filter((it) => {
-        const o = it.offer || {};
-        if (cls && normMatch(o.class || "") !== normMatch(cls)) return false;
-        if (category && normMatch(o.category || "") !== normMatch(category)) return false;
-        return true;
-      });
-    items.push(...arr);
-  }
-
-  const ranked = rankOffers(items, {
-    size: sizeNum,
-    capacityLiters: capNum,
-    className: cls,
-    limit: null,
-  });
-
-  const picked = pickCheapestPerBrand(ranked).slice(0, MAX_OFFERS);
-
-  return { offers: picked.map((r) => ({ brand: r.brand, offer: r.offer })) };
-}
-
-async function handleVisionMedia(mediaInput, lang, key, opts = {}) {
-  const stripUrls = opts.stripUrls === true;
-  const normalizedMedia = normalizeMediaInput(mediaInput);
-  if (!normalizedMedia) throw new Error("media_missing");
-
-  const mime = String(normalizedMedia.mimeType || "").toLowerCase();
-  if (mime && mime.startsWith("audio/")) {
-    console.warn(
-      JSON.stringify({ level: "warn", msg: "vision_blocked_non_image", mimeType: normalizedMedia.mimeType || null })
-    );
-    throw new Error("vision_non_image");
-  }
-
-  const downloaded = await downloadMediaBuffer(normalizedMedia);
-  const sniffedMime = sniffImageMime(downloaded.buffer);
-  const downloadedMime = String(downloaded.mimeType || "").toLowerCase();
-  const finalMime = (sniffedMime || downloadedMime || mime || "").toLowerCase();
-
-  if (!finalMime.startsWith("image/")) {
-    const ext = path.extname(normalizedMedia.filename || normalizedMedia.url || "").toLowerCase();
-    const extLooksImage = [".jpg", ".jpeg", ".png", ".gif", ".webp"].includes(ext);
-    if (!extLooksImage && !sniffedMime) {
-      console.warn(
-        JSON.stringify({
-          level: "warn",
-          msg: "vision_blocked_after_download",
-          mimeType: downloaded.mimeType || null,
-          sniffedMime: sniffedMime || null,
-        })
-      );
-      throw new Error("vision_non_image");
-    }
-  }
-
-  const logBase = {
-    level: "info",
-    msg: "vision_media",
-    mimeProvided: normalizedMedia.mimeType || null,
-    mimeDownloaded: downloaded.mimeType || null,
-    sniffedMime: sniffedMime || null,
-    sizeBytes: downloaded.buffer.length,
-    reqId: opts.reqId || null,
-  };
-  console.log(JSON.stringify(logBase));
-
-  let vision = null;
-  try {
-    vision = await visionAnalyzer(downloaded.buffer, finalMime || downloaded.mimeType || "image/jpeg", {
-      reqId: opts.reqId || null,
-    });
-  } catch (err) {
-    console.error(
-      JSON.stringify({
-        level: "error",
-        msg: "vision_call_failed",
-        reqId: opts.reqId || null,
-        error: (err && err.message) || String(err),
-      })
-    );
-  }
-
-  if (vision && vision.confidence !== undefined) {
-    console.log(
-      JSON.stringify({
-        level: "info",
-        msg: "vision_result",
-        reqId: opts.reqId || null,
-        confidence: vision.confidence,
-        category: vision.category || null,
-        brand: vision.brand || null,
-        size: vision.size_inches || null,
-        capacity: vision.capacity_liters || null,
-      })
-    );
-  }
-
-  let offerReply = null;
-  if (vision) {
-    const mapped = VISION_CATEGORY_MAP[vision.category] || {};
-    const cls = mapped.cls || null;
-    const category = mapped.category || null;
-    const brand = vision.brand ? String(vision.brand).toUpperCase() : null;
-    const sizeNum = vision.size_inches ? Number(vision.size_inches) : null;
-    const capNum = vision.capacity_liters ? Number(vision.capacity_liters) : null;
-
-    const offers = selectOffersFromVision({
-      category: vision.category,
-      cls,
-      categoryReadable: category,
-      brand,
-      size_inches: sizeNum,
-      capacity_liters: capNum,
-    });
-
-    const header = offersHeader(lang, {
-      brand,
-      cls: cls || category || undefined,
-      category: category || undefined,
-      size: sizeNum || undefined,
-    });
-    const entries = Array.isArray(offers.offers) ? offers.offers : [];
-    const title = titleFromHeader(header);
-    const body = entries.length
-      ? buildPremiumOffersReply({ title, entries, lang, maxChars: CFG.maxReplyChars })
-      : fallbackWithAgent(lang);
-    offerReply = {
-      reply: shortenNoQuestion(body, CFG.maxReplyChars),
-      confidence: vision.confidence || 0,
-      ctx: { brand, cls, category, sizeNum, offers: { offers: entries } },
-    };
-  }
-
-  if (!offerReply) {
-    try {
-      const mimeType = finalMime || downloaded.mimeType || "image/jpeg";
-      const dataUrl = `data:${mimeType};base64,${downloaded.buffer.toString("base64")}`;
-      const desc = await describeImage({ image: dataUrl, model: pickVisionModel() }, getOpenAIClient());
-      const safeDesc = ensureNoQuestion(sanitizeDerivedText(desc)).slice(0, 1800);
-      if (safeDesc) {
-        const direct = tryDirectOfferAnswer(safeDesc, [], lang, key);
-        if (direct) {
-          offerReply = { reply: shortenNoQuestion(direct, CFG.maxReplyChars), confidence: 0 };
-        }
-      }
-    } catch (err) {
-      console.error(
-        JSON.stringify({
-          level: "error",
-          msg: "vision_fallback_failed",
-          reqId: opts.reqId || null,
-          error: (err && err.message) || String(err),
-        })
-      );
-    }
-  }
-
-  if (!offerReply) {
-    const ask = shortenNoQuestion(t(lang, "askTextInsteadMedia"), 420);
-    return { reply: ask, confidence: 0 };
-  }
-
-  const finalReplyText = stripUrls
-    ? stripNonPurchaseUrls(String(offerReply.reply || ""))
-    : String(offerReply.reply || "");
-  const finalReply = shortenNoQuestion(finalReplyText, CFG.maxReplyChars);
-  const ctxData = offerReply.ctx || {};
-  const visionEntries = Array.isArray(ctxData.offers && ctxData.offers.offers) ? ctxData.offers.offers : [];
-  const visionOfferCtx = visionEntries.length ? buildOfferContextEntries(visionEntries) : null;
-  setCtx(key, {
-    lastBrand: ctxData.brand || undefined,
-    lastClass: ctxData.cls || undefined,
-    lastCategory: ctxData.category || undefined,
-    lastSize: ctxData.sizeNum || undefined,
-    lastOffersShown: visionOfferCtx ? visionOfferCtx.lastOffersShown : undefined,
-    lastOfferPicks: visionOfferCtx ? visionOfferCtx.lastOfferPicks : undefined,
-    lastOfferItems: visionOfferCtx ? visionOfferCtx.lastOfferItems : undefined,
-  });
-
-  return { reply: finalReply, confidence: offerReply.confidence || 0 };
 }
 
 function setVisionAnalyzerForTest(fn) {
