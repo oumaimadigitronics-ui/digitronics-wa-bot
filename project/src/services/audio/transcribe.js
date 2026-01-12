@@ -8,16 +8,6 @@ import os from "os";
 import { sniffAudioMime, extFromAudioMime, cleanMimeType, inferMimeFromPath } from "./mime.js";
 
 /**
- * Normalize language hint to ISO 639-1 code for OpenAI API.
- * @param {string} language - Language hint
- * @param {Function} normalizeLanguageHintImpl - Implementation function from lang service
- * @returns {string|null} Normalized language code
- */
-function normalizeLanguageHint(language, normalizeLanguageHintImpl) {
-  return normalizeLanguageHintImpl(language);
-}
-
-/**
  * Transcribe audio file using OpenAI Whisper API.
  * @param {Object} params - Transcription parameters
  * @param {string} params.filePath - Path to audio file
@@ -41,7 +31,7 @@ export async function transcribeAudioOpenAI(
   normalizeLanguageHintImpl,
   audioTranscriberOverride = null
 ) {
-  const languageHint = normalizeLanguageHint(language, normalizeLanguageHintImpl);
+  const languageHint = normalizeLanguageHintImpl(language);
   if (typeof audioTranscriberOverride === "function") {
     return audioTranscriberOverride(filePath, mimeType, languageHint);
   }
@@ -133,7 +123,7 @@ export async function transcribeAudioFile(
   normalizeLanguageHintImpl,
   audioTranscriberOverride = null
 ) {
-  const languageHint = normalizeLanguageHint(language, normalizeLanguageHintImpl);
+  const languageHint = normalizeLanguageHintImpl(language);
   if (typeof audioTranscriberOverride === "function") return audioTranscriberOverride(filePath, mimeType, languageHint);
 
   const mimeRaw = String(mimeType || "");
