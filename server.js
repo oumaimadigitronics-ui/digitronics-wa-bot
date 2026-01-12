@@ -141,6 +141,18 @@ import {
   refreshOffersReference,
 } from './project/src/services/offers/index.js';
 
+import {
+  createMemory as createMemoryImpl,
+  setCtx as setCtxImpl,
+  getCtx as getCtxImpl,
+  resetCtxForCategoryChange as resetCtxForCategoryChangeImpl,
+  cleanupContexts as cleanupContextsImpl,
+  hasRecentProductContext as hasRecentProductContextImpl,
+  shouldAskOrderNo as shouldAskOrderNoImpl,
+  markOrderAsk as markOrderAskImpl,
+  clearOrderAsk as clearOrderAskImpl,
+} from './project/src/services/conversation/index.js';
+
 let toFileImpl = toFile;
 
 const app = express();
@@ -1880,142 +1892,21 @@ function rateLimitOk(key, ip) {
   return entry.count <= CFG.rateMax && ipOk;
 }
 
-class Memory {
-  constructor(opts) {
-    const o = opts || {};
-    this.ttlMs = Number(o.ttlMs) || 24 * 60 * 60 * 1000;
-    this.maxMessages = Math.max(6, Number(o.maxMessages) || 12);
-    this.persist = Boolean(o.persist);
-    this.dirAbs = path.resolve(String(o.dir || "./data"));
-    this.file = path.join(this.dirAbs, "memory_store.json");
-    this.store = new Map();
-    this.flushTimer = null;
-    this.maxConversations = 5000;
-  }
-
-  ensureDir() {
-    if (!this.persist) return;
-    try {
-      if (!fs.existsSync(this.dirAbs)) fs.mkdirSync(this.dirAbs, { recursive: true, mode: 0o700 });
-    } catch {}
-  }
-
-  load() {
-    if (!this.persist) return;
-    this.ensureDir();
-    try {
-      if (!fs.existsSync(this.file)) return;
-      const raw = fs.readFileSync(this.file, "utf8");
-      const parsed = JSON.parse(raw || "{}");
-      const entries = (parsed && parsed.entries) || {};
-      const keys = Object.keys(entries);
-      for (let i = 0; i < keys.length; i += 1) {
-        const k = keys[i];
-        const v = entries[k];
-        if (!v || !Array.isArray(v.msgs)) continue;
-        const msgs = v.msgs
-          .filter((m) => m && (m.role === "user" || m.role === "assistant") && typeof m.content === "string")
-          .slice(-this.maxMessages);
-        this.store.set(k, { msgs, lastSeen: Number(v.lastSeen) || Date.now() });
-      }
-      console.log("Memory loaded:", this.store.size, "conversations");
-    } catch (e) {
-      console.log("Memory load failed:", (e && e.message) || String(e));
-    }
-  }
-
-  evictIfNeeded() {
-    if (this.store.size <= this.maxConversations) return;
-    const items = [];
-    for (const [k, v] of this.store.entries()) items.push([k, (v && v.lastSeen) || 0]);
-    items.sort((a, b) => a[1] - b[1]);
-    const toRemove = Math.max(1, this.store.size - this.maxConversations);
-    for (let i = 0; i < toRemove; i += 1) this.store.delete(items[i][0]);
-  }
-
-  flushSoon() {
-    if (!this.persist) return;
-    if (this.flushTimer) return;
-    this.flushTimer = setTimeout(() => {
-      this.flushTimer = null;
-      this.flushNow();
-    }, 1500);
-  }
-
-  flushNow() {
-    if (!this.persist) return;
-    this.ensureDir();
-    try {
-      const entries = {};
-      for (const [k, v] of this.store.entries()) {
-        entries[k] = { lastSeen: v.lastSeen, msgs: v.msgs.slice(-this.maxMessages) };
-      }
-      const tmp = this.file + ".tmp";
-      fs.writeFileSync(tmp, JSON.stringify({ version: 1, entries }, null, 2), { encoding: "utf8", mode: 0o600 });
-      try {
-        fs.renameSync(tmp, this.file);
-      } catch {
-        fs.writeFileSync(this.file, JSON.stringify({ version: 1, entries }, null, 2), { encoding: "utf8", mode: 0o600 });
-        try {
-          fs.unlinkSync(tmp);
-        } catch {}
-      }
-    } catch (e) {
-      console.log("Memory flush failed:", (e && e.message) || String(e));
-    }
-  }
-
-  push(key, role, content) {
-    const now = Date.now();
-    const k = String(key || "").slice(0, 180);
-    const entry = this.store.get(k) || { msgs: [], lastSeen: now };
-    entry.msgs.push({ role, content: String(content || "").trim().slice(0, 2000) });
-    entry.msgs = entry.msgs.filter((m) => m && m.content).slice(-this.maxMessages);
-    entry.lastSeen = now;
-    this.store.set(k, entry);
-    this.evictIfNeeded();
-    this.flushSoon();
-    return entry.msgs;
-  }
-
-  get(key) {
-    const v = this.store.get(String(key || "").slice(0, 180));
-    if (!v || !Array.isArray(v.msgs)) return [];
-    return v.msgs;
-  }
-
-  cleanup() {
-    const now = Date.now();
-    for (const [k, v] of this.store.entries()) {
-      if (!v || !v.lastSeen || now - v.lastSeen > this.ttlMs) this.store.delete(k);
-    }
-    this.flushSoon();
-  }
-}
-
-const memory = new Memory({
+const memory = createMemoryImpl({
   ttlMs: CFG.memoryTtlMs,
   maxMessages: CFG.memoryMaxMessages,
   persist: CFG.memoryPersist,
   dir: CFG.memoryDir,
 });
 
-const ctxStore = new Map();
-const CTX_TTL_MS = 24 * 60 * 60 * 1000;
-
-function shouldAskOrderNo(key, now = Date.now()) {
-  const ctx = getCtx(key);
-  const lastAsk = ctx.lastAskOrderAt || 0;
-  return !lastAsk || now - lastAsk > PENDING_TTL_MS;
-}
-
-function markOrderAsk(key, type) {
-  setCtx(key, { lastAskOrderAt: Date.now(), lastAskOrderType: type });
-}
-
-function clearOrderAsk(key) {
-  setCtx(key, { lastAskOrderAt: 0, lastAskOrderType: "" });
-}
+// Use imported context and session functions
+const shouldAskOrderNo = shouldAskOrderNoImpl;
+const markOrderAsk = markOrderAskImpl;
+const clearOrderAsk = clearOrderAskImpl;
+const setCtx = setCtxImpl;
+const getCtx = getCtxImpl;
+const hasRecentProductContext = hasRecentProductContextImpl;
+const resetCtxForCategoryChange = resetCtxForCategoryChangeImpl;
 
 function neutralOrderReply(lang) {
   if (lang === "fr") return "D’accord.";
@@ -2028,25 +1919,6 @@ function alternativeSupportReply(lang) {
   if (lang === "fr") return "Envoyez votre nom + téléphone, on vous rappelle, ou appelez: " + calls + ".";
   if (lang === "ar") return "صيفط لينا سميتك + رقمك وغا نتاصلوا بيك، أو عيط لينا على: " + calls + ".";
   return "Sift smiytk + numéro, ghadi ntasslo bik, ola 3ayet lina: " + calls + ".";
-}
-
-function setCtx(key, patch) {
-  const now = Date.now();
-  const k = String(key || "");
-  const v = ctxStore.get(k) || { at: now };
-  const p = patch || {};
-  ctxStore.set(k, Object.assign({}, v, p, { at: now }));
-}
-
-function getCtx(key) {
-  const k = String(key || "");
-  const v = ctxStore.get(k);
-  if (!v) return {};
-  if (!v.at || Date.now() - v.at > CTX_TTL_MS) {
-    ctxStore.delete(k);
-    return {};
-  }
-  return v;
 }
 
 // Now that getCtx and setCtx are defined, initialize offers service helpers
@@ -2637,20 +2509,6 @@ function isAngryOrProblemIntent(text) {
   return hasAnyToken(s, tokens);
 }
 
-
-function hasRecentProductContext(ctx) {
-  if (!ctx) return false;
-  return Boolean(
-    ctx.lastBrand ||
-      ctx.lastCategory ||
-      ctx.lastClass ||
-      ctx.lastProductName ||
-      ctx.lastModel ||
-      ctx.lastSize ||
-      ctx.lastOffersShown
-  );
-}
-
 // Cache catalog overview intent phrases for performance
 const CATALOG_OVERVIEW_PHRASES = new Set([
   "شنو",
@@ -3140,31 +2998,6 @@ function extractOrderNumber(text) {
   const m = s.match(/\b\d{4,12}\b/);
   if (m && m[0]) return m[0];
   return null;
-}
-
-function resetCtxForCategoryChange(key, category, cls) {
-  if (!key) return;
-  const ctx = getCtx(key);
-  const currentCategory = normMatch(ctx.lastCategory || "");
-  const currentClass = normMatch(ctx.lastClass || "");
-  const nextCategory = normMatch(category || "");
-  const nextClass = normMatch(cls || "");
-
-  const categoryMismatch = nextCategory && currentCategory && currentCategory !== nextCategory;
-  const classMismatch = nextClass && currentClass && currentClass !== nextClass;
-  const resetNeeded = categoryMismatch || classMismatch || (nextCategory && currentCategory !== nextCategory);
-
-  if (!resetNeeded) return;
-
-  setCtx(key, {
-    lastBrand: undefined,
-    lastCategory: undefined,
-    lastClass: undefined,
-    lastSize: undefined,
-    lastOffersShown: undefined,
-    lastOfferPicks: undefined,
-    lastOfferItems: undefined,
-  });
 }
 
 function extractTvSize(text, opts = {}) {
@@ -8726,9 +8559,7 @@ function startMaintenanceTimer() {
       if (!v || !v.at || now - v.at > FALLBACK_TTL_MS) fallbackStrikeStore.delete(k);
     }
 
-    for (const [k, v] of ctxStore.entries()) {
-      if (!v || !v.at || now - v.at > CTX_TTL_MS) ctxStore.delete(k);
-    }
+    cleanupContextsImpl(now);
 
     for (const [k, v] of supportModeStore.entries()) {
       if (!v || !v.at || now - v.at > SUPPORT_TTL_MS) supportModeStore.delete(k);
