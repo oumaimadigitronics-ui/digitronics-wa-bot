@@ -5,7 +5,12 @@
  * (Arabic, French, and English). They use pattern matching with tokens, phrases,
  * and emojis to identify what the user wants.
  * 
- * Note: These functions depend on helper utilities from server.js:
+ * ⚠️ PHASE 1 - EXTRACTION ONLY ⚠️
+ * 
+ * These functions currently reference helper utilities that are NOT YET IMPORTED.
+ * They will throw ReferenceError if called directly. This is intentional for Phase 1.
+ * 
+ * Dependencies needed (currently in server.js):
  * - normalizeIntentText()
  * - hasAnyEmoji()
  * - hasAnyToken()
@@ -16,7 +21,10 @@
  * - isOrderStatusIntent()
  * - isProductAdviceIntent()
  * 
- * In Phase 2, these dependencies will be properly imported.
+ * Phase 2 will:
+ * 1. Extract helper functions to lib/utils
+ * 2. Add proper imports
+ * 3. Update server.js to use these modules
  */
 
 /**

@@ -4,15 +4,22 @@
  * Multilingual response templates for common customer inquiries.
  * These templates provide consistent, professional responses in French and Arabic.
  * 
+ * ⚠️ PHASE 1 - EXTRACTION ONLY ⚠️
+ * 
+ * These templates are ready to use and have no external dependencies.
+ * They can be imported and used immediately.
+ * 
  * Templates include:
  * - Purchase/Buy intent responses
  * - Clarification messages
  * - Delivery information
  * - Payment methods
  * - Warranty details
- * - Contact information
+ * - Contact information (with placeholders for dynamic data)
  * - Escalation for angry customers
  * - Support for technical issues
+ * 
+ * Phase 2 will update server.js to import and use these templates.
  */
 
 /**

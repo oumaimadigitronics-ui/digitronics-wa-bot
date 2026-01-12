@@ -5,12 +5,20 @@
  * This module provides the central routing function that determines which template(s)
  * to return based on the user's message intent.
  * 
- * Note: This function depends on:
- * - Intent detection functions (isAngryIntent, isConfusedIntent, etc.)
- * - Templates (ESCALATION_TEMPLATE, CLARITY_TEMPLATE, etc.)
- * - isProductAdviceIntent() and resolveAdvice() from server.js
+ * ⚠️ PHASE 1 - EXTRACTION ONLY ⚠️
  * 
- * In Phase 2, these dependencies will be properly imported from their respective modules.
+ * This function currently references dependencies that are NOT YET IMPORTED.
+ * It will throw ReferenceError if called directly. This is intentional for Phase 1.
+ * 
+ * Dependencies needed:
+ * - Intent functions: isAngryIntent, isConfusedIntent, isSupportIntent, isBuyIntent, hasQuantitySignal, isContactIntent, isDeliveryIntent, isPaymentIntent, isWarrantyIntent
+ * - Templates: ESCALATION_TEMPLATE, CLARITY_TEMPLATE, SUPPORT_TEMPLATE, BUY_INTENT_TEMPLATE, CONTACT_TEMPLATE, DELIVERY_TEMPLATE, PAYMENT_TEMPLATE, WARRANTY_TEMPLATE
+ * - From server.js: isProductAdviceIntent(), resolveAdvice()
+ * 
+ * Phase 2 will:
+ * 1. Add imports from intents.js and templates.js
+ * 2. Extract isProductAdviceIntent and resolveAdvice
+ * 3. Update server.js to use this module
  */
 
 /**
