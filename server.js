@@ -78,6 +78,38 @@ import {
   getLastOffersSync,
 } from './project/src/services/woocommerce/index.js';
 
+import {
+  hasArabicScript as hasArabicScriptImpl,
+  detectUserLanguage as detectUserLanguageImpl,
+  detectLang as detectLangImpl,
+  normalizeLanguageHint as normalizeLanguageHintImpl,
+  effectiveReplyLang as effectiveReplyLangImpl,
+  findBrandByNorm as findBrandByNormImpl,
+  detectBrandAlias as detectBrandAliasImpl,
+  detectBrand as detectBrandImpl,
+  buildDefaultClassAliases as buildDefaultClassAliasesImpl,
+  detectClass as detectClassImpl,
+  normalizeCategoryName as normalizeCategoryNameImpl,
+  normalizeClassName as normalizeClassNameImpl,
+  detectCategory as detectCategoryImpl,
+  findCategoryByNorm as findCategoryByNormImpl,
+  findClassByNorm as findClassByNormImpl,
+  resolveCategoryIntent as resolveCategoryIntentImpl,
+  detectApplianceCategory as detectApplianceCategoryImpl,
+  detectExplicitApplianceCategory as detectExplicitApplianceCategoryImpl,
+  parseBudget as parseBudgetImpl,
+  detectPriceIntent as detectPriceIntentImpl,
+  detectCheapIntent as detectCheapIntentImpl,
+  hasTvIntentTokens as hasTvIntentTokensImpl,
+  hasTvSizeContext as hasTvSizeContextImpl,
+  extractTvSize as extractTvSizeImpl,
+  tokenizeAlnum as tokenizeAlnumImpl,
+  detectModel as detectModelImpl,
+  extractCapacityLiters as extractCapacityLitersImpl,
+  isPhotoRequestIntent as isPhotoRequestIntentImpl,
+  parseUserQuery as parseUserQueryImpl
+} from './project/src/services/nlp/index.js';
+
 let toFileImpl = toFile;
 
 const app = express();
@@ -732,7 +764,7 @@ function parseMenuSelection(text) {
 }
 
 function hasArabicScript(text) {
-  return /[\u0600-\u06FF]/.test(String(text || ""));
+  return hasArabicScriptImpl(text);
 }
 
 function hasSmartToken(text) {
@@ -901,51 +933,13 @@ function warrantyTextForBrand(lang, brand, cls) {
 }
 
 // Cache language detection tokens to avoid recreating arrays on every call
-const LANG_DETECT_FR_STRONG = Object.freeze(["bonjour", "salut", "merci"]);
-const LANG_DETECT_FR_TOKENS = Object.freeze(["merci", "livraison", "garantie", "prix", "commande", "commander", "svp", "s'il", "sil"]);
-const LANG_DETECT_EN_STRONG = Object.freeze(["hello", "hi", "hey"]);
-const LANG_DETECT_EN_TOKENS = Object.freeze(["thanks", "please", "delivery", "warranty", "price", "order", "buy", "purchase"]);
-
+// Language detection - delegated to nlp module
 function detectUserLanguage(text) {
-  const raw = String(text || "");
-  const t0 = raw.trim();
-  if (!t0) return "dzl";
-
-  // Early return for Arabic script
-  if (hasArabicScript(raw)) return "ar";
-
-  const s = normMatch(t0);
-  const hasLatin = /[A-Za-z]/.test(t0);
-  let frScore = 0;
-  let enScore = 0;
-
-  // Check for French diacritics
-  if (/[éèêàçùôî]/i.test(t0)) frScore += 2;
-
-  // Score based on token matching - use frozen arrays directly
-  for (const token of LANG_DETECT_FR_STRONG) {
-    if (includesToken(s, token)) frScore += 2;
-  }
-  for (const token of LANG_DETECT_FR_TOKENS) {
-    if (includesToken(s, token)) frScore += 1;
-  }
-  for (const token of LANG_DETECT_EN_STRONG) {
-    if (includesToken(s, token)) enScore += 2;
-  }
-  for (const token of LANG_DETECT_EN_TOKENS) {
-    if (includesToken(s, token)) enScore += 1;
-  }
-
-  // Determine language based on scores
-  if (frScore >= 2 && frScore >= enScore) return "fr";
-  if (enScore >= 2) return "en";
-  if (frScore >= 1 && hasLatin && enScore === 0) return "fr";
-  return "dzl";
+  return detectUserLanguageImpl(text);
 }
 
 function detectLang(text) {
-  const detected = detectUserLanguage(text);
-  return detected === "en" ? "dzl" : detected;
+  return detectLangImpl(text);
 }
 
 function resolvePreferredLang({ key, text }) {
@@ -977,26 +971,11 @@ function resolvePreferredLang({ key, text }) {
 }
 
 function normalizeLanguageHint(lang) {
-  const normalized = String(lang || "").trim().toLowerCase();
-  if (!normalized) return null;
-  
-  // Map known variants to standard codes
-  if (normalized === "dz" || normalized === "dzl" || normalized === "darija") return "ar";
-  if (normalized.startsWith("ar")) return "ar";
-  if (normalized.startsWith("fr")) return "fr";
-  if (normalized.startsWith("en")) return "en";
-  
-  // Return two-letter language codes as-is
-  if (/^[a-z]{2}$/.test(normalized)) return normalized;
-  
-  return null;
+  return normalizeLanguageHintImpl(lang);
 }
 
 function effectiveReplyLang({ hintLang, userText }) {
-  const normalized = normalizeLanguageHint(hintLang);
-  if (normalized === "fr") return "fr";
-  const inferred = detectLang(userText);
-  return inferred === "fr" ? "fr" : "ar";
+  return effectiveReplyLangImpl({ hintLang, userText });
 }
 
 function t(lang, key, vars) {
@@ -2035,21 +2014,11 @@ function getCtx(key) {
 }
 
 function normalizeCategoryName(name) {
-  const base = String(name || "").trim();
-  if (!base) return null;
-  const k = normMatch(base);
-  const v = OFFERS_INDEX.categoryNorm.get(k);
-  if (v) return v;
-  return base;
+  return normalizeCategoryNameImpl(name, OFFERS_INDEX);
 }
 
 function normalizeClassName(name) {
-  const base = String(name || "").trim();
-  if (!base) return null;
-  const k = normMatch(base);
-  const v = OFFERS_INDEX.classNorm.get(k);
-  if (v) return v;
-  return base;
+  return normalizeClassNameImpl(name, OFFERS_INDEX);
 }
 
 const fallbackStrikeStore = new Map();
@@ -3105,54 +3074,11 @@ function rebuildModelPrefixIndex(modelLookup) {
 }
 
 function tokenizeAlnum(s) {
-  const out = [];
-  let cur = "";
-  const str = String(s || "");
-  for (let i = 0; i < str.length; i += 1) {
-    const ch = str[i];
-    const code = str.charCodeAt(i);
-    const isAlnum =
-      (code >= 48 && code <= 57) ||
-      (code >= 65 && code <= 90) ||
-      (code >= 97 && code <= 122) ||
-      (code >= 192 && code <= 687);
-
-    if (isAlnum) {
-      cur += ch;
-    } else if (cur) {
-      out.push(cur);
-      cur = "";
-    }
-  }
-  if (cur) out.push(cur);
-  return out;
+  return tokenizeAlnumImpl(s);
 }
 
 function detectModel(text) {
-  const s = normMatch(text);
-  if (!s) return null;
-
-  const tokens = tokenizeAlnum(s);
-  for (let i = 0; i < tokens.length; i += 1) {
-    const tok = tokens[i];
-    if (!tok || tok.length < 4) continue;
-    const hit = OFFERS_INDEX.modelLookup.get(tok);
-    if (hit) return hit;
-
-    if (tok.length >= 6) {
-      for (let j = 0; j + 4 <= tok.length; j += 1) {
-        const p4 = tok.slice(j, j + 4);
-        const cand = OFFERS_INDEX.modelPrefix4.get(p4);
-        if (!cand) continue;
-        for (let k = 0; k < cand.length; k += 1) {
-          const mLower = cand[k].mLower;
-          if (mLower && tok.indexOf(mLower) >= 0) return cand[k].entry;
-        }
-      }
-    }
-  }
-
-  return null;
+  return detectModelImpl(text, OFFERS_INDEX);
 }
 
 function extractModelCode(text) {
@@ -3197,419 +3123,43 @@ function findOfferFromLinks(text) {
   return null;
 }
 
-const BRAND_ALIASES = Object.freeze([
-  { brand: "SAMSUNG", tokens: ["سامسونج", "سيمسونج", "سانسونج"] },
-  { brand: "TCL", tokens: ["تي سي ال", "تي سي إل", "تكل"] },
-  { brand: "DAIKO", tokens: ["دايكو", "دايكو"] },
-  { brand: "HAIER", tokens: ["هاير"] },
-  { brand: "LG", tokens: ["ال جي", "الجي"] },
-  { brand: "HISENSE", tokens: ["هايسنس", "هاي سينس", "هايسينس"] },
-  { brand: "XIAOMI", tokens: ["xiaomi", "mi", "شاومي", "شومي"] },
-]);
-
+// Brand detection - delegated to nlp module
 function detectBrandAlias(text) {
-  const raw = String(text || "");
-  const s = normMatch(raw);
-  if (!s) return null;
-
-  for (let i = 0; i < BRAND_ALIASES.length; i += 1) {
-    const entry = BRAND_ALIASES[i];
-    const brand = findBrandByNorm(entry.brand) || entry.brand;
-    for (let j = 0; j < entry.tokens.length; j += 1) {
-      const token = entry.tokens[j];
-      if (token && includesToken(s, token)) return brand;
-    }
-  }
-  return null;
+  return detectBrandAliasImpl(text, OFFERS_INDEX);
 }
 
 function detectBrand(text) {
-  const s = normMatch(text);
-  const aliasHit = detectBrandAlias(text);
-  if (aliasHit) return aliasHit;
-
-  const brands = OFFERS_INDEX.brands || [];
-  for (let i = 0; i < brands.length; i += 1) {
-    const b = brands[i];
-    if (b && includesToken(s, b)) return b;
-  }
-  return null;
+  return detectBrandImpl(text, OFFERS_INDEX);
 }
 
 function findBrandByNorm(name) {
-  const target = normMatch(name || "");
-  const brands = OFFERS_INDEX.brands || [];
-  for (let i = 0; i < brands.length; i += 1) {
-    if (normMatch(brands[i]) === target) return brands[i];
-  }
-  return null;
+  return findBrandByNormImpl(name, OFFERS_INDEX);
 }
 
+// Class and category detection - delegated to nlp module
 function buildDefaultClassAliases() {
-  const tvCanon = OFFERS_INDEX.classCanon.tv;
-  const out = {};
-  if (tvCanon) out[tvCanon] = ["tv", "tele", "télé", "television", "télévision", "تلفاز", "تلفزيون", "google tv", "smart tv"];
-  return out;
+  return buildDefaultClassAliasesImpl(OFFERS_INDEX);
 }
 
 function detectClass(text) {
-  const s = normMatch(text);
-  if (!s) return null;
-
-  const defaults = buildDefaultClassAliases();
-  const entries = Object.entries(defaults);
-  for (let i = 0; i < entries.length; i += 1) {
-    const cls = entries[i][0];
-    const aliases = entries[i][1] || [];
-    for (let j = 0; j < aliases.length; j += 1) {
-      const a = aliases[j];
-      if (a && includesToken(s, a)) return cls;
-    }
-  }
-
-  const classes = OFFERS_INDEX.classes || [];
-  for (let i = 0; i < classes.length; i += 1) {
-    const cls = classes[i];
-    const ncls = normMatch(cls);
-    if (!ncls) continue;
-    if (s === ncls || s.indexOf(ncls) >= 0) return cls;
-  }
-
-  return null;
+  return detectClassImpl(text, OFFERS_INDEX);
 }
 
-const CATEGORY_ALIASES = Object.freeze({
-  Tv: [
-    "tv",
-    "tele",
-    "télé",
-    "television",
-    "télévision",
-    "تلفاز",
-    "تلفزة",
-    "تلفزيون",
-    "ecran",
-    "écran",
-    "lcran",
-  ],
-  Climatiseur: [
-    "clim",
-    "climatiseur",
-    "climatiseur mobile",
-    "climatisation",
-    "air conditioner",
-    "ac",
-    "مكيف",
-    "مكيف هواء",
-    "klima",
-    "كليما",
-  ],
-  "Machine A Laver": [
-    "machine a laver",
-    "machine à laver",
-    "machine a laver le linge",
-    "machine à laver le linge",
-    "lave linge",
-    "lave-linge",
-    "lavelinge",
-    "washing machine",
-    "ماكينة صابون",
-    "غسالة",
-    "غسالة ملابس",
-    "غسالة ديال الحوايج",
-    "غسالة ديال لوايج",
-    "ماكينة اوتوماتيك",
-    "ماكينة أوتوماتيك",
-    "ماكينة اوطوماتيك",
-    "ماكينة أوطوماتيك",
-    "ماكينة اتوماتيك",
-    "مكينة اوتوماتيك",
-    "مكينة اوطوماتيك",
-    "مكينة اتوماتيك",
-    "mquina dial ssiab",
-    "mquina dyal ssiab",
-    "machina dial ssiab",
-    "machine automatique",
-    "lave linge automatique",
-  ],
-  Refrigerateur: [
-    "refrigerateur",
-    "réfrigérateur",
-    "refrigerator",
-    "frigo",
-    "frigidaire",
-    "ريفريجيراتور",
-    "ثلاجة",
-    "ثلاج",
-    "تلاجة",
-    "لاجة",
-    "براد",
-    "refrigirateur",
-    "talaja",
-    "tlaja",
-    "thalaja",
-    "thallaja",
-    "thallajat",
-    "telajja",
-    "friko",
-    "فريكو",
-  ],
-  Congelateur: ["congelateur", "congélateur", "freezer", "فريزر"],
-  "Chauffe-eau": ["chauffe-eau", "chauffe eau", "water heater", "سخان"],
-  "Micro-ondes": ["micro-ondes", "micro ondes", "micro onde", "microondes", "microonde", "microwave", "ميكرو"],
-  "Lave Vaisselle": ["lave vaisselle", "lave-vaisselle", "lavevaisselle", "dishwasher", "غسالة صحون"],
-  "Air Fryer": ["air fryer", "airfryer", "قلاية هوائية", "اير فراير", "ايرفراير"],
-  "Barre De Son": ["barre de son", "soundbar", "ساندبار"],
-  Cuisiniere: [
-    "cuisiniere",
-    "cuisinière",
-    "cuisinier",
-    "gaziniere",
-    "gazinière",
-    "four",
-    "forn",
-    "فران",
-    "فورنو",
-    "طباخة",
-    "موقد",
-    "بوتاجاز",
-    "kuzina",
-    "kouzina",
-    "kوزينة",
-    "كوزينة",
-    "كوجينة",
-    "cuisinière gaz",
-    "cuisson",
-    "cuisine",
-    "cooker",
-    "stove",
-    "range",
-  ],
-});
-
-const APPLIANCE_CATEGORY_KEYWORDS = Object.freeze({
-  cooker: CATEGORY_ALIASES.Cuisiniere,
-  refrigerator: CATEGORY_ALIASES.Refrigerateur,
-  washing_machine: CATEGORY_ALIASES["Machine A Laver"],
-  air_conditioner: CATEGORY_ALIASES.Climatiseur,
-  microwave: CATEGORY_ALIASES["Micro-ondes"],
-  dishwasher: CATEGORY_ALIASES["Lave Vaisselle"],
-  water_heater: CATEGORY_ALIASES["Chauffe-eau"],
-});
-
-const APPLIANCE_CATEGORY_CANON = Object.freeze({
-  cooker: "Cuisiniere",
-  refrigerator: "Refrigerateur",
-  washing_machine: "Machine A Laver",
-  air_conditioner: "Climatiseur",
-  microwave: "Micro-ondes",
-  dishwasher: "Lave Vaisselle",
-  water_heater: "Chauffe-eau",
-});
-
-const CATEGORY_CLASS_KEYWORDS = Object.freeze([
-  {
-    category: "Refrigerateur",
-    keywords: [
-      "ثلاجة",
-      "ثلاج",
-      "تلاجة",
-      "لاجة",
-      "fridge",
-      "frigo",
-      "frigidaire",
-      "réfrigérateur",
-      "refrigerator",
-      "refrigerateur",
-      "refrigirateur",
-      "no frost",
-      "nofrost",
-      "نو فروست",
-      "نو فرست",
-      "talaja",
-      "tlaja",
-      "thalaja",
-      "thallaja",
-      "thallajat",
-      "telajja",
-      "friko",
-      "فريكو",
-      "براد",
-    ],
-  },
-  {
-    category: "Tv",
-    cls: "Tv",
-    keywords: [
-      "تلفاز",
-      "تلفزة",
-      "تلفزيون",
-      "tv",
-      "télé",
-      "tele",
-      "télévision",
-      "television",
-      "smart tv",
-      "android tv",
-      "google tv",
-      "oled",
-      "qled",
-      "ecran",
-      "écran",
-      "lcran",
-    ],
-  },
-  {
-    category: "Machine A Laver",
-    keywords: [
-      "غسالة",
-      "غسالة ملابس",
-      "غسالة ديال الحوايج",
-      "غسالة ديال لوايج",
-      "lavage",
-      "machine a laver",
-      "machine à laver",
-      "machine a laver le linge",
-      "machine à laver le linge",
-      "lave linge",
-      "lave-linge",
-      "lavelinge",
-      "washing machine",
-      "machina dial ssiab",
-      "mquina dial ssiab",
-      "mquina dyal ssiab",
-      "ماكينة اوتوماتيك",
-      "ماكينة أوتوماتيك",
-      "ماكينة اوطوماتيك",
-      "ماكينة أوطوماتيك",
-      "ماكينة اتوماتيك",
-      "مكينة اوتوماتيك",
-      "مكينة اوطوماتيك",
-      "مكينة اتوماتيك",
-      "machine automatique",
-      "lave linge automatique",
-    ],
-  },
-  {
-    category: "Climatiseur",
-    keywords: [
-      "مكيف",
-      "مكيف هواء",
-      "مكيف هوائي",
-      "climatiseur",
-      "clim",
-      "climatisation",
-      "climatiseur mobile",
-      "air conditioner",
-      "ac",
-      "klima",
-      "كليما",
-    ],
-  },
-  {
-    category: "Cuisiniere",
-    keywords: [
-      "cuisiniere",
-      "cuisinière",
-      "cuisinier",
-      "gaziniere",
-      "gazinière",
-      "four",
-      "forn",
-      "فران",
-      "فورنو",
-      "طباخة",
-      "موقد",
-      "بوتاجاز",
-      "kuzina",
-      "kouzina",
-      "kوزينة",
-      "كوزينة",
-      "كوجينة",
-      "cuisinière gaz",
-      "cuisson",
-      "cuisine",
-      "cooker",
-      "stove",
-      "range",
-    ],
-  },
-  {
-    category: "Micro-ondes",
-    keywords: ["micro-ondes", "micro ondes", "micro onde", "microondes", "microonde", "microwave", "ميكرو"],
-  },
-  {
-    category: "Lave Vaisselle",
-    keywords: ["lave vaisselle", "lave-vaisselle", "lavevaisselle", "dishwasher", "غسالة صحون"],
-  },
-  {
-    category: "Chauffe-eau",
-    keywords: ["chauffe-eau", "chauffe eau", "water heater", "سخان"],
-  },
-]);
-
+// Category and appliance detection - delegated to nlp module
 function detectCategory(text) {
-  const s = normMatch(text);
-  if (!s) return null;
-
-  const entries = Object.entries(CATEGORY_ALIASES);
-  for (let i = 0; i < entries.length; i += 1) {
-    const canonical = entries[i][0];
-    const aliases = entries[i][1] || [];
-    for (let j = 0; j < aliases.length; j += 1) {
-      const a = aliases[j];
-      if (a && includesToken(s, a)) return normalizeCategoryName(canonical);
-    }
-  }
-
-  const cats = OFFERS_INDEX.categories || [];
-  for (let i = 0; i < cats.length; i += 1) {
-    const cat = cats[i];
-    const ncat = normMatch(cat);
-    if (!ncat) continue;
-    if (s === ncat || s.indexOf(ncat) >= 0) return cat;
-  }
-
-  return null;
+  return detectCategoryImpl(text, OFFERS_INDEX);
 }
 
 function findCategoryByNorm(name) {
-  const target = normMatch(name || "");
-  const cats = OFFERS_INDEX.categories || [];
-  for (let i = 0; i < cats.length; i += 1) {
-    if (normMatch(cats[i]) === target) return cats[i];
-  }
-  return null;
+  return findCategoryByNormImpl(name, OFFERS_INDEX);
 }
 
 function findClassByNorm(name) {
-  const target = normMatch(name || "");
-  const classes = OFFERS_INDEX.classes || [];
-  for (let i = 0; i < classes.length; i += 1) {
-    if (normMatch(classes[i]) === target) return classes[i];
-  }
-  return null;
+  return findClassByNormImpl(name, OFFERS_INDEX);
 }
 
 function resolveCategoryIntent(text) {
-  const s = normMatch(text);
-  if (!s) return null;
-
-  for (let i = 0; i < CATEGORY_CLASS_KEYWORDS.length; i += 1) {
-    const entry = CATEGORY_CLASS_KEYWORDS[i] || {};
-    const keywords = Array.isArray(entry.keywords) ? entry.keywords : [];
-    for (let j = 0; j < keywords.length; j += 1) {
-      const kw = keywords[j];
-      if (kw && includesToken(s, kw)) {
-        return {
-          category: normalizeCategoryName(entry.category || null),
-          cls: normalizeClassName(entry.cls || null),
-        };
-      }
-    }
-  }
-
-  return null;
+  return resolveCategoryIntentImpl(text, OFFERS_INDEX);
 }
 
 function extractOrderNumber(text) {
@@ -3645,27 +3195,11 @@ function resetCtxForCategoryChange(key, category, cls) {
 }
 
 function extractTvSize(text, opts = {}) {
-  const s0 = arabicIndicToAsciiDigits(String(text || ""));
-  const categoryHint = normMatch(opts.category || opts.categoryHint || "");
-  const tvCanonNorm = normMatch(OFFERS_INDEX.classCanon.tv || "tv");
-  const allowNoHint = Boolean(opts.allowNoHint) || (categoryHint && categoryHint === tvCanonNorm);
-  const requireTvHint = opts.requireTvHint === true;
-  const externalTvContext = opts.externalTvContext === true || hasTvSizeContext(text);
-
-  const size = extractAllowedTvSizeFromString(s0, { allowNoHint, requireTvHint, externalTvContext });
-  return size || null;
+  return extractTvSizeImpl(text, opts, OFFERS_INDEX, extractAllowedTvSizeFromString);
 }
 
 function extractCapacityLiters(text) {
-  const s0 = arabicIndicToAsciiDigits(String(text || ""));
-  const s = s0.toLowerCase();
-  const hasLiterHint = /\b(l|litre|litres|liter|liters|لتر)\b/.test(s);
-  const m = s0.match(/(?:^|[^\d])(\d{2,4})\s*(?:l|litre|litres|liter|liters|لتر)(?=$|[^\d])/i);
-  if (m && m[1]) return Number(m[1]);
-  if (!hasLiterHint) return null;
-  const digitsOnly = s0.replace(/[^\d]/g, "");
-  if (digitsOnly.length >= 2 && digitsOnly.length <= 4) return Number(digitsOnly);
-  return null;
+  return extractCapacityLitersImpl(text);
 }
 
 // RULE: build product link only when explicitly requested
@@ -6600,29 +6134,13 @@ function isPreferCheapest(text) {
   return false;
 }
 
-const PRICE_KEYWORDS = ["prix", "price", "combien", "tarif", "coute", "coûte", "bch7al", "بشحال", "ثمن"];
-const CHEAP_KEYWORDS = ["pas cher", "cheap", "moins cher", "affordable"];
-
+// Price detection - delegated to nlp module
 function detectPriceIntent(text) {
-  const s = normMatch(text || "");
-  for (let i = 0; i < PRICE_KEYWORDS.length; i += 1) {
-    const k = normMatch(PRICE_KEYWORDS[i]);
-    if (k && s.indexOf(k) >= 0) return true;
-  }
-  for (let i = 0; i < CHEAP_KEYWORDS.length; i += 1) {
-    const k = normMatch(CHEAP_KEYWORDS[i]);
-    if (k && s.indexOf(k) >= 0) return true;
-  }
-  return false;
+  return detectPriceIntentImpl(text);
 }
 
 function detectCheapIntent(text) {
-  const s = normMatch(text || "");
-  for (let i = 0; i < CHEAP_KEYWORDS.length; i += 1) {
-    const k = normMatch(CHEAP_KEYWORDS[i]);
-    if (k && s.indexOf(k) >= 0) return true;
-  }
-  return false;
+  return detectCheapIntentImpl(text);
 }
 
 function extractMoroccoPhone(text) {
@@ -7219,42 +6737,15 @@ function isThankYouMessage(text) {
 }
 
 function parseBudget(text) {
-  const s0 = arabicIndicToAsciiDigits(String(text || ""));
-  const s = s0.toLowerCase();
-  const budgetPatterns = [
-    /(?:moins de|max(?:imum)?|budget|under|<=|⩽|inferieur a|jusqu'?a|upto|up to)\s*([\d\s.,]{2,})/i,
-    /(?:<=|⩽)\s*([\d\s.,]{2,})/,
-    /([\d\s.,]{3,})\s*(?:dh|dhs|mad|dirhams?|د\.?م|درهم)/i,
-  ];
-  for (let i = 0; i < budgetPatterns.length; i += 1) {
-    const m = s.match(budgetPatterns[i]);
-    if (m && m[1]) {
-      const num = Number(String(m[1]).replace(/[^\d]/g, ""));
-      if (Number.isFinite(num) && num > 0) return num;
-    }
-  }
-  return null;
+  return parseBudgetImpl(text);
 }
 
 function hasTvIntentTokens(text) {
-  const s = normMatch(text || "");
-  if (!s) return false;
-  const tokens = ["tv", "tele", "télé", "television", "télévision", "smart tv", "android tv", "google tv", "تلفاز", "تلفزيون"];
-  for (let i = 0; i < tokens.length; i += 1) {
-    if (includesToken(s, tokens[i])) return true;
-  }
-  return /(^|[^a-z0-9])(tv|tele|télé)\d{2,3}/i.test(text || "");
+  return hasTvIntentTokensImpl(text);
 }
 
 function hasTvSizeContext(text) {
-  const raw = String(text || "");
-  const lower = raw.toLowerCase();
-  if (hasTvIntentTokens(lower)) return true;
-  if (/(pouce|pouces|inch|inches|\"\s*$|''\s*$|diagonale|\"|''|po\b)/i.test(lower)) return true;
-  if (/(بوصة|بوص|بوس)/i.test(raw)) return true;
-  if (/\d{2,3}\s*(بوصة|بوص|بوس)/i.test(raw)) return true;
-  if (/(النمرة|نمرة|رقم|num(?:ero)?|numero|taille)\s*\d{2,3}/i.test(arabicIndicToAsciiDigits(raw))) return true;
-  return false;
+  return hasTvSizeContextImpl(text);
 }
 
 function extractSizeInfo(text) {
@@ -7399,32 +6890,11 @@ function shouldPreferCommerceRouting(text, ctx, opts = {}) {
 }
 
 function detectApplianceCategory(text) {
-  const s = normMatch(text || "");
-  if (!s) return null;
-  let bestKey = null;
-  let bestLen = 0;
-  const entries = Object.entries(APPLIANCE_CATEGORY_KEYWORDS);
-  for (let i = 0; i < entries.length; i += 1) {
-    const key = entries[i][0];
-    const keywords = entries[i][1] || [];
-    for (let j = 0; j < keywords.length; j += 1) {
-      const kw = keywords[j];
-      if (kw && includesToken(s, kw)) {
-        const kwLen = normMatch(kw).length;
-        if (kwLen > bestLen) {
-          bestLen = kwLen;
-          bestKey = key;
-        }
-      }
-    }
-  }
-  return bestKey;
+  return detectApplianceCategoryImpl(text);
 }
 
 function detectExplicitApplianceCategory(text) {
-  const key = detectApplianceCategory(text);
-  if (!key) return null;
-  return APPLIANCE_CATEGORY_CANON[key] || null;
+  return detectExplicitApplianceCategoryImpl(text);
 }
 
 function routeApplianceCategoryOffers(applianceKey, lang, key) {
@@ -7484,102 +6954,16 @@ function handleCmDimensionRouting(text, lang, key, sizeInfo) {
 }
 
 function parseUserQuery(text, opts = {}) {
-  const raw = String(text || "");
-  const ctx = opts.ctx || {};
-  const key = opts.key || null;
-  const logContext = opts.logContext || null;
-
-  const forcedIntent = resolveCategoryIntent(raw);
-  const forcedCategory = (forcedIntent && forcedIntent.category) || null;
-  const forcedClass = (forcedIntent && forcedIntent.cls) || null;
-
-  const modelHit = detectModel(raw);
-  const explicitBrand = (modelHit && modelHit.brand) || detectBrand(raw);
-  const ctxBrand = ctx.lastBrand || null;
-  const ctxBrandValid = Boolean(ctxBrand && OFFERS && OFFERS.offers && OFFERS.offers[ctxBrand]);
-  const tvCanonNorm = normMatch(OFFERS_INDEX.classCanon.tv || "tv");
-  const ctxCategoryNorm = normMatch(ctx.lastCategory || "");
-  const ctxClassNorm = normMatch(ctx.lastClass || "");
-  const strictCategory =
-    FEATURE_STRICT_CATEGORY_SWITCH && !forcedCategory ? detectExplicitApplianceCategory(raw) : null;
-  if (strictCategory && normMatch(strictCategory) !== tvCanonNorm && normMatch(strictCategory) !== "tv") {
-    resetCtxForCategoryChange(key, strictCategory, null);
-    if (LOG_DEBUG && ctx.lastCategory && normMatch(ctx.lastCategory) !== normMatch(strictCategory)) {
-      debugLog("category_switch_override", {
-        reqId: logContext && logContext.reqId ? logContext.reqId : null,
-        conversationId: redactLogId(logContext && logContext.conversationId ? logContext.conversationId : null),
-        senderId: redactLogId(logContext && logContext.senderId ? logContext.senderId : null),
-        mediaKind: logContext && logContext.mediaKind ? logContext.mediaKind : null,
-        fromCategory: ctx.lastCategory || null,
-        toCategory: strictCategory,
-      });
-    }
-  }
-  const ctxTvContext =
-    ctxCategoryNorm === tvCanonNorm ||
-    ctxClassNorm === tvCanonNorm ||
-    Number.isFinite(Number(ctx.lastSize)) ||
-    Boolean(ctxBrand);
-  const sizeVal = extractTvSize(raw, {
-    categoryHint: forcedCategory || ctx.lastCategory || null,
-    allowNoHint: hasTvSizeContext(raw) || Boolean(explicitBrand && !forcedCategory) || ctxTvContext,
-    requireTvHint: false,
-    externalTvContext: hasTvSizeContext(raw) || Boolean(explicitBrand) || ctxTvContext,
+  return parseUserQueryImpl(text, opts, {
+    OFFERS,
+    OFFERS_INDEX,
+    extractAllowedTvSizeFromString,
+    resetCtxForCategoryChange,
+    debugLog,
+    redactLogId,
+    FEATURE_STRICT_CATEGORY_SWITCH,
+    LOG_DEBUG
   });
-  const detectedBrand = explicitBrand || (ctxBrandValid ? ctxBrand : null);
-  const detectedCategory = forcedCategory || strictCategory || detectCategory(raw) || ctx.lastCategory || null;
-  const detectedClass = forcedClass || (!detectedCategory ? detectClass(raw) : null) || ctx.lastClass || null;
-
-  const forcedNonTv =
-    (detectedCategory && normMatch(detectedCategory) !== tvCanonNorm && normMatch(detectedCategory) !== "tv") ||
-    (detectedClass && normMatch(detectedClass) !== tvCanonNorm);
-
-  const tvClass = OFFERS_INDEX.classCanon.tv || "Tv";
-  const brand = detectedBrand || null;
-  const cls = sizeVal ? tvClass || detectedClass || detectedCategory || null : detectedClass || null;
-  const category = sizeVal
-    ? detectedCategory ||
-      (cls && normMatch(cls) === normMatch(OFFERS_INDEX.classCanon.tv || "tv") ? cls : OFFERS_INDEX.classCanon.tv || null)
-    : detectedCategory || null;
-  const model = modelHit && modelHit.offer ? modelHit.offer.model || modelHit.offer.sku || modelHit.offer.name || null : null;
-  const priceIntent = detectPriceIntent(raw);
-  const budgetDh = parseBudget(raw);
-  const wantsPhotoLink = isPhotoRequestIntent(raw);
-  const capacityLiters = extractCapacityLiters(raw);
-
-  let confidence = 0.2;
-  if (brand) confidence += 0.15;
-  if (sizeVal) confidence += 0.3;
-  if (category || cls) confidence += 0.15;
-  if (modelHit) confidence += 0.25;
-  if (priceIntent || Number.isFinite(budgetDh)) confidence += 0.1;
-  confidence = Math.max(0, Math.min(1, confidence));
-
-  const parsed = {
-    raw,
-    brand,
-    cls,
-    size: Number.isFinite(sizeVal) ? sizeVal : null,
-    model,
-    category,
-    intentCategory: forcedCategory || null,
-    intentClass: forcedClass || null,
-    priceIntent,
-    budgetDh: Number.isFinite(budgetDh) ? budgetDh : null,
-    wantsPhotoLink,
-    confidence,
-    capacityLiters: Number.isFinite(capacityLiters) ? capacityLiters : null,
-    modelHit: modelHit
-      ? {
-          brand: modelHit.brand,
-          model: (modelHit.offer && modelHit.offer.model) || modelHit.offer?.sku || null,
-          hasStock: Number(((modelHit.offer || {}).stock) || 0) > 0,
-        }
-      : null,
-  };
-
-  debugLog("parse_user_query", Object.assign({}, parsed, { raw: LOG_DEBUG ? raw : undefined }));
-  return parsed;
 }
 
 function tvTypeScore(typeStr) {
@@ -8124,15 +7508,7 @@ function asksAboutDeliveryPaymentWarranty(text) {
 }
 
 function isPhotoRequestIntent(text) {
-  const s = normMatch(text);
-  if (s.indexOf("photo") >= 0) return true;
-  if (s.indexOf("picture") >= 0) return true;
-  if (s.indexOf("image") >= 0) return true;
-  if (s.indexOf("pic") >= 0) return true;
-  if (s.indexOf("تصويرة") >= 0) return true;
-  if (s.indexOf("صورة") >= 0) return true;
-  if (s.indexOf("صور") >= 0) return true;
-  return false;
+  return isPhotoRequestIntentImpl(text);
 }
 
 function isNoOrderNumberIntent(text) {
@@ -10598,6 +9974,32 @@ export {
   parseUserQuery,
   shouldPreferCommerceRouting,
   detectApplianceCategory,
+  // NLP functions for backward compatibility
+  detectUserLanguage,
+  detectLang,
+  hasArabicScript,
+  normalizeLanguageHint,
+  effectiveReplyLang,
+  detectBrand,
+  detectBrandAlias,
+  findBrandByNorm,
+  detectClass,
+  detectCategory,
+  findCategoryByNorm,
+  findClassByNorm,
+  buildDefaultClassAliases,
+  normalizeCategoryName,
+  normalizeClassName,
+  detectModel,
+  tokenizeAlnum,
+  detectPriceIntent,
+  detectCheapIntent,
+  parseBudget,
+  extractTvSize,
+  hasTvIntentTokens,
+  hasTvSizeContext,
+  isPhotoRequestIntent,
+  detectExplicitApplianceCategory,
 };
 
 function runSelfTests() {
