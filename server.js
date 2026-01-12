@@ -503,13 +503,8 @@ const COMPANY = {
   address: "Ville de Casablanca – Quartier Oulfa (Haj Fateh) – Rue 9 – Rond-point Chahdiya – à côté de la boulangerie Pan Com",
 };
 
-const VOICE_NOT_UNDERSTOOD_TEMPLATE = `╭───────────────╮
-│  🎤 *Message vocal*          │
-╰───────────────╯
-🇫🇷 Je n’ai pas pu comprendre clairement votre message vocal.
-🇲🇦 ما قدرتش نفهم مزيان الصوت.
-✅ Envoyez-le مرة أخرى بصوت واضح أو كتب ليا الرسالة.
-🔒 Service pro — réponse rapide.`;
+// Media service constants (imported from media service)
+const VOICE_NOT_UNDERSTOOD_TEMPLATE = VOICE_NOT_UNDERSTOOD_TEMPLATE_IMPL;
 
 const OFFERS_FALLBACK_MESSAGE = `🚨🔥 *PROMO FLASH اليوم* 🔥🚨
 ⚠️ (Stock limité – حتى يكمّل الستوك)
@@ -848,6 +843,91 @@ function stripUrlQueriesInText(text) {
   return stripUrlQueriesInTextImpl(text);
 }
 
+// Media service wrappers
+function guessMediaKind(meta) {
+  return guessMediaKindImpl(meta);
+}
+
+function normalizeMediaSingle(mediaVal) {
+  return normalizeMediaSingleImpl(mediaVal);
+}
+
+function normalizeMedia(mediaVal) {
+  return normalizeMediaImpl(mediaVal);
+}
+
+function normalizeMediaInput(mediaVal) {
+  return normalizeMediaInputImpl(mediaVal);
+}
+
+async function ensurePublicUrl(urlObj) {
+  return ensurePublicUrlImpl(urlObj);
+}
+
+async function fetchMedia(url, opts = {}) {
+  return fetchMediaImpl(url, {
+    ...opts,
+    getFetch,
+    sniffImageMime,
+    CFG,
+  });
+}
+
+async function downloadMediaBuffer(mediaInput) {
+  return downloadMediaBufferImpl(mediaInput, {
+    mediaFetcherOverride,
+    CFG,
+    sniffImageMime,
+    getFetch,
+  });
+}
+
+function getUrlHost(url) {
+  return getUrlHostImpl(url);
+}
+
+function extractMediaMetaFromBody(body) {
+  return extractMediaMetaFromBodyImpl(body);
+}
+
+function classifyMediaRoute(mediaInfo, msgType) {
+  return classifyMediaRouteImpl(mediaInfo, msgType);
+}
+
+function sanitizeDerivedText(text) {
+  return sanitizeDerivedTextImpl(text, stripUrlQueriesInText);
+}
+
+async function deriveMediaText(mediaInput, lang, reqId) {
+  return deriveMediaTextImpl(mediaInput, lang, reqId, {
+    normalizeMedia,
+    guessMediaKind,
+    fetchMedia,
+    sniffImageMime,
+    describeImage,
+    getOpenAIClient,
+    ensureNoQuestion,
+    stripUrlQueriesInText,
+    CFG,
+  });
+}
+
+function fallbackWithAgent(lang) {
+  return fallbackWithAgentImpl(lang, CONTACTS);
+}
+
+function audioReminderText(lang) {
+  return audioReminderTextImpl(lang);
+}
+
+function voiceNotUnderstoodTemplate() {
+  return voiceNotUnderstoodTemplateImpl();
+}
+
+function shouldSendAudioReminder(key) {
+  return shouldSendAudioReminderImpl(key);
+}
+
 const ORDER_FORM_URL_SAFE = sanitizeUrlNoQuestion(ORDER_FORM_URL);
 const MAPS_URL_RAW = "https://maps.app.goo.gl/sLuZQCt74KVkq39H7?g_st=aw";
 const MAPS_URL_SAFE = sanitizeUrlNoQuestion(MAPS_URL_RAW);
@@ -1005,21 +1085,6 @@ function t(lang, key, vars) {
 }
 
 // RULE #2 fallback with agent
-function fallbackWithAgent(lang) {
-  const L = String(lang || "dzl");
-  if (L === "fr") {
-    return (
-      "Désolé, je n’ai pas bien compris 🙏 Un agent humain va prendre le relais, ou appelez-nous au " +
-      CONTACTS.calls.join(" / ") +
-      "."
-    );
-  }
-  return (
-    "سمح ليا ما فهمتش الطلب ديالك مزيان 🙏 غادي يدخل معاك وكيل بشري يكمل معاك، ولا تقدر تعيط لينا على " +
-    CONTACTS.calls.join(" / ") +
-    "."
-  );
-}
 
 function agentWillFinalize(lang) {
   const L = String(lang || "dzl");
@@ -1074,91 +1139,6 @@ function extractTextFromBody(body) {
   return "";
 }
 
-function extractMediaMetaFromBody(body) {
-  const b = body || {};
-  const typeHint = extractMessageType(b);
-  const candidates = [];
-  const pushCandidate = (val, kindHint) => {
-    if (!val) return;
-    if (Array.isArray(val) && val.length) {
-      candidates.push(Object.assign({}, val[0], { kind: kindHint || val[0].kind }));
-      return;
-    }
-    if (typeof val === "string") {
-      candidates.push({ url: val, kind: kindHint || null });
-      return;
-    }
-    if (typeof val === "object") {
-      candidates.push({
-        kind: kindHint || val.kind || val.type || val.messageType || null,
-        url: val.url || val.media_url || val.mediaUrl || val.downloadUrl || val.href || val.link || null,
-        mimeType: val.mimeType || val.mimetype || val.contentType || val.typeMime || null,
-        filename: val.filename || val.fileName || val.name || null,
-        base64: val.base64 || val.payload || val.data || null,
-        id: val.id || val.mediaId || val.media_id || null,
-      });
-    }
-  };
-
-  const fields = [
-    ["media_url"],
-    ["mediaUrl"],
-    ["media"],
-    ["attachment"],
-    ["audio"],
-    ["voice"],
-    ["voice_note"],
-    ["voiceNote"],
-    ["video"],
-    ["image"],
-    ["document"],
-    ["data", "media"],
-    ["data", "audio"],
-    ["data", "voice"],
-    ["data", "voice_note"],
-    ["data", "media_url"],
-    ["data", "mediaUrl"],
-    ["data", "attachment"],
-    ["data", "message", "audio"],
-    ["data", "message", "voice"],
-  ];
-
-  for (let i = 0; i < fields.length; i += 1) {
-    const val = safeGet(b, fields[i]);
-    if (val !== undefined && val !== null) pushCandidate(val, fields[i].includes("audio") || fields[i].includes("voice") ? "audio" : null);
-  }
-
-  if (!candidates.length) return null;
-
-  const guessKind = (meta) => {
-    const kRaw = String(meta.kind || typeHint || "").toLowerCase();
-    const mime = String(meta.mimeType || "").toLowerCase();
-    const fn = String(meta.filename || "").toLowerCase();
-    const u = String(meta.url || "").toLowerCase();
-    if (kRaw.includes("audio") || kRaw.includes("voice")) return "audio";
-    if (kRaw.includes("image") || kRaw.includes("photo")) return "image";
-    if (kRaw.includes("video")) return "video";
-    if (kRaw.includes("doc")) return "document";
-    if (mime.startsWith("audio/")) return "audio";
-    if (mime.startsWith("image/")) return "image";
-    if (mime.startsWith("video/")) return "video";
-    if (mime.includes("pdf")) return "document";
-    const ext = path.extname(fn || u).replace(/^\./, "");
-    if (["ogg", "opus", "m4a", "mp3", "wav", "webm"].includes(ext)) return "audio";
-    if (["jpg", "jpeg", "png", "gif", "webp"].includes(ext)) return "image";
-    if (["mp4", "mov", "avi"].includes(ext)) return "video";
-    return null;
-  };
-
-  for (let i = 0; i < candidates.length; i += 1) {
-    const c = candidates[i];
-    if (c && (c.url || c.base64 || c.id)) {
-      return Object.assign({}, c, { kind: guessKind(c) });
-    }
-  }
-
-  return null;
-}
 
 function extractMediaFromBody(body) {
   const b = body || {};
@@ -2268,7 +2248,6 @@ function isGreetingLikeOpener(text) {
   if (/(^|\s)(bonjour|salut|hello)/i.test(raw)) return true;
   if (/(^|\s)(salam|salem|selam|slm)(\s|$)/i.test(raw)) return true;
   if (/kifach n3awnk/i.test(raw)) return true;
-  return false;
 }
 
 function isForcedGreeting(text) {
@@ -2328,8 +2307,6 @@ const PENDING_TTL_MS = 30 * 60 * 1000;
 const supportModeStore = new Map();
 const SUPPORT_TTL_MS = 30 * 60 * 1000;
 // RULE #3 audio reminder + transcription
-const audioReminderStore = new Map();
-
 function hasFocusBrand() {
   const b = FOCUS.brand;
   if (!b) return false;
@@ -3696,6 +3673,20 @@ function shouldConvertAudioToWav(mimeType) {
   return true;
 }
 
+function isAudioMime(mime) {
+  const m = String(mime || "").toLowerCase();
+  return m.startsWith("audio/") || m === "application/ogg";
+}
+
+function cleanMimeType(input) {
+  if (!input) return "";
+  const normalized = String(input || "").trim().toLowerCase();
+  if (!normalized) return "";
+  const base = normalized.split(";")[0].trim();
+  if (base === "audio/opus" || base === "application/ogg") return "audio/ogg";
+  return base;
+}
+
 function isAudioMeta(meta) {
   const m = meta || {};
   const kind = String(m.kind || "").toLowerCase();
@@ -4090,66 +4081,6 @@ function handleVisionMediaForTest(mediaInput, lang, key) {
   return handleVisionMedia(mediaInput, lang, key);
 }
 
-function sanitizeDerivedText(text) {
-  return stripUrlQueriesInText(String(text || "").replace(/https?:\/\/\S+/g, "")).trim();
-}
-
-async function deriveMediaText(mediaInput, lang, reqId) {
-  const normalized = normalizeMedia(mediaInput);
-  if (!normalized) return { ok: false, reason: "media_missing" };
-  if (CFG.mediaMode === "disabled") return { ok: false, disabled: true };
-
-  const raw = (normalized && normalized.raw) || {};
-  const baseKind = normalized.kind || guessMediaKind({ mime: normalized.mime, type: raw.type, kind: raw.kind });
-  if (baseKind === "audio") {
-    // Audio functionality removed - return failure so fallback message is used
-    console.log(JSON.stringify({ level: "info", msg: "audio_disabled", reqId }));
-    return { ok: false, reason: "audio_disabled", path: "audio" };
-  }
-
-  if (baseKind === "image" || baseKind === "unknown") {
-    try {
-      let buffer = null;
-      let mimeType = normalized.mime || "";
-      let sizeBytes = 0;
-
-      if (normalized.url) {
-        const fetched = await fetchMedia(normalized.url, {
-          maxBytes: CFG.mediaMaxBytesImage,
-          timeoutMs: CFG.mediaFetchTimeoutMs,
-          allowHttp: CFG.mediaAllowHttp,
-        });
-        buffer = fetched.buffer;
-        sizeBytes = fetched.sizeBytes || fetched.buffer.length || 0;
-        mimeType = mimeType || fetched.mimeType || "image/jpeg";
-      } else if (normalized.base64 || raw.base64 || raw.payload || raw.data) {
-        const b64 = String(normalized.base64 || raw.base64 || raw.payload || raw.data || "");
-        const buf = Buffer.from(b64, "base64");
-        sizeBytes = buf.length;
-        if (sizeBytes > CFG.mediaMaxBytesImage) throw new Error("image_too_large");
-        const sniffed = sniffImageMime(buf);
-        mimeType = mimeType || raw.mimeType || raw.contentType || sniffed || "image/jpeg";
-        buffer = buf;
-      } else {
-        throw new Error("media_url_missing");
-      }
-
-      const dataUrl = `data:${mimeType};base64,${buffer.toString("base64")}`;
-      const desc = await describeImage(
-        { image: dataUrl, model: CFG.openaiVisionModel || OPENAI_MODEL },
-        getOpenAIClient()
-      );
-      const safe = ensureNoQuestion(sanitizeDerivedText(desc));
-      if (!safe) throw new Error("vision_description_empty");
-      return { ok: true, text: safe.slice(0, 1800), path: "image", sizeBytes, mimeType };
-    } catch (err) {
-      console.error(JSON.stringify({ level: "error", msg: "media_image_derive_fail", reqId, error: (err && err.message) || String(err) }));
-      return { ok: false, error: err };
-    }
-  }
-
-  return { ok: false, reason: "unsupported_media" };
-}
 
 function normalizeOfferItem(brand, offer, originalIdx) {
   return normalizeOfferItemImpl(brand, offer, originalIdx);
@@ -9096,46 +9027,6 @@ async function main() {
 }
 
 // RULE #3 audio reminder + transcription
-function audioReminderText(lang) {
-  if (String(lang || "") === "fr") {
-    return "Pour vous aider rapidement, merci d’écrire votre demande en message au lieu d’un vocal 🙏";
-  }
-  return "باش نعاونك بسرعة، عفاك كتب ليا الطلب فمِساج بدل الصوت 🙏";
-}
-
-function audioAnswerNote(lang) {
-  const L = String(lang || "dzl");
-  if (L === "fr") {
-    return "Je suis un DigiTronics Assistant. Voici ce que j’ai compris de votre audio et ma réponse. Si c’est correct, parfait ! Sinon, il se peut que je n’aie pas bien entendu—désolé. Merci d’écrire votre message pour que je puisse mieux répondre.";
-  }
-  return "أنا خدمة العملاء. هاد الشي اللي فهمت من الصوت ديالك وهدي هي الجواب ديالي. إلا كان هذا هو القصد ديالك مزيان! إلا ما كانش، يمكن ما فهمتش مزيان الصوت ديالك كنعتذر، وكتب ليا الرسالة باش نجاوبك أحسن.";
-}
-
-function voiceNotUnderstoodTemplate() {
-  return VOICE_NOT_UNDERSTOOD_TEMPLATE;
-}
-
-function shouldSendAudioReminder(key) {
-  const last = audioReminderStore.get(key);
-  const now = Date.now();
-  const ONE_DAY = 24 * 60 * 60 * 1000;
-  if (!last || now - last > ONE_DAY) {
-    audioReminderStore.set(key, now);
-    return true;
-  }
-  return false;
-}
-
-function classifyMediaRoute(mediaInfo, msgType) {
-  const mimeType = String((mediaInfo && mediaInfo.mimeType) || "").toLowerCase();
-  const audioLikely = Boolean(
-    msgType === "audio" || msgType === "voice" || (mediaInfo && (isAudioMime(mimeType) || isAudioMeta(mediaInfo)))
-  );
-  const imageLikely = Boolean(mediaInfo && (mimeType.startsWith("image/") || String(mediaInfo.kind || "") === "image"));
-  const mediaKind = mediaInfo ? (audioLikely ? "audio" : imageLikely ? "image" : "other") : "text";
-  return { mimeType: mediaInfo ? mediaInfo.mimeType || "" : "", audioLikely, imageLikely, path: mediaKind, mediaKind };
-}
-
 async function processIncomingMedia({ mediaInfo, mediaMeta, msgType, lang, key, reqId }) {
   const normalizedMedia = normalizeMediaInput(mediaInfo || mediaMeta || null);
   const route = classifyMediaRoute(normalizedMedia, msgType || (mediaMeta && mediaMeta.kind));
