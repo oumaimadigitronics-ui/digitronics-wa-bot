@@ -5,7 +5,6 @@
 import { spawn } from "child_process";
 import path from "path";
 import { isAudioMime, cleanMimeType } from "./mime.js";
-import { execFilePromise, commandExists } from "./utils.js";
 
 /**
  * Determine if audio should be converted to WAV format.
