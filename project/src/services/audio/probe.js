@@ -2,7 +2,7 @@
  * Audio format detection and probing using ffprobe.
  */
 
-import { execFilePromise, commandExists } from "./convert.js";
+import { execFilePromise, commandExists } from "./utils.js";
 import { mimeFromProbe, isAudioMime, cleanMimeType, inferMimeFromPath } from "./mime.js";
 
 /**

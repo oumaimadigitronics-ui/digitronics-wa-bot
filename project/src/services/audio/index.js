@@ -10,6 +10,12 @@
  * - Audio transcription (OpenAI Whisper)
  */
 
+// Re-export shared utilities
+export {
+  execFilePromise,
+  commandExists,
+} from "./utils.js";
+
 // Re-export all MIME utilities
 export {
   isAudioMime,
@@ -31,8 +37,6 @@ export {
 
 // Re-export all conversion utilities
 export {
-  execFilePromise,
-  commandExists,
   shouldConvertAudioToWav,
   shouldConvertAudioToMp3,
   convertAudioToWav,
