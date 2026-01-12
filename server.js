@@ -168,25 +168,19 @@ import {
 } from './project/src/services/conversation/index.js';
 
 import {
-  guessMediaKind as guessMediaKindImpl,
-  normalizeMediaSingle as normalizeMediaSingleImpl,
-  normalizeMedia as normalizeMediaImpl,
-  normalizeMediaInput as normalizeMediaInputImpl,
-  ensurePublicUrl as ensurePublicUrlImpl,
-  fetchMedia as fetchMediaImpl,
-  downloadMediaBuffer as downloadMediaBufferImpl,
-  getUrlHost as getUrlHostImpl,
-  classifyMediaRoute as classifyMediaRouteImpl,
-  extractMediaMetaFromBody as extractMediaMetaFromBodyImpl,
-  sanitizeDerivedText as sanitizeDerivedTextImpl,
-  deriveMediaText as deriveMediaTextImpl,
-  processIncomingMedia as processIncomingMediaImpl,
-  VOICE_NOT_UNDERSTOOD_TEMPLATE as VOICE_NOT_UNDERSTOOD_TEMPLATE_IMPL,
-  fallbackWithAgent as fallbackWithAgentImpl,
-  audioReminderText as audioReminderTextImpl,
-  voiceNotUnderstoodTemplate as voiceNotUnderstoodTemplateImpl,
-  shouldSendAudioReminder as shouldSendAudioReminderImpl,
-} from './project/src/services/media/index.js';
+  sniffImageMime as sniffImageMimeImpl,
+  toImageUrlString as toImageUrlStringImpl,
+  isVisionCapableModel as isVisionCapableModelImpl,
+  pickVisionModel as pickVisionModelImpl,
+  describeImage as describeImageImpl,
+  parseVisionJson as parseVisionJsonImpl,
+  deriveVisionHintsFromText as deriveVisionHintsFromTextImpl,
+  normalizeVisionResult as normalizeVisionResultImpl,
+  analyzeProductImage as analyzeProductImageImpl,
+  selectOffersFromVision as selectOffersFromVisionImpl,
+  handleVisionMedia as handleVisionMediaImpl,
+  VISION_CATEGORY_MAP as VISION_CATEGORY_MAP_IMPL,
+} from './project/src/services/vision/index.js';
 
 let toFileImpl = toFile;
 
@@ -835,27 +829,6 @@ function ensureNoQuestion(text) {
 
 function shortenNoQuestion(text, max, logContext) {
   return shortenNoQuestionImpl(text, max, logContext, { CFG, shorten });
-}
-
-function sniffImageMime(buf) {
-  if (!Buffer.isBuffer(buf)) return "";
-  if (buf.length >= 3 && buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff) return "image/jpeg";
-  if (
-    buf.length >= 8 &&
-    buf[0] === 0x89 &&
-    buf[1] === 0x50 &&
-    buf[2] === 0x4e &&
-    buf[3] === 0x47 &&
-    buf[4] === 0x0d &&
-    buf[5] === 0x0a &&
-    buf[6] === 0x1a &&
-    buf[7] === 0x0a
-  )
-    return "image/png";
-  if (buf.length >= 12 && buf.slice(0, 4).toString("ascii") === "RIFF" && buf.slice(8, 12).toString("ascii") === "WEBP")
-    return "image/webp";
-  if (buf.length >= 4 && buf.slice(0, 4).toString("ascii") === "GIF8") return "image/gif";
-  return "";
 }
 
 function formatSize(lang, size) {
@@ -3019,12 +2992,87 @@ function priceSummaryText(lang, min, max) {
  * 3) map the JSON to our offer selection hints (selectOffersFromVision)
  * 4) build a reply using the same ranking/formatting used for text routes
  */
-const VISION_CATEGORY_MAP = {
-  tv: { cls: "Tv", category: "Tv" },
-  refrigerateur: { cls: "Refrigerateur", category: "Refrigerateur" },
-  cuisiniere: { cls: "Cuisiniere", category: "Cuisiniere" },
-  lave_linge: { cls: "Machine A Laver", category: "Machine A Laver" },
-};
+const VISION_CATEGORY_MAP = VISION_CATEGORY_MAP_IMPL;
+
+// Vision service wrappers
+const sniffImageMime = sniffImageMimeImpl;
+const toImageUrlString = toImageUrlStringImpl;
+const isVisionCapableModel = isVisionCapableModelImpl;
+const describeImage = describeImageImpl;
+const parseVisionJson = parseVisionJsonImpl;
+const normalizeVisionResult = normalizeVisionResultImpl;
+
+// Vision functions that need dependency injection
+function pickVisionModel() {
+  return pickVisionModelImpl(CFG, OPENAI_MODEL);
+}
+
+function deriveVisionHintsFromText(rawText) {
+  return deriveVisionHintsFromTextImpl(rawText, {
+    normMatch,
+    includesToken,
+    offersIndex: OFFERS_INDEX,
+    brandPriority: BRAND_PRIORITY,
+  });
+}
+
+function analyzeProductImage(imageBytes, mimeType, opts = {}) {
+  return analyzeProductImageImpl(imageBytes, mimeType, opts, {
+    openaiClient: getOpenAIClient(),
+    cfg: CFG,
+    defaultModel: OPENAI_MODEL,
+    normMatch,
+    includesToken,
+    offersIndex: OFFERS_INDEX,
+    brandPriority: BRAND_PRIORITY,
+  });
+}
+
+function selectOffersFromVision(hints) {
+  return selectOffersFromVisionImpl(hints, {
+    offersIndex: OFFERS_INDEX,
+    offers: OFFERS,
+    featureAssumeTvOnBrandOnly: FEATURE_ASSUME_TV_ON_BRAND_ONLY,
+    listOffersForBrand,
+    maxOffers: MAX_OFFERS,
+    normMatch,
+    rankOffers,
+    pickCheapestPerBrand,
+  });
+}
+
+async function handleVisionMedia(mediaInput, lang, key, opts = {}) {
+  return handleVisionMediaImpl(mediaInput, lang, key, opts, {
+    normalizeMediaInput,
+    downloadMediaBuffer,
+    visionAnalyzer,
+    cfg: CFG,
+    defaultModel: OPENAI_MODEL,
+    openaiClient: getOpenAIClient(),
+    offersHeader,
+    buildPremiumOffersReply,
+    fallbackWithAgent,
+    titleFromHeader,
+    shortenNoQuestion,
+    ensureNoQuestion,
+    sanitizeDerivedText,
+    tryDirectOfferAnswer,
+    t,
+    stripNonPurchaseUrls,
+    setCtx,
+    buildOfferContextEntries,
+    offersIndex: OFFERS_INDEX,
+    offers: OFFERS,
+    featureAssumeTvOnBrandOnly: FEATURE_ASSUME_TV_ON_BRAND_ONLY,
+    listOffersForBrand,
+    maxOffers: MAX_OFFERS,
+    normMatch,
+    rankOffers,
+    pickCheapestPerBrand,
+    includesToken,
+    brandPriority: BRAND_PRIORITY,
+  });
+}
 
 let visionAnalyzer = analyzeProductImage;
 let mediaFetcherOverride = null;
@@ -3032,6 +3080,438 @@ let audioDownloaderOverride = null;
 let audioTranscriberOverride = null;
 let audioConverterOverride = null;
 
+// Audio service wrapper functions
+function isAudioMime(mime) {
+  return isAudioMimeImpl(mime);
+}
+
+function cleanMimeType(input) {
+  return cleanMimeTypeImpl(input);
+}
+
+function sniffAudioMime(buf) {
+  return sniffAudioMimeImpl(buf);
+}
+
+function extFromAudioMime(mime) {
+  return extFromAudioMimeImpl(mime);
+}
+
+function inferMimeFromPath(filepath, fallbackMime) {
+  return inferMimeFromPathImpl(filepath, fallbackMime);
+}
+
+function isAudioMeta(meta) {
+  return isAudioMetaImpl(meta);
+}
+
+function mimeFromProbe(formatName, codecName) {
+  return mimeFromProbeImpl(formatName, codecName);
+}
+
+function sanitizeLogSnippet(buffer, maxBytes = 120) {
+  return sanitizeLogSnippetImpl(buffer, maxBytes);
+}
+
+function readAudioHeader(filePath, maxBytes = 256) {
+  return readAudioHeaderImpl(filePath, maxBytes);
+}
+
+function isInvalidAudioPayload(headerBuf) {
+  return isInvalidAudioPayloadImpl(headerBuf);
+}
+
+function validateDownloadedAudio({ filePath, sizeBytes, url, reqId }) {
+  return validateDownloadedAudioImpl({ filePath, sizeBytes, url, reqId });
+}
+
+function execFilePromise(cmd, args, opts = {}) {
+  return execFilePromiseImpl(cmd, args, opts);
+}
+
+async function commandExists(cmd) {
+  return commandExistsImpl(cmd);
+}
+
+function shouldConvertAudioToWav(mimeType) {
+  return shouldConvertAudioToWavImpl(mimeType, CFG);
+}
+
+function shouldConvertAudioToMp3(filePath, mimeType) {
+  return shouldConvertAudioToMp3Impl(filePath, mimeType, CFG);
+}
+
+async function convertAudioToWav(inputPath, outputPath, reqId) {
+  return convertAudioToWavImpl(inputPath, outputPath, reqId, audioConverterOverride);
+}
+
+async function convertAudioToMp3(inputPath, outputPath, reqId) {
+  return convertAudioToMp3Impl(inputPath, outputPath, reqId, audioConverterOverride);
+}
+
+async function probeAudioInfo(filePath, reqId) {
+  return probeAudioInfoImpl(filePath, reqId);
+}
+
+async function resolveAudioMime({ filePath, mimeType, filename, url, sniffedMime, reqId }) {
+  return resolveAudioMimeImpl({ filePath, mimeType, filename, url, sniffedMime, reqId }, CFG);
+}
+
+function ensureAudioFileExtMatchesMime(filePath, mimeType) {
+  return ensureAudioFileExtMatchesMimeImpl(filePath, mimeType);
+}
+
+async function downloadToTemp(url, filepath) {
+  return downloadToTempImpl(url, filepath, fetchMedia, CFG);
+}
+
+async function downloadAudioBuffer(mediaInput, reqId) {
+  return downloadAudioBufferImpl(mediaInput, reqId, fetchMedia, CFG, audioDownloaderOverride);
+}
+
+async function transcribeAudioOpenAI(
+  { filePath, model, mimeType = "", filename = "", reqId = null, language = null },
+  openaiClient
+) {
+  return transcribeAudioOpenAIImpl(
+    { filePath, model, mimeType, filename, reqId, language },
+    openaiClient,
+    CFG,
+    toFileImpl,
+    normalizeLanguageHintImpl,
+    audioTranscriberOverride
+  );
+}
+
+async function transcribeAudioFile(filePath, mimeType, language) {
+  return transcribeAudioFileImpl(
+    filePath,
+    mimeType,
+    language,
+    getOpenAIClient,
+    CFG,
+    toFileImpl,
+    normalizeLanguageHintImpl,
+    audioTranscriberOverride
+  );
+}
+
+function buildPipelineTranscriber(reqId) {
+  return buildPipelineTranscriberImpl(reqId, getOpenAIClient, CFG, toFileImpl, normalizeLanguageHintImpl);
+}
+
+function guessMediaKind(meta) {
+  const mime = String((meta && (meta.mime || meta.mimetype || meta.mimeType || meta.contentType || meta.type)) || "").toLowerCase();
+  const type = String((meta && meta.type) || "").toLowerCase();
+  const kindField = String((meta && meta.kind) || "").toLowerCase();
+  const filename = String((meta && (meta.filename || meta.fileName || meta.name)) || "");
+  const url = String((meta && meta.url) || "");
+  if (kindField === "image") return "image";
+  if (kindField === "audio" || type === "voice" || type === "audio") return "audio";
+  if (mime.startsWith("image/")) return "image";
+  if (mime.startsWith("audio/")) return "audio";
+  const ext = path.extname(filename || url).toLowerCase();
+  if ([".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp"].includes(ext)) return "image";
+  if ([".mp3", ".wav", ".ogg", ".opus", ".m4a", ".webm", ".3gp", ".3gpp"].includes(ext)) return "audio";
+  return "unknown";
+}
+
+function normalizeMediaSingle(mediaVal) {
+  if (!mediaVal) return null;
+  if (typeof mediaVal === "string") {
+    const str = String(mediaVal).trim();
+    if (!str) return null;
+    if (str.startsWith("data:")) {
+      const mimeMatch = str.match(/^data:([^;,]+)?;/i);
+      const mime = mimeMatch && mimeMatch[1] ? mimeMatch[1] : "";
+      return { kind: guessMediaKind({ mime }), url: str, mime, raw: mediaVal };
+    }
+    if (/^https?:\/\//i.test(str)) {
+      const kind = guessMediaKind({ url: str });
+      return { kind, url: str, raw: mediaVal };
+    }
+    const base64ish = /^[a-z0-9+/=\s]+$/i.test(str) && str.length > 100;
+    if (base64ish) return { kind: "image", base64: str, raw: { base64: str } };
+    return null;
+  }
+
+  if (Array.isArray(mediaVal)) {
+    let image = null;
+    let audio = null;
+    let first = null;
+    for (let i = 0; i < mediaVal.length; i += 1) {
+      const norm = normalizeMediaSingle(mediaVal[i]);
+      if (!norm) continue;
+      if (!first) first = norm;
+      if (norm.kind === "image" && !image) image = norm;
+      if (norm.kind === "audio" && !audio) audio = norm;
+    }
+    return image || audio || first;
+  }
+
+  if (typeof mediaVal === "object") {
+    const url = String(
+      mediaVal.url ||
+        mediaVal.media_url ||
+        mediaVal.link ||
+        mediaVal.download_url ||
+        mediaVal.downloadUrl ||
+        mediaVal.mediaUrl ||
+        ""
+    ).trim();
+    const mime = String(mediaVal.mime || mediaVal.mimetype || mediaVal.mimeType || mediaVal.contentType || "").trim();
+    const filename = String(mediaVal.filename || mediaVal.fileName || mediaVal.name || "").trim();
+    const base64 = mediaVal.base64 || mediaVal.payload || mediaVal.data || null;
+    const kind = guessMediaKind({ mime, type: mediaVal.type, kind: mediaVal.kind, filename, url });
+    return { kind, url, mime, filename, base64, raw: mediaVal };
+  }
+
+  return null;
+}
+
+function normalizeMedia(mediaVal) {
+  return normalizeMediaSingle(mediaVal);
+}
+
+function normalizeMediaInput(mediaVal) {
+  const norm = normalizeMedia(mediaVal);
+  if (!norm) return null;
+  const raw = norm.raw || {};
+  return {
+    url: norm.url || "",
+    id: String(raw.id || raw.mediaId || raw.media_id || "").trim(),
+    mimeType: norm.mime || String(raw.mimeType || raw.contentType || "").trim(),
+    filename: norm.filename || String(raw.filename || raw.fileName || raw.name || "").trim(),
+    base64: norm.base64 || raw.base64 || raw.payload || raw.data || null,
+    kind: norm.kind || raw.kind || null,
+    raw,
+  };
+}
+
+function isPrivateHost(hostname) {
+  const h = String(hostname || "").toLowerCase();
+  if (!h) return true;
+  if (h === "localhost") return true;
+  if (h === "::1" || h === "0:0:0:0:0:0:0:1") return true;
+  if (/^127\./.test(h)) return true;
+  if (/^10\./.test(h)) return true;
+  if (/^192\.168\./.test(h)) return true;
+  if (/^172\.(1[6-9]|2[0-9]|3[0-1])\./.test(h)) return true;
+  if (/^169\.254\./.test(h)) return true;
+  if (/^100\.(6[4-9]|[7-9]\d|1[0-1]\d|12[0-7])\./.test(h)) return true;
+  if (/^198\.(1[8-9])\./.test(h)) return true;
+  if (/^192\.0\./.test(h)) return true;
+  if (/^(fc00|fd00)/.test(h)) return true;
+  if (/^fe80:/.test(h)) return true;
+  return false;
+}
+
+function isPrivateIp(ip) {
+  const addr = String(ip || "").trim().toLowerCase();
+  if (!addr) return true;
+  if (net.isIP(addr) === 6) {
+    if (addr === "::1") return true;
+    if (addr.startsWith("fe80:")) return true;
+    if (addr.startsWith("fc") || addr.startsWith("fd")) return true;
+    return false;
+  }
+  if (net.isIP(addr) !== 4) return true;
+  const parts = addr.split(".").map((part) => Number(part));
+  if (parts.length !== 4 || parts.some((part) => !Number.isFinite(part))) return true;
+  const [a, b] = parts;
+  if (a === 10) return true;
+  if (a === 127) return true;
+  if (a === 0) return true;
+  if (a === 169 && b === 254) return true;
+  if (a === 172 && b >= 16 && b <= 31) return true;
+  if (a === 192 && b === 168) return true;
+  if (a === 100 && b >= 64 && b <= 127) return true;
+  if (a === 198 && (b === 18 || b === 19)) return true;
+  if (a === 192 && b === 0) return true;
+  return false;
+}
+
+async function ensurePublicUrl(urlObj) {
+  if (!urlObj) throw new Error("media_url_missing");
+  if (isPrivateHost(urlObj.hostname)) throw new Error("media_ssrf_blocked");
+  if (net.isIP(urlObj.hostname)) {
+    if (isPrivateIp(urlObj.hostname)) throw new Error("media_ssrf_blocked");
+    return;
+  }
+  let addresses = [];
+  try {
+    addresses = await dns.lookup(urlObj.hostname, { all: true, verbatim: true });
+  } catch {
+    throw new Error("media_ssrf_blocked");
+  }
+  if (!addresses.length) throw new Error("media_ssrf_blocked");
+  for (const addr of addresses) {
+    if (isPrivateIp(addr.address)) throw new Error("media_ssrf_blocked");
+  }
+}
+
+async function fetchMedia(url, opts = {}) {
+  if (!url) throw new Error("media_url_missing");
+  const allowHttp = opts.allowHttp ?? CFG.mediaAllowHttp;
+  const maxBytes = opts.maxBytes ?? CFG.mediaMaxBytesImage;
+  const timeoutMs = opts.timeoutMs ?? CFG.mediaFetchTimeoutMs;
+  const maxRedirects = Number.isInteger(opts.redirects) ? opts.redirects : 3;
+
+  if (String(url || "").startsWith("data:")) {
+    const m = String(url || "").match(/^data:([^;,]+)?;base64,(.+)$/i);
+    if (!m || !m[2]) throw new Error("media_data_invalid");
+    const buf = Buffer.from(m[2], "base64");
+    if (buf.length > maxBytes) throw new Error("media_too_large");
+    const sniffedMime = sniffImageMime(buf) || m[1] || "application/octet-stream";
+    return { buffer: buf, mimeType: sniffedMime, sizeBytes: buf.length, sniffedMime };
+  }
+
+  let currentUrl = url;
+  let redirects = 0;
+
+  while (redirects <= maxRedirects) {
+    const u = new URL(currentUrl);
+    if (u.protocol !== "http:" && u.protocol !== "https:") throw new Error("media_protocol_blocked");
+    if (u.protocol === "http:" && !allowHttp) throw new Error("media_http_blocked");
+    await ensurePublicUrl(u);
+
+    let ctrl = null;
+    let timeoutId = null;
+    if (typeof AbortController !== "undefined") ctrl = new AbortController();
+    if (ctrl) timeoutId = setTimeout(() => ctrl.abort(), timeoutMs);
+
+    try {
+      const resp = await getFetch()(currentUrl, { method: "GET", redirect: "manual", signal: ctrl ? ctrl.signal : undefined });
+      if (!resp) throw new Error("media_fetch_failed");
+
+      const status = Number(resp.status || 0);
+      const loc = resp.headers && resp.headers.get && resp.headers.get("location");
+      if ([301, 302, 303, 307, 308].includes(status) && loc && redirects < maxRedirects) {
+        currentUrl = new URL(loc, currentUrl).toString();
+        redirects += 1;
+        continue;
+      }
+
+      if (!resp.ok) throw new Error("media_fetch_failed");
+
+      const mimeType = String((resp.headers && resp.headers.get && resp.headers.get("content-type")) || "").trim();
+      const contentLength = Number((resp.headers && resp.headers.get && resp.headers.get("content-length")) || NaN);
+      if (Number.isFinite(contentLength) && contentLength > maxBytes) {
+        console.warn(JSON.stringify({ level: "warn", msg: "media_blocked_size_header", sizeBytes: contentLength, maxBytes, host: u.hostname }));
+        throw new Error("media_too_large");
+      }
+
+      const chunks = [];
+      let sizeBytes = 0;
+      if (resp.body && typeof resp.body.getReader === "function") {
+        const reader = resp.body.getReader();
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          if (value) {
+            sizeBytes += value.length;
+            if (sizeBytes > maxBytes) {
+              console.warn(JSON.stringify({ level: "warn", msg: "media_blocked_size_stream", sizeBytes, maxBytes, host: u.hostname }));
+              throw new Error("media_too_large");
+            }
+            chunks.push(Buffer.from(value));
+          }
+        }
+      } else if (typeof resp.arrayBuffer === "function") {
+        const arrBuf = await resp.arrayBuffer();
+        const buf = Buffer.from(arrBuf);
+        sizeBytes = buf.length;
+        if (sizeBytes > maxBytes) throw new Error("media_too_large");
+        chunks.push(buf);
+      } else {
+        throw new Error("media_fetch_failed");
+      }
+
+      const buffer = Buffer.concat(chunks);
+      const sniffedMime = sniffImageMime(buffer);
+      const finalMime =
+        sniffedMime || mimeType || (path.extname(u.pathname || "").match(/\.jpe?g|\.png|\.webp|\.gif/i) ? "image/jpeg" : "application/octet-stream");
+
+      console.log(
+        JSON.stringify({
+          level: "info",
+          msg: "media_fetched",
+          host: u.hostname,
+          sizeBytes,
+          contentType: mimeType || null,
+          sniffedMime: sniffedMime || null,
+        })
+      );
+
+      return { buffer, mimeType: finalMime, sizeBytes, sniffedMime };
+    } finally {
+      if (timeoutId) clearTimeout(timeoutId);
+    }
+  }
+
+  throw new Error("media_redirect_loop");
+}
+
+async function downloadMediaBuffer(mediaInput) {
+  const m = mediaInput || {};
+  if (typeof mediaFetcherOverride === "function") return mediaFetcherOverride(m);
+
+  const baseUrl = String(CFG.wanotifierMediaUrl || "").replace(/\/$/, "");
+  const url = m.url || (m.id && baseUrl ? `${baseUrl}/${m.id}` : "");
+  if (!url && !m.base64) throw new Error("media_url_missing");
+
+  if (m.base64 && !url) {
+    const buf = Buffer.from(String(m.base64 || ""), "base64");
+    if (buf.length > CFG.mediaMaxBytesImage) throw new Error("media_too_large");
+    const sniffedMime = sniffImageMime(buf) || m.mimeType || "application/octet-stream";
+    return { buffer: buf, mimeType: sniffedMime, filename: m.filename || null };
+  }
+
+  const fetched = await fetchMedia(url, {
+    maxBytes: CFG.mediaMaxBytesImage,
+    timeoutMs: CFG.mediaFetchTimeoutMs,
+    allowHttp: CFG.mediaAllowHttp,
+  });
+
+  return {
+    buffer: fetched.buffer,
+    mimeType: m.mimeType || fetched.sniffedMime || fetched.mimeType || "application/octet-stream",
+    filename: m.filename || null,
+  };
+}
+
+function isAudioMime(mime) {
+  const m = String(mime || "").toLowerCase();
+  return m.startsWith("audio/") || m === "application/ogg";
+}
+
+function cleanMimeType(input) {
+  if (!input) return "";
+  const normalized = String(input || "").trim().toLowerCase();
+  if (!normalized) return "";
+  const base = normalized.split(";")[0].trim();
+  if (base === "audio/opus" || base === "application/ogg") return "audio/ogg";
+  return base;
+}
+
+function sanitizeLogSnippet(buffer, maxBytes = 120) {
+  const raw = Buffer.isBuffer(buffer) ? buffer : Buffer.from(buffer || []);
+  return raw
+    .slice(0, maxBytes)
+    .toString("utf8")
+    .replace(/[^\x20-\x7E]+/g, " ")
+    .trim();
+}
+
+function getUrlHost(url) {
+  if (!url) return null;
+  if (String(url).startsWith("data:")) return "data";
+  try {
+    return new URL(String(url)).host || null;
+  } catch {
+    return null;
+  }
+}
 
 function readAudioHeader(filePath, maxBytes = 256) {
   const fd = fs.openSync(filePath, "r");
@@ -3567,519 +4047,6 @@ function buildPipelineTranscriber(reqId) {
     }
     return { rawTranscript: String(out || ""), segments: null, modelUsed: model || "openai" };
   };
-}
-
-function parseVisionJson(rawText) {
-  if (rawText && typeof rawText === "object") return { ok: true, obj: rawText };
-  const txt = String(rawText || "").trim();
-  if (!txt) return { ok: false, raw: "" };
-  const cleaned = txt.replace(/^```json\s*/i, "").replace(/```$/g, "").trim();
-  try {
-    const obj = JSON.parse(cleaned);
-    return { ok: true, obj };
-  } catch {}
-
-  const start = cleaned.indexOf("{");
-  const end = cleaned.lastIndexOf("}");
-  if (start >= 0 && end > start) {
-    const slice = cleaned.slice(start, end + 1);
-    try {
-      const obj = JSON.parse(slice);
-      return { ok: true, obj };
-    } catch {}
-  }
-
-  return { ok: false, raw: cleaned };
-}
-
-function deriveVisionHintsFromText(rawText) {
-  const txt = String(rawText || "").trim();
-  if (!txt) return null;
-
-  const normalized = normMatch(txt);
-  const out = {
-    category: "other",
-    brand: null,
-    model: null,
-    size_inches: null,
-    capacity_liters: null,
-    confidence: 0.15,
-  };
-
-  const brandsPool = [...new Set([...(OFFERS_INDEX.brands || []), ...(BRAND_PRIORITY || [])])];
-  for (let i = 0; i < brandsPool.length; i += 1) {
-    const b = brandsPool[i];
-    if (includesToken(txt, b)) {
-      out.brand = b;
-      break;
-    }
-  }
-
-  const sizeMatch = txt.match(/(\d{2,3})\s*(?:"|pouce|pouces|inch|inches|po|in)?/i);
-  if (sizeMatch) {
-    const sizeNum = Number(sizeMatch[1]);
-    if (Number.isFinite(sizeNum) && sizeNum >= 14 && sizeNum <= 120) {
-      out.size_inches = sizeNum;
-      out.category = out.category === "other" ? "tv" : out.category;
-    }
-  }
-
-  const capMatch = txt.match(/(\d{2,4})\s*(?:l|litre|litres)/i);
-  if (capMatch) {
-    const capNum = Number(capMatch[1]);
-    if (Number.isFinite(capNum) && capNum >= 20 && capNum <= 1200) {
-      out.capacity_liters = capNum;
-      out.category = out.category === "other" ? "refrigerateur" : out.category;
-    }
-  }
-
-  if (/\btv\b|tele|écran|ecran|screen|qled|oled/.test(normalized)) out.category = "tv";
-  else if (/frigo|refrigerateur|réfrigérateur/.test(normalized)) out.category = "refrigerateur";
-  else if (/cuisiniere|four/.test(normalized)) out.category = "cuisiniere";
-  else if (/lave\s*linge|machine\s*a\s*laver/.test(normalized)) out.category = "lave_linge";
-  else if (/clim|climatiseur|ac/.test(normalized)) out.category = "climatiseur";
-
-  if (!out.brand && txt.length <= 80) out.model = txt;
-
-  return out;
-}
-
-function normalizeVisionResult(obj) {
-  const o = obj && typeof obj === "object" ? obj : {};
-  const category = String(o.category || "").toLowerCase();
-  const brand = String(o.brand || "").trim();
-  const model = String(o.model || "").trim();
-  const sizeInches = Number(o.size_inches);
-  const capacityLiters = Number(o.capacity_liters);
-  const confidence = Number(o.confidence);
-
-  return {
-    category,
-    brand: brand || null,
-    model: model || null,
-    size_inches: Number.isFinite(sizeInches) ? sizeInches : null,
-    capacity_liters: Number.isFinite(capacityLiters) ? capacityLiters : null,
-    confidence: Number.isFinite(confidence) && confidence >= 0 && confidence <= 1 ? confidence : 0,
-  };
-}
-
-function toImageUrlString(image, mime = "image/jpeg") {
-  if (typeof image === "string") {
-    if (/^(https?:|data:)/i.test(image)) return image;
-    throw new Error("Image string must start with http or data:");
-  }
-
-  if (Buffer.isBuffer(image) || image instanceof Uint8Array) {
-    const buf = Buffer.isBuffer(image) ? image : Buffer.from(image);
-    const b64 = buf.toString("base64");
-    return `data:${mime};base64,${b64}`;
-  }
-
-  if (image && typeof image === "object") {
-    if (typeof image.url === "string") return toImageUrlString(image.url, mime);
-    console.error("Invalid image object keys:", Object.keys(image || {}));
-    throw new Error("Unsupported image object for vision: expected string, Buffer/Uint8Array, or { url }");
-  }
-
-  throw new Error("Unsupported image type for vision input");
-}
-
-async function describeImage({ image, model }, openaiClient) {
-  const client = openaiClient || getOpenAIClient();
-  const imageUrl = toImageUrlString(image);
-  console.log("vision image typeof:", typeof image, "isBuffer:", Buffer.isBuffer(image));
-  if (typeof imageUrl === "string" && /^(data:|https?:)/i.test(imageUrl)) {
-    console.log("vision image_url preview:", imageUrl.slice(0, 80));
-  }
-  const resp = await client.responses.create({
-    model: model || pickVisionModel(),
-    input: [
-      {
-        role: "user",
-        content: [
-          {
-            type: "input_text",
-            text: "Extract brand/model/size/category + any visible text. Return ONE compact line. No URLs. No question marks.",
-          },
-          { type: "input_image", image_url: imageUrl },
-        ],
-      },
-    ],
-  });
-
-  const outText =
-    (resp && (resp.output_text || resp.text)) ||
-    (resp &&
-      resp.output &&
-      Array.isArray(resp.output) &&
-      resp.output[0] &&
-      (resp.output[0].content || resp.output[0].text)) ||
-    "";
-  return String(outText || "").trim();
-}
-
-function isVisionCapableModel(modelName) {
-  const m = String(modelName || "").toLowerCase();
-  return /gpt-4o|gpt-4\.1|o3|vision/.test(m);
-}
-
-function pickVisionModel() {
-  if (CFG.openaiVisionModel && isVisionCapableModel(CFG.openaiVisionModel)) return CFG.openaiVisionModel;
-  if (OPENAI_MODEL && isVisionCapableModel(OPENAI_MODEL)) return OPENAI_MODEL;
-  // Default to a known vision-capable model if none provided
-  return "gpt-4o-mini";
-}
-
-async function analyzeProductImage(imageBytes, mimeType, opts = {}) {
-  const imgBuf = Buffer.isBuffer(imageBytes) ? imageBytes : Buffer.from(imageBytes || []);
-  const safeMime = sniffImageMime(imgBuf) || String(mimeType || "image/jpeg");
-  const model = pickVisionModel();
-  const client = getOpenAIClient();
-  const formattingInstruction =
-    "Identify the product and output strict JSON only with keys: category (tv|refrigerateur|cuisiniere|lave_linge|other), brand, model, size_inches, capacity_liters, confidence (0..1).";
-
-  let resp = null;
-  let formattingEnabled = true;
-  let lastError = null;
-
-  for (let attempt = 0; attempt < 2; attempt += 1) {
-    const enforceJsonNote = formattingEnabled
-      ? ""
-      : " Respond with JSON only. Do not add explanations, code fences, or non-JSON text.";
-    const imageUrl = toImageUrlString(imgBuf, safeMime);
-    console.log("vision image typeof:", typeof imageBytes, "isBuffer:", Buffer.isBuffer(imageBytes));
-    if (typeof imageUrl === "string" && /^(data:|https?:)/i.test(imageUrl)) {
-      console.log("vision image_url preview:", imageUrl.slice(0, 80));
-    }
-    const payload = {
-      model,
-      temperature: 0,
-      input: [
-        {
-          role: "user",
-          content: [
-            {
-              type: "input_text",
-              text: formattingInstruction + enforceJsonNote,
-            },
-            { type: "input_image", image_url: imageUrl },
-          ],
-        },
-      ],
-    };
-
-    if (formattingEnabled) {
-      payload.text = { format: { type: "json_object" } };
-    }
-
-    try {
-      resp = await client.responses.create(payload);
-      break;
-    } catch (err) {
-      lastError = err;
-      const msg = (err && (err.message || err.toString())) || "unknown_error";
-      console.error(
-        JSON.stringify({
-          level: "error",
-          msg: "vision_openai_call_failed",
-          reqId: opts.reqId || null,
-          model,
-          formatting: formattingEnabled,
-          error: msg,
-        })
-      );
-
-      const lowerMsg = String(msg || "").toLowerCase();
-      const formattingUnsupported =
-        formattingEnabled &&
-        (lowerMsg.includes("text.format") || lowerMsg.includes("response_format") || lowerMsg.includes("unsupported"));
-
-      if (formattingUnsupported && attempt === 0) {
-        formattingEnabled = false;
-        continue;
-      }
-
-      throw err;
-    }
-  }
-
-  if (!resp) throw lastError || new Error("vision_no_response");
-
-  let rawOut = "";
-  if (resp && typeof resp.output_text === "string") rawOut = resp.output_text;
-  else if (resp && typeof resp.text === "string") rawOut = resp.text;
-  else if (resp && Array.isArray(resp.output)) rawOut = resp.output.map((it) => (typeof it === "string" ? it : it?.content || it?.text || "")).join("\n");
-
-  const parsed = parseVisionJson(rawOut);
-  if (!parsed.ok) {
-    const fallback = deriveVisionHintsFromText(parsed.raw || rawOut);
-    console.error(
-      JSON.stringify({
-        level: fallback ? "warn" : "error",
-        msg: "vision_invalid_json",
-        reqId: opts.reqId || null,
-        model,
-        formatting: formattingEnabled,
-        raw: rawOut,
-      })
-    );
-    if (!fallback) {
-      const e = new Error("vision_invalid_json");
-      e.rawOutput = rawOut;
-      throw e;
-    }
-    const normFallback = normalizeVisionResult(fallback);
-    console.log(
-      JSON.stringify({
-        level: "info",
-        msg: "vision_analyzed_fallback",
-        modelUsed: model,
-        confidence: normFallback.confidence,
-      })
-    );
-    return normFallback;
-  }
-
-  const norm = normalizeVisionResult(parsed.obj);
-
-  console.log(
-    JSON.stringify({
-      level: "info",
-      msg: "vision_analyzed",
-      modelUsed: model,
-      confidence: norm.confidence,
-    })
-  );
-
-  return norm;
-}
-
-function selectOffersFromVision(hints) {
-  const h = hints || {};
-  const mapped = VISION_CATEGORY_MAP[h.category] || { cls: null, category: null };
-  const cls = mapped.cls || h.cls || null;
-  const category = mapped.category || h.categoryReadable || null;
-  const brand = String(h.brand || "").toUpperCase();
-  const size = Number(h.size_inches);
-  const capacity = Number(h.capacity_liters);
-  const sizeNum = Number.isFinite(size) ? size : null;
-  const capNum = Number.isFinite(capacity) ? capacity : null;
-
-  if (brand) {
-    const isBrandOnlyQuery = !cls && !category && !sizeNum && !capNum;
-    const tvCanon = OFFERS_INDEX.classCanon.tv || "Tv";
-    
-    if (FEATURE_ASSUME_TV_ON_BRAND_ONLY && isBrandOnlyQuery) {
-      const resTv = listOffersForBrand(brand, {
-        cls: tvCanon,
-        limit: MAX_OFFERS,
-        withOffers: true,
-        tvOnly: true,
-      });
-      if (resTv?.offers?.length > 0) {
-        return { offers: resTv.offers.map((offer) => ({ brand, offer })) };
-      }
-    }
-
-    const res = listOffersForBrand(brand, {
-      cls,
-      category,
-      size: sizeNum,
-      capacityLiters: capNum,
-      limit: MAX_OFFERS,
-      withOffers: true,
-    });
-    if (res && Array.isArray(res.offers) && res.offers.length) {
-      return { offers: res.offers.map((offer) => ({ brand, offer })) };
-    }
-  }
-
-  const items = [];
-  const brands = OFFERS_INDEX.brands || [];
-  for (let i = 0; i < brands.length; i += 1) {
-    const b = brands[i];
-    const arr = ((OFFERS && OFFERS.offers && OFFERS.offers[b]) || [])
-      .map((offer, idx) => ({ brand: b, offer, originalIdx: idx }))
-      .filter((it) => {
-        const o = it.offer || {};
-        if (cls && normMatch(o.class || "") !== normMatch(cls)) return false;
-        if (category && normMatch(o.category || "") !== normMatch(category)) return false;
-        return true;
-      });
-    items.push(...arr);
-  }
-
-  const ranked = rankOffers(items, {
-    size: sizeNum,
-    capacityLiters: capNum,
-    className: cls,
-    limit: null,
-  });
-
-  const picked = pickCheapestPerBrand(ranked).slice(0, MAX_OFFERS);
-
-  return { offers: picked.map((r) => ({ brand: r.brand, offer: r.offer })) };
-}
-
-async function handleVisionMedia(mediaInput, lang, key, opts = {}) {
-  const stripUrls = opts.stripUrls === true;
-  const normalizedMedia = normalizeMediaInput(mediaInput);
-  if (!normalizedMedia) throw new Error("media_missing");
-
-  const mime = String(normalizedMedia.mimeType || "").toLowerCase();
-  if (mime && mime.startsWith("audio/")) {
-    console.warn(
-      JSON.stringify({ level: "warn", msg: "vision_blocked_non_image", mimeType: normalizedMedia.mimeType || null })
-    );
-    throw new Error("vision_non_image");
-  }
-
-  const downloaded = await downloadMediaBuffer(normalizedMedia);
-  const sniffedMime = sniffImageMime(downloaded.buffer);
-  const downloadedMime = String(downloaded.mimeType || "").toLowerCase();
-  const finalMime = (sniffedMime || downloadedMime || mime || "").toLowerCase();
-
-  if (!finalMime.startsWith("image/")) {
-    const ext = path.extname(normalizedMedia.filename || normalizedMedia.url || "").toLowerCase();
-    const extLooksImage = [".jpg", ".jpeg", ".png", ".gif", ".webp"].includes(ext);
-    if (!extLooksImage && !sniffedMime) {
-      console.warn(
-        JSON.stringify({
-          level: "warn",
-          msg: "vision_blocked_after_download",
-          mimeType: downloaded.mimeType || null,
-          sniffedMime: sniffedMime || null,
-        })
-      );
-      throw new Error("vision_non_image");
-    }
-  }
-
-  const logBase = {
-    level: "info",
-    msg: "vision_media",
-    mimeProvided: normalizedMedia.mimeType || null,
-    mimeDownloaded: downloaded.mimeType || null,
-    sniffedMime: sniffedMime || null,
-    sizeBytes: downloaded.buffer.length,
-    reqId: opts.reqId || null,
-  };
-  console.log(JSON.stringify(logBase));
-
-  let vision = null;
-  try {
-    vision = await visionAnalyzer(downloaded.buffer, finalMime || downloaded.mimeType || "image/jpeg", {
-      reqId: opts.reqId || null,
-    });
-  } catch (err) {
-    console.error(
-      JSON.stringify({
-        level: "error",
-        msg: "vision_call_failed",
-        reqId: opts.reqId || null,
-        error: (err && err.message) || String(err),
-      })
-    );
-  }
-
-  if (vision && vision.confidence !== undefined) {
-    console.log(
-      JSON.stringify({
-        level: "info",
-        msg: "vision_result",
-        reqId: opts.reqId || null,
-        confidence: vision.confidence,
-        category: vision.category || null,
-        brand: vision.brand || null,
-        size: vision.size_inches || null,
-        capacity: vision.capacity_liters || null,
-      })
-    );
-  }
-
-  let offerReply = null;
-  if (vision) {
-    const mapped = VISION_CATEGORY_MAP[vision.category] || {};
-    const cls = mapped.cls || null;
-    const category = mapped.category || null;
-    const brand = vision.brand ? String(vision.brand).toUpperCase() : null;
-    const sizeNum = vision.size_inches ? Number(vision.size_inches) : null;
-    const capNum = vision.capacity_liters ? Number(vision.capacity_liters) : null;
-
-    const offers = selectOffersFromVision({
-      category: vision.category,
-      cls,
-      categoryReadable: category,
-      brand,
-      size_inches: sizeNum,
-      capacity_liters: capNum,
-    });
-
-    const header = offersHeader(lang, {
-      brand,
-      cls: cls || category || undefined,
-      category: category || undefined,
-      size: sizeNum || undefined,
-    });
-    const entries = Array.isArray(offers.offers) ? offers.offers : [];
-    const title = titleFromHeader(header);
-    const body = entries.length
-      ? buildPremiumOffersReply({ title, entries, lang, maxChars: CFG.maxReplyChars })
-      : fallbackWithAgent(lang);
-    offerReply = {
-      reply: shortenNoQuestion(body, CFG.maxReplyChars),
-      confidence: vision.confidence || 0,
-      ctx: { brand, cls, category, sizeNum, offers: { offers: entries } },
-    };
-  }
-
-  if (!offerReply) {
-    try {
-      const mimeType = finalMime || downloaded.mimeType || "image/jpeg";
-      const dataUrl = `data:${mimeType};base64,${downloaded.buffer.toString("base64")}`;
-      const desc = await describeImage({ image: dataUrl, model: pickVisionModel() }, getOpenAIClient());
-      const safeDesc = ensureNoQuestion(sanitizeDerivedText(desc)).slice(0, 1800);
-      if (safeDesc) {
-        const direct = tryDirectOfferAnswer(safeDesc, [], lang, key);
-        if (direct) {
-          offerReply = { reply: shortenNoQuestion(direct, CFG.maxReplyChars), confidence: 0 };
-        }
-      }
-    } catch (err) {
-      console.error(
-        JSON.stringify({
-          level: "error",
-          msg: "vision_fallback_failed",
-          reqId: opts.reqId || null,
-          error: (err && err.message) || String(err),
-        })
-      );
-    }
-  }
-
-  if (!offerReply) {
-    const ask = shortenNoQuestion(t(lang, "askTextInsteadMedia"), 420);
-    return { reply: ask, confidence: 0 };
-  }
-
-  const finalReplyText = stripUrls
-    ? stripNonPurchaseUrls(String(offerReply.reply || ""))
-    : String(offerReply.reply || "");
-  const finalReply = shortenNoQuestion(finalReplyText, CFG.maxReplyChars);
-  const ctxData = offerReply.ctx || {};
-  const visionEntries = Array.isArray(ctxData.offers && ctxData.offers.offers) ? ctxData.offers.offers : [];
-  const visionOfferCtx = visionEntries.length ? buildOfferContextEntries(visionEntries) : null;
-  setCtx(key, {
-    lastBrand: ctxData.brand || undefined,
-    lastClass: ctxData.cls || undefined,
-    lastCategory: ctxData.category || undefined,
-    lastSize: ctxData.sizeNum || undefined,
-    lastOffersShown: visionOfferCtx ? visionOfferCtx.lastOffersShown : undefined,
-    lastOfferPicks: visionOfferCtx ? visionOfferCtx.lastOfferPicks : undefined,
-    lastOfferItems: visionOfferCtx ? visionOfferCtx.lastOfferItems : undefined,
-  });
-
-  return { reply: finalReply, confidence: offerReply.confidence || 0 };
 }
 
 function setVisionAnalyzerForTest(fn) {
