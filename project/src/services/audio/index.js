@@ -56,6 +56,5 @@ export {
 export {
   transcribeAudioOpenAI,
   transcribeAudioFile,
-  transcribeAudio,
   buildPipelineTranscriber,
 } from "./transcribe.js";

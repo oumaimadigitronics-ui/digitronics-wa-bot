@@ -192,7 +192,6 @@ import {
   downloadAudioBuffer as downloadAudioBufferImpl,
   transcribeAudioOpenAI as transcribeAudioOpenAIImpl,
   transcribeAudioFile as transcribeAudioFileImpl,
-  transcribeAudio as transcribeAudioImpl,
   buildPipelineTranscriber as buildPipelineTranscriberImpl,
 } from './project/src/services/audio/index.js';
 
@@ -3168,19 +3167,6 @@ async function transcribeAudioOpenAI(
 
 async function transcribeAudioFile(filePath, mimeType, language) {
   return transcribeAudioFileImpl(
-    filePath,
-    mimeType,
-    language,
-    getOpenAIClient,
-    CFG,
-    toFileImpl,
-    normalizeLanguageHintImpl,
-    audioTranscriberOverride
-  );
-}
-
-async function transcribeAudio(filePath, mimeType, language) {
-  return transcribeAudioImpl(
     filePath,
     mimeType,
     language,

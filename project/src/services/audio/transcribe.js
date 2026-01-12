@@ -141,40 +141,6 @@ export async function transcribeAudioFile(
 }
 
 /**
- * Transcribe audio file (alias for transcribeAudioFile).
- * @param {string} filePath - Path to audio file
- * @param {string} mimeType - Audio MIME type
- * @param {string} language - Language hint
- * @param {Function} getOpenAIClient - Function to get OpenAI client
- * @param {Object} CFG - Configuration object
- * @param {Function} toFileImpl - toFile implementation
- * @param {Function} normalizeLanguageHintImpl - Language normalization function
- * @param {Function} audioTranscriberOverride - Optional test override function
- * @returns {Promise<string>} Transcribed text
- */
-export async function transcribeAudio(
-  filePath,
-  mimeType,
-  language,
-  getOpenAIClient,
-  CFG,
-  toFileImpl,
-  normalizeLanguageHintImpl,
-  audioTranscriberOverride = null
-) {
-  return transcribeAudioFile(
-    filePath,
-    mimeType,
-    language,
-    getOpenAIClient,
-    CFG,
-    toFileImpl,
-    normalizeLanguageHintImpl,
-    audioTranscriberOverride
-  );
-}
-
-/**
  * Build transcriber function for audio pipeline.
  * @param {string} reqId - Request ID for logging
  * @param {Function} getOpenAIClient - Function to get OpenAI client

@@ -20,11 +20,12 @@ export function sanitizeLogSnippet(buffer, maxBytes = 120) {
 }
 
 /**
- * Get URL host for logging purposes.
+ * Get URL host for logging purposes (private utility).
+ * @private
  * @param {string} url - URL to extract host from
  * @returns {string|null} Host or null
  */
-function getUrlHost(url) {
+function _getUrlHost(url) {
   if (!url) return null;
   if (String(url).startsWith("data:")) return "data";
   try {
@@ -79,7 +80,7 @@ export function validateDownloadedAudio({ filePath, sizeBytes, url, reqId }) {
   const stats = fs.statSync(filePath);
   const actualSize = sizeBytes || stats.size || 0;
   const header = readAudioHeader(filePath, 256);
-  const host = getUrlHost(url);
+  const host = _getUrlHost(url);
 
   if (actualSize < 1024) {
     console.error(
