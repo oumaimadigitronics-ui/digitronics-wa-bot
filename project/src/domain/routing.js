@@ -4,22 +4,34 @@
  * Routes user messages to appropriate response templates based on detected intents.
  * This module provides the central routing function that determines which template(s)
  * to return based on the user's message intent.
- * 
- * ⚠️ PHASE 1 - EXTRACTION ONLY ⚠️
- * 
- * This function currently references dependencies that are NOT YET IMPORTED.
- * It will throw ReferenceError if called directly. This is intentional for Phase 1.
- * 
- * Dependencies needed:
- * - Intent functions: isAngryIntent, isConfusedIntent, isSupportIntent, isBuyIntent, hasQuantitySignal, isContactIntent, isDeliveryIntent, isPaymentIntent, isWarrantyIntent
- * - Templates: ESCALATION_TEMPLATE, CLARITY_TEMPLATE, SUPPORT_TEMPLATE, BUY_INTENT_TEMPLATE, CONTACT_TEMPLATE, DELIVERY_TEMPLATE, PAYMENT_TEMPLATE, WARRANTY_TEMPLATE
- * - From server.js: isProductAdviceIntent(), resolveAdvice()
- * 
- * Phase 2 will:
- * 1. Add imports from intents.js and templates.js
- * 2. Extract isProductAdviceIntent and resolveAdvice
- * 3. Update server.js to use this module
  */
+
+import {
+  isAngryIntent,
+  isConfusedIntent,
+  isSupportIntent,
+  isBuyIntent,
+  hasQuantitySignal,
+  isContactIntent,
+  isDeliveryIntent,
+  isPaymentIntent,
+  isWarrantyIntent
+} from './intents.js';
+
+import {
+  ESCALATION_TEMPLATE,
+  CLARITY_TEMPLATE,
+  SUPPORT_TEMPLATE,
+  BUY_INTENT_TEMPLATE,
+  CONTACT_TEMPLATE,
+  DELIVERY_TEMPLATE,
+  PAYMENT_TEMPLATE,
+  WARRANTY_TEMPLATE
+} from '../services/replies/templates.js';
+
+// Note: isProductAdviceIntent and resolveAdvice still come from server.js
+// These will be handled in a future phase when server.js is fully modularized
+// For now, routing.js is used by server.js, so these references work via closure
 
 /**
  * Routes a user message to the appropriate response template(s)

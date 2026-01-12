@@ -4,28 +4,21 @@
  * These functions detect user intentions from message text in multiple languages
  * (Arabic, French, and English). They use pattern matching with tokens, phrases,
  * and emojis to identify what the user wants.
- * 
- * ⚠️ PHASE 1 - EXTRACTION ONLY ⚠️
- * 
- * These functions currently reference helper utilities that are NOT YET IMPORTED.
- * They will throw ReferenceError if called directly. This is intentional for Phase 1.
- * 
- * Dependencies needed (currently in server.js):
- * - normalizeIntentText()
- * - hasAnyEmoji()
- * - hasAnyToken()
- * - hasAnyPhrase()
- * - includesToken()
- * - normMatch()
- * - arabicIndicToAsciiDigits()
- * - isOrderStatusIntent()
- * - isProductAdviceIntent()
- * 
- * Phase 2 will:
- * 1. Extract helper functions to lib/utils
- * 2. Add proper imports
- * 3. Update server.js to use these modules
  */
+
+import {
+  normalizeIntentText,
+  hasAnyEmoji,
+  hasAnyToken,
+  hasAnyPhrase,
+  includesToken,
+  normMatch,
+  arabicIndicToAsciiDigits
+} from '../lib/textUtils.js';
+
+// Note: isOrderStatusIntent and isProductAdviceIntent still come from server.js
+// These will be handled in a future phase when server.js is fully modularized
+// For now, intents.js is used by server.js, so these references work via closure
 
 /**
  * Detects if the user wants contact information (location, phone, email)
