@@ -3103,6 +3103,126 @@ let audioDownloaderOverride = null;
 let audioTranscriberOverride = null;
 let audioConverterOverride = null;
 
+// Audio service wrapper functions
+function isAudioMime(mime) {
+  return isAudioMimeImpl(mime);
+}
+
+function cleanMimeType(input) {
+  return cleanMimeTypeImpl(input);
+}
+
+function sniffAudioMime(buf) {
+  return sniffAudioMimeImpl(buf);
+}
+
+function extFromAudioMime(mime) {
+  return extFromAudioMimeImpl(mime);
+}
+
+function inferMimeFromPath(filepath, fallbackMime) {
+  return inferMimeFromPathImpl(filepath, fallbackMime);
+}
+
+function isAudioMeta(meta) {
+  return isAudioMetaImpl(meta);
+}
+
+function mimeFromProbe(formatName, codecName) {
+  return mimeFromProbeImpl(formatName, codecName);
+}
+
+function sanitizeLogSnippet(buffer, maxBytes = 120) {
+  return sanitizeLogSnippetImpl(buffer, maxBytes);
+}
+
+function readAudioHeader(filePath, maxBytes = 256) {
+  return readAudioHeaderImpl(filePath, maxBytes);
+}
+
+function isInvalidAudioPayload(headerBuf) {
+  return isInvalidAudioPayloadImpl(headerBuf);
+}
+
+function validateDownloadedAudio({ filePath, sizeBytes, url, reqId }) {
+  return validateDownloadedAudioImpl({ filePath, sizeBytes, url, reqId });
+}
+
+function execFilePromise(cmd, args, opts = {}) {
+  return execFilePromiseImpl(cmd, args, opts);
+}
+
+async function commandExists(cmd) {
+  return commandExistsImpl(cmd);
+}
+
+function shouldConvertAudioToWav(mimeType) {
+  return shouldConvertAudioToWavImpl(mimeType, CFG);
+}
+
+function shouldConvertAudioToMp3(filePath, mimeType) {
+  return shouldConvertAudioToMp3Impl(filePath, mimeType, CFG);
+}
+
+async function convertAudioToWav(inputPath, outputPath, reqId) {
+  return convertAudioToWavImpl(inputPath, outputPath, reqId, audioConverterOverride);
+}
+
+async function convertAudioToMp3(inputPath, outputPath, reqId) {
+  return convertAudioToMp3Impl(inputPath, outputPath, reqId, audioConverterOverride);
+}
+
+async function probeAudioInfo(filePath, reqId) {
+  return probeAudioInfoImpl(filePath, reqId);
+}
+
+async function resolveAudioMime({ filePath, mimeType, filename, url, sniffedMime, reqId }) {
+  return resolveAudioMimeImpl({ filePath, mimeType, filename, url, sniffedMime, reqId }, CFG);
+}
+
+function ensureAudioFileExtMatchesMime(filePath, mimeType) {
+  return ensureAudioFileExtMatchesMimeImpl(filePath, mimeType);
+}
+
+async function downloadToTemp(url, filepath) {
+  return downloadToTempImpl(url, filepath, fetchMedia, CFG);
+}
+
+async function downloadAudioBuffer(mediaInput, reqId) {
+  return downloadAudioBufferImpl(mediaInput, reqId, fetchMedia, CFG, audioDownloaderOverride);
+}
+
+async function transcribeAudioOpenAI(
+  { filePath, model, mimeType = "", filename = "", reqId = null, language = null },
+  openaiClient
+) {
+  return transcribeAudioOpenAIImpl(
+    { filePath, model, mimeType, filename, reqId, language },
+    openaiClient,
+    CFG,
+    toFileImpl,
+    normalizeLanguageHintImpl,
+    audioTranscriberOverride
+  );
+}
+
+async function transcribeAudioFile(filePath, mimeType, language) {
+  return transcribeAudioFileImpl(
+    filePath,
+    mimeType,
+    language,
+    getOpenAIClient,
+    CFG,
+    toFileImpl,
+    normalizeLanguageHintImpl,
+    audioTranscriberOverride
+  );
+}
+
+function buildPipelineTranscriber(reqId) {
+  return buildPipelineTranscriberImpl(reqId, getOpenAIClient, CFG, toFileImpl, normalizeLanguageHintImpl);
+}
+
 function guessMediaKind(meta) {
   const mime = String((meta && (meta.mime || meta.mimetype || meta.mimeType || meta.contentType || meta.type)) || "").toLowerCase();
   const type = String((meta && meta.type) || "").toLowerCase();
