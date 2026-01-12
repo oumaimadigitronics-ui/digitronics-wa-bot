@@ -110,6 +110,37 @@ import {
   parseUserQuery as parseUserQueryImpl
 } from './project/src/services/nlp/index.js';
 
+import {
+  BRAND_PRIORITY as BRAND_PRIORITY_IMPL,
+  MAX_OFFERS as MAX_OFFERS_IMPL,
+  brandRank as brandRankImpl,
+  rankOffers as rankOffersImpl,
+  pickCheapestPerBrand as pickCheapestPerBrandImpl,
+  pickFirstPerBrand as pickFirstPerBrandImpl,
+  normalizeOfferItem as normalizeOfferItemImpl,
+  isTvOffer as isTvOfferImpl,
+  matchTvSynonym as matchTvSynonymImpl,
+  matchTvTitleHint as matchTvTitleHintImpl,
+  inferTvCanonFromOffers as inferTvCanonFromOffersImpl,
+  getTvFilterInfo as getTvFilterInfoImpl,
+  formatSize as formatSizeImpl,
+  buildOfferDisplayName as buildOfferDisplayNameImpl,
+  formatOfferLine as formatOfferLineImpl,
+  offersHeader as offersHeaderImpl,
+  offersTemplate as offersTemplateImpl,
+  buildPremiumOffersReply as buildPremiumOffersReplyImpl,
+  listOffersForBrand as listOffersForBrandImpl,
+  listOffersForSizeAcrossBrands as listOffersForSizeAcrossBrandsImpl,
+  collectTvOffers as collectTvOffersImpl,
+  bestGuessOffers as bestGuessOffersImpl,
+  defaultTvOffersForReceiver as defaultTvOffersForReceiverImpl,
+  setFormattingConfig,
+  setFormattingHelpers,
+  setServiceConfig,
+  setServiceHelpers,
+  refreshOffersReference,
+} from './project/src/services/offers/index.js';
+
 let toFileImpl = toFile;
 
 const app = express();
@@ -308,6 +339,11 @@ const FOCUS = {
   mode: String(FOCUS_MODE || "preferred").trim().toLowerCase(),
 };
 
+// Initialize offers service modules with configuration
+// (This needs to be after CFG, logger, debugLog are defined but before wrapper functions)
+// Note: Some helper functions like ensureNoQuestion are defined later in the file,
+// so we'll set those up after they're defined
+
 // Wrapper functions that call the WooCommerce service with necessary parameters
 function wcAuthHeader() {
   return wcAuthHeaderImpl(CFG);
@@ -409,6 +445,8 @@ function updateOffersReferences() {
   OFFERS = getOffers();
   OFFERS_INDEX = getOffersIndex();
   lastOffersSync = getLastOffersSync();
+  // Update offers module reference
+  refreshOffersReference();
 }
 
 const CONTACTS = {
@@ -417,20 +455,10 @@ const CONTACTS = {
 };
 
 // RULE #1 no questions
-const BRAND_PRIORITY = [
-  "TCL",
-  "Daiko",
-  "Haier",
-  "Samsung",
-  "LG",
-  "Elexia",
-  "Revolution",
-  "Visio",
-  "Echolink",
-  "Hisense",
-  "Tivoli",
-];
-const MAX_OFFERS = 3;
+// Brand priority and max offers are now defined in offersRanking.js
+// but we keep constants here for backward compatibility
+const BRAND_PRIORITY = BRAND_PRIORITY_IMPL;
+const MAX_OFFERS = MAX_OFFERS_IMPL;
 
 const COMPANY = {
   name: "Digitronics",
@@ -476,29 +504,14 @@ function offersFallbackMessage() {
 // Removed BRAND_KNOWLEDGE - tech knowledge functionality removed
 
 // RULE #1 no questions
-// Cache brand rank map for performance - initialized lazily to avoid circular dependency
-let BRAND_RANK_MAP = null;
-
+// brandRank and getBrandRankMap now delegated to offersRanking module
 function getBrandRankMap() {
-  if (!BRAND_RANK_MAP) {
-    BRAND_RANK_MAP = new Map(BRAND_PRIORITY.map((b, idx) => [normMatch(b), idx]));
-  }
-  return BRAND_RANK_MAP;
+  // This function is now handled by the offers module, but we keep a wrapper for compatibility
+  return new Map(BRAND_PRIORITY.map((b, idx) => [normMatch(b), idx]));
 }
 
 function brandRank(name, priority = BRAND_PRIORITY) {
-  const normalized = normMatch(name || "");
-  
-  // Use cached map if using default priority
-  if (priority === BRAND_PRIORITY) {
-    const rank = getBrandRankMap().get(normalized);
-    return Number.isInteger(rank) ? rank : Number.POSITIVE_INFINITY;
-  }
-  
-  // Fallback for custom priority (rare case)
-  const customMap = new Map(priority.map((b, idx) => [normMatch(b), idx]));
-  const rank = customMap.get(normalized);
-  return Number.isInteger(rank) ? rank : Number.POSITIVE_INFINITY;
+  return brandRankImpl(name, priority);
 }
 
 function getOpenAIClient() {
@@ -857,6 +870,34 @@ function stripUrlQueriesInText(text) {
 const ORDER_FORM_URL_SAFE = sanitizeUrlNoQuestion(ORDER_FORM_URL);
 const MAPS_URL_RAW = "https://maps.app.goo.gl/sLuZQCt74KVkq39H7?g_st=aw";
 const MAPS_URL_SAFE = sanitizeUrlNoQuestion(MAPS_URL_RAW);
+
+// Initialize offers service modules now that all dependencies are available
+setFormattingConfig({
+  FEATURE_OFFERS_BOX_HEADER,
+  FEATURE_OFFER_TAIL_COMPACT,
+  FEATURE_SHOW_SKU_IN_OFFERS,
+  FEATURE_LEGACY_OFFER_LINE,
+  FEATURE_LEGACY_OFFER_DISPLAY_NAME,
+  FEATURE_OFFER_ITEM_EMOJI_FORMAT,
+  CFG,
+  ORDER_FORM_URL_SAFE,
+});
+
+setFormattingHelpers({
+  ensureNoQuestion,
+  stripUrlQueriesInText,
+});
+
+setServiceConfig({
+  FEATURE_STRICT_STOCK_FILTER,
+  LOG_DEBUG,
+  debugLog,
+  logger,
+  CFG,
+});
+
+// Note: getCtx and setCtx are defined later, so we'll set those in a separate call
+// after they're defined (search for "setServiceHelpers" below)
 
 function stripNonPurchaseUrls(text) {
   const s = String(text || "");
@@ -2012,6 +2053,13 @@ function getCtx(key) {
   }
   return v;
 }
+
+// Now that getCtx and setCtx are defined, initialize offers service helpers
+setServiceHelpers({
+  getCtx,
+  setCtx,
+  ensureNoQuestion,
+});
 
 function normalizeCategoryName(name) {
   return normalizeCategoryNameImpl(name, OFFERS_INDEX);
