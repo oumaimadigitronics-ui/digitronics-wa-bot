@@ -18,7 +18,9 @@ export {
   isConfusedIntent,
   isSupportIntent,
   isBuyIntent,
-  hasQuantitySignal
+  hasQuantitySignal,
+  isOrderStatusIntent,
+  isProductAdviceIntent
 } from './intents.js';
 
 // Re-export routing function

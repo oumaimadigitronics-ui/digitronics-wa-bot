@@ -16,9 +16,151 @@ import {
   arabicIndicToAsciiDigits
 } from '../lib/textUtils.js';
 
-// Note: isOrderStatusIntent and isProductAdviceIntent still come from server.js
-// These will be handled in a future phase when server.js is fully modularized
-// For now, intents.js is used by server.js, so these references work via closure
+/**
+ * Helper function to extract order number from text
+ * @param {string} text - Input text
+ * @returns {string|null} Order number if found
+ */
+function extractOrderNumber(text) {
+  const s = arabicIndicToAsciiDigits(String(text || ""));
+  const m = s.match(/\b\d{4,12}\b/);
+  if (m && m[0]) return m[0];
+  return null;
+}
+
+/**
+ * Detects if the user is asking about order status/tracking
+ * @param {string} text - The user's message text
+ * @returns {boolean} True if order status intent is detected
+ */
+export function isOrderStatusIntent(text) {
+  const raw = String(text || "");
+  const s = normMatch(raw);
+
+  const orderNo = extractOrderNumber(raw);
+  const hasDigits = Boolean(orderNo);
+
+  const orderWords = [
+    "commande",
+    "commende",
+    "order",
+    "tracking",
+    "suivi",
+    "statut",
+    "status",
+    "numero",
+    "num",
+    "رقم",
+    "الطلب",
+    "طلب",
+    "commande رقم",
+    "num commande",
+  ];
+
+  const progressWords = [
+    "ou est",
+    "où est",
+    "where",
+    "fin",
+    "فين",
+    "wsl",
+    "wsla",
+    "wasla",
+    "matwsl",
+    "ma wslatch",
+    "ma wslat",
+    "ma wslatch",
+    "retard",
+    "late",
+    "delayed",
+    "pas recu",
+    "pas reçu",
+    "لم اتوصل",
+    "ما توصلتش",
+    "متأخر",
+    "تأخر",
+    "واصلة",
+    "وصل",
+    "وصلات",
+    "توصلت",
+  ];
+
+  let hasOrderWord = false;
+  for (let i = 0; i < orderWords.length; i += 1) {
+    const k = normMatch(orderWords[i]);
+    if (k && s.indexOf(k) >= 0) {
+      hasOrderWord = true;
+      break;
+    }
+  }
+
+  let hasProgressWord = false;
+  for (let i = 0; i < progressWords.length; i += 1) {
+    const k = normMatch(progressWords[i]);
+    if (k && s.indexOf(k) >= 0) {
+      hasProgressWord = true;
+      break;
+    }
+  }
+
+  if (hasOrderWord) return true;
+
+  if (hasProgressWord && hasDigits) return true;
+
+  if (hasProgressWord) {
+    if (s.indexOf("commande") >= 0) return true;
+    if (s.indexOf("رقم") >= 0) return true;
+    if (s.indexOf("الطلب") >= 0) return true;
+    if (s.indexOf("طلب") >= 0) return true;
+  }
+
+  return false;
+}
+
+/**
+ * Detects if the user is asking for product advice/comparison
+ * @param {string} text - The user's message text
+ * @returns {boolean} True if product advice intent is detected
+ */
+export function isProductAdviceIntent(text) {
+  const s = normMatch(arabicIndicToAsciiDigits(text)).toLowerCase();
+  if (!s) return false;
+  const normalized = s.replace(/['']/g, " ").replace(/\s+/g, " ").trim();
+
+  const priceTokens = ["price", "prix", "ثمن", "سعر"];
+  const advicePhrases = [
+    "difference",
+    "différence",
+    "compare",
+    "comparaison",
+    "which one",
+    "c est quoi le mieux",
+    "c'est quoi le mieux",
+    "شنو احسن",
+    "شنو أحسن",
+  ];
+  const adviceTokens = [
+    "better",
+    "best",
+    "mieux",
+    "meilleur",
+    "vs",
+    "الفرق",
+    "فرق",
+    "مقارنة",
+    "أحسن",
+    "احسن",
+    "ولا",
+    "مزيان",
+  ];
+
+  const hasAdvice =
+    advicePhrases.some((phrase) => normalized.includes(normMatch(phrase))) ||
+    adviceTokens.some((token) => includesToken(normalized, token));
+  const hasPrice = priceTokens.some((token) => includesToken(normalized, token));
+  if (hasPrice && !hasAdvice) return false;
+  return hasAdvice;
+}
 
 /**
  * Detects if the user wants contact information (location, phone, email)

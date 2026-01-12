@@ -23,6 +23,8 @@ import {
   isSupportIntent,
   isBuyIntent,
   hasQuantitySignal,
+  isOrderStatusIntent,
+  isProductAdviceIntent,
   routeTemplate
 } from './project/src/domain/index.js';
 
@@ -2189,45 +2191,6 @@ function isOnlyEmojiOrPunct(raw) {
 
 
 
-function isProductAdviceIntent(text) {
-  const s = normMatch(arabicIndicToAsciiDigits(text)).toLowerCase();
-  if (!s) return false;
-  const normalized = s.replace(/[’']/g, " ").replace(/\s+/g, " ").trim();
-
-  const priceTokens = ["price", "prix", "ثمن", "سعر"];
-  const advicePhrases = [
-    "difference",
-    "différence",
-    "compare",
-    "comparaison",
-    "which one",
-    "c est quoi le mieux",
-    "c'est quoi le mieux",
-    "شنو احسن",
-    "شنو أحسن",
-  ];
-  const adviceTokens = [
-    "better",
-    "best",
-    "mieux",
-    "meilleur",
-    "vs",
-    "الفرق",
-    "فرق",
-    "مقارنة",
-    "أحسن",
-    "احسن",
-    "ولا",
-    "مزيان",
-  ];
-
-  const hasAdvice =
-    advicePhrases.some((phrase) => normalized.includes(normMatch(phrase))) ||
-    adviceTokens.some((token) => includesToken(normalized, token));
-  const hasPrice = priceTokens.some((token) => includesToken(normalized, token));
-  if (hasPrice && !hasAdvice) return false;
-  return hasAdvice;
-}
 
 function hasTvSizeInQuery(raw) {
   const s = arabicIndicToAsciiDigits(String(raw || "")).toLowerCase();
@@ -8683,89 +8646,6 @@ function isNoOrderNumberIntent(text) {
   return false;
 }
 
-function isOrderStatusIntent(text) {
-  const raw = String(text || "");
-  const s = normMatch(raw);
-
-  const orderNo = extractOrderNumber(raw);
-  const hasDigits = Boolean(orderNo);
-
-  const orderWords = [
-    "commande",
-    "commende",
-    "order",
-    "tracking",
-    "suivi",
-    "statut",
-    "status",
-    "numero",
-    "num",
-    "رقم",
-    "الطلب",
-    "طلب",
-    "commande رقم",
-    "num commande",
-  ];
-
-  const progressWords = [
-    "ou est",
-    "où est",
-    "where",
-    "fin",
-    "فين",
-    "wsl",
-    "wsla",
-    "wasla",
-    "matwsl",
-    "ma wslatch",
-    "ma wslat",
-    "ma wslatch",
-    "retard",
-    "late",
-    "delayed",
-    "pas recu",
-    "pas reçu",
-    "لم اتوصل",
-    "ما توصلتش",
-    "متأخر",
-    "تأخر",
-    "واصلة",
-    "وصل",
-    "وصلات",
-    "توصلت",
-  ];
-
-  let hasOrderWord = false;
-  for (let i = 0; i < orderWords.length; i += 1) {
-    const k = normMatch(orderWords[i]);
-    if (k && s.indexOf(k) >= 0) {
-      hasOrderWord = true;
-      break;
-    }
-  }
-
-  let hasProgressWord = false;
-  for (let i = 0; i < progressWords.length; i += 1) {
-    const k = normMatch(progressWords[i]);
-    if (k && s.indexOf(k) >= 0) {
-      hasProgressWord = true;
-      break;
-    }
-  }
-
-  if (hasOrderWord) return true;
-
-  if (hasProgressWord && hasDigits) return true;
-
-  if (hasProgressWord) {
-    if (s.indexOf("commande") >= 0) return true;
-    if (s.indexOf("رقم") >= 0) return true;
-    if (s.indexOf("الطلب") >= 0) return true;
-    if (s.indexOf("طلب") >= 0) return true;
-  }
-
-  return false;
-}
 
 function isLocationIntent(text) {
   if (isOrderStatusIntent(text)) return false;

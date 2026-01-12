@@ -15,7 +15,8 @@ import {
   isContactIntent,
   isDeliveryIntent,
   isPaymentIntent,
-  isWarrantyIntent
+  isWarrantyIntent,
+  isProductAdviceIntent
 } from './intents.js';
 
 import {
@@ -29,10 +30,6 @@ import {
   WARRANTY_TEMPLATE
 } from '../services/replies/templates.js';
 
-// Note: isProductAdviceIntent and resolveAdvice still come from server.js
-// These will be handled in a future phase when server.js is fully modularized
-// For now, routing.js is used by server.js, so these references work via closure
-
 /**
  * Routes a user message to the appropriate response template(s)
  * 
@@ -40,17 +37,25 @@ import {
  * 1. Angry customers → ESCALATION_TEMPLATE (highest priority)
  * 2. Confused customers → CLARITY_TEMPLATE
  * 3. Support issues → SUPPORT_TEMPLATE
- * 4. Product advice → resolveAdvice()
+ * 4. Product advice → resolveAdviceFn() if provided
  * 5. Multiple intents → Combined templates (buy, contact, delivery, payment, warranty)
  * 
  * @param {string} text - The user's message text
+ * @param {Object} options - Optional configuration
+ * @param {Function} options.resolveAdviceFn - Optional advice resolver function from server.js
  * @returns {string|null} The appropriate template(s) or null if no match
  */
-export function routeTemplate(text) {
+export function routeTemplate(text, options = {}) {
+  const { resolveAdviceFn } = options;
+  
   if (isAngryIntent(text)) return ESCALATION_TEMPLATE;
   if (isConfusedIntent(text)) return CLARITY_TEMPLATE;
   if (isSupportIntent(text)) return SUPPORT_TEMPLATE;
-  if (isProductAdviceIntent(text)) return resolveAdvice(text, {});
+  
+  // If product advice intent detected and resolver provided, use it
+  if (isProductAdviceIntent(text) && typeof resolveAdviceFn === 'function') {
+    return resolveAdviceFn(text, {});
+  }
 
   const templates = [];
   if (isBuyIntent(text) || hasQuantitySignal(text)) templates.push(BUY_INTENT_TEMPLATE);
