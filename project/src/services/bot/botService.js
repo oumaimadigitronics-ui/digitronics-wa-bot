@@ -7,7 +7,6 @@ import { extractMoroccoPhone, hasMoroccoPhone, phoneConfirmReply } from '../lang
 import { isBatteryTvIntent, powerIntentReply } from '../lang/powerIntent.js';
 import { hasBye, isThanks, thanksReply } from '../lang/thanks.js';
 import { buildMainMenu } from '../menu/menuBuilder.js';
-import { transcribeAudio } from '../stt/sttService.js';
 import { STRONG_CATEGORY_KEYWORDS, WEAK_CATEGORY_KEYWORDS } from '../../knowledge/catalog.js';
 import { extractBudgetMad, detectCategory, isPriceQuery } from '../nlp/extractPriceQuery.js';
 import { maybeAnswerFromCatalogOrEscalate } from '../guardrails/catalogEvidenceGuardrail.js';
@@ -149,11 +148,10 @@ function getOffersForCategory(offersIndex, categoryKey) {
 }
 
 export class BotService {
-  constructor({ memoryStore, offersIndex, cfg, sttService } = {}) {
+  constructor({ memoryStore, offersIndex, cfg } = {}) {
     this.memoryStore = memoryStore;
     this.offersIndex = offersIndex;
     this.cfg = cfg;
-    this.sttService = sttService || { transcribeAudio };
   }
 
   async handleNotification(body = {}, context = {}) {
@@ -195,18 +193,8 @@ export class BotService {
     if (!userText) {
       const audioPayload = getAudioPayload(body);
       if (audioPayload) {
-        const preferredLangHint = preferredLang || (body.text ? detectUserLanguage(body.text) : '');
-        const transcript = await this.sttService?.transcribeAudio?.({
-          ...audioPayload,
-          preferredLangHint,
-          requestId: botContext.requestId,
-          cfg: this.cfg,
-        });
-        if (transcript) {
-          userText = transcript;
-        } else {
-          sttFailed = true;
-        }
+        // Audio functionality removed - set fallback message
+        sttFailed = true;
       }
     }
 
