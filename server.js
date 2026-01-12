@@ -63,6 +63,7 @@ import {
   getBrandFromWoo as getBrandFromWooImpl,
   getTvSizeFromProduct as getTvSizeFromProductImpl,
   getSizeFromNameSku as getSizeFromNameSkuImpl,
+  extractAllowedTvSizeFromString as extractAllowedTvSizeFromStringImpl,
   getCapacityFromProduct as getCapacityFromProductImpl,
   extractClassFromAttributes as extractClassFromAttributesImpl,
   getClassFromCategories as getClassFromCategoriesImpl,
@@ -318,6 +319,10 @@ function getTvSizeFromProduct(p) {
 
 function getSizeFromNameSku(p) {
   return getSizeFromNameSkuImpl(p);
+}
+
+function extractAllowedTvSizeFromString(str, opts) {
+  return extractAllowedTvSizeFromStringImpl(str, opts);
 }
 
 function getCapacityFromProduct(p) {

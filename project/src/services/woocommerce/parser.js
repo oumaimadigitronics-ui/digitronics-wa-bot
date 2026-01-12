@@ -2,7 +2,7 @@
  * WooCommerce product parsing functions
  */
 
-import { normMatch, includesToken, arabicIndicToAsciiDigits } from "../../../lib/textUtils.js";
+import { normMatch, includesToken, arabicIndicToAsciiDigits } from "../../lib/textUtils.js";
 
 /**
  * Brand priority for brand inference
@@ -153,7 +153,13 @@ function isSizeAttrKey(name) {
  * @param {Object} opts - Options
  * @returns {number} TV size or 0
  */
-function extractAllowedTvSizeFromString(str, opts = {}) {
+/**
+ * Extract allowed TV size from string
+ * @param {string} str - String to parse
+ * @param {Object} opts - Options
+ * @returns {number} TV size or 0
+ */
+export function extractAllowedTvSizeFromString(str, opts = {}) {
   const s0 = arabicIndicToAsciiDigits(String(str || ""));
   if (!s0) return 0;
   const s = s0.toLowerCase();

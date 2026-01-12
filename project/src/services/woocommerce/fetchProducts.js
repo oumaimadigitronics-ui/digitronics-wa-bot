@@ -2,7 +2,7 @@
  * WooCommerce API functions for fetching products
  */
 
-import { getFetch } from "../../../src/deps.js";
+import { getFetch } from "../../../../src/deps.js";
 
 /**
  * Global state for WooCommerce fetch function override (for testing)

@@ -19,6 +19,7 @@ export {
   getBrandFromWoo,
   getTvSizeFromProduct,
   getSizeFromNameSku,
+  extractAllowedTvSizeFromString,
   getCapacityFromProduct,
   extractClassFromAttributes,
   getClassFromCategories,

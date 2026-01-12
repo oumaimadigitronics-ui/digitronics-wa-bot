@@ -2,7 +2,7 @@
  * WooCommerce sync and refresh logic
  */
 
-import { normMatch, includesToken } from "../../../lib/textUtils.js";
+import { normMatch, includesToken } from "../../lib/textUtils.js";
 import { buildWooUrl, wcFetchJson } from "./fetchProducts.js";
 import { offerFromWooProduct, getBrandFromWoo } from "./parser.js";
 
