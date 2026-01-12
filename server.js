@@ -168,32 +168,19 @@ import {
 } from './project/src/services/conversation/index.js';
 
 import {
-  isAudioMime as isAudioMimeImpl,
-  cleanMimeType as cleanMimeTypeImpl,
-  sniffAudioMime as sniffAudioMimeImpl,
-  extFromAudioMime as extFromAudioMimeImpl,
-  inferMimeFromPath as inferMimeFromPathImpl,
-  isAudioMeta as isAudioMetaImpl,
-  mimeFromProbe as mimeFromProbeImpl,
-  sanitizeLogSnippet as sanitizeLogSnippetImpl,
-  readAudioHeader as readAudioHeaderImpl,
-  isInvalidAudioPayload as isInvalidAudioPayloadImpl,
-  validateDownloadedAudio as validateDownloadedAudioImpl,
-  execFilePromise as execFilePromiseImpl,
-  commandExists as commandExistsImpl,
-  shouldConvertAudioToWav as shouldConvertAudioToWavImpl,
-  shouldConvertAudioToMp3 as shouldConvertAudioToMp3Impl,
-  convertAudioToWav as convertAudioToWavImpl,
-  convertAudioToMp3 as convertAudioToMp3Impl,
-  probeAudioInfo as probeAudioInfoImpl,
-  resolveAudioMime as resolveAudioMimeImpl,
-  ensureAudioFileExtMatchesMime as ensureAudioFileExtMatchesMimeImpl,
-  downloadToTemp as downloadToTempImpl,
-  downloadAudioBuffer as downloadAudioBufferImpl,
-  transcribeAudioOpenAI as transcribeAudioOpenAIImpl,
-  transcribeAudioFile as transcribeAudioFileImpl,
-  buildPipelineTranscriber as buildPipelineTranscriberImpl,
-} from './project/src/services/audio/index.js';
+  sniffImageMime as sniffImageMimeImpl,
+  toImageUrlString as toImageUrlStringImpl,
+  isVisionCapableModel as isVisionCapableModelImpl,
+  pickVisionModel as pickVisionModelImpl,
+  describeImage as describeImageImpl,
+  parseVisionJson as parseVisionJsonImpl,
+  deriveVisionHintsFromText as deriveVisionHintsFromTextImpl,
+  normalizeVisionResult as normalizeVisionResultImpl,
+  analyzeProductImage as analyzeProductImageImpl,
+  selectOffersFromVision as selectOffersFromVisionImpl,
+  handleVisionMedia as handleVisionMediaImpl,
+  VISION_CATEGORY_MAP as VISION_CATEGORY_MAP_IMPL,
+} from './project/src/services/vision/index.js';
 
 let toFileImpl = toFile;
 
@@ -847,27 +834,6 @@ function ensureNoQuestion(text) {
 
 function shortenNoQuestion(text, max, logContext) {
   return shortenNoQuestionImpl(text, max, logContext, { CFG, shorten });
-}
-
-function sniffImageMime(buf) {
-  if (!Buffer.isBuffer(buf)) return "";
-  if (buf.length >= 3 && buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff) return "image/jpeg";
-  if (
-    buf.length >= 8 &&
-    buf[0] === 0x89 &&
-    buf[1] === 0x50 &&
-    buf[2] === 0x4e &&
-    buf[3] === 0x47 &&
-    buf[4] === 0x0d &&
-    buf[5] === 0x0a &&
-    buf[6] === 0x1a &&
-    buf[7] === 0x0a
-  )
-    return "image/png";
-  if (buf.length >= 12 && buf.slice(0, 4).toString("ascii") === "RIFF" && buf.slice(8, 12).toString("ascii") === "WEBP")
-    return "image/webp";
-  if (buf.length >= 4 && buf.slice(0, 4).toString("ascii") === "GIF8") return "image/gif";
-  return "";
 }
 
 function formatSize(lang, size) {
@@ -3049,12 +3015,87 @@ function priceSummaryText(lang, min, max) {
  * 3) map the JSON to our offer selection hints (selectOffersFromVision)
  * 4) build a reply using the same ranking/formatting used for text routes
  */
-const VISION_CATEGORY_MAP = {
-  tv: { cls: "Tv", category: "Tv" },
-  refrigerateur: { cls: "Refrigerateur", category: "Refrigerateur" },
-  cuisiniere: { cls: "Cuisiniere", category: "Cuisiniere" },
-  lave_linge: { cls: "Machine A Laver", category: "Machine A Laver" },
-};
+const VISION_CATEGORY_MAP = VISION_CATEGORY_MAP_IMPL;
+
+// Vision service wrappers
+const sniffImageMime = sniffImageMimeImpl;
+const toImageUrlString = toImageUrlStringImpl;
+const isVisionCapableModel = isVisionCapableModelImpl;
+const describeImage = describeImageImpl;
+const parseVisionJson = parseVisionJsonImpl;
+const normalizeVisionResult = normalizeVisionResultImpl;
+
+// Vision functions that need dependency injection
+function pickVisionModel() {
+  return pickVisionModelImpl(CFG, OPENAI_MODEL);
+}
+
+function deriveVisionHintsFromText(rawText) {
+  return deriveVisionHintsFromTextImpl(rawText, {
+    normMatch,
+    includesToken,
+    offersIndex: OFFERS_INDEX,
+    brandPriority: BRAND_PRIORITY,
+  });
+}
+
+function analyzeProductImage(imageBytes, mimeType, opts = {}) {
+  return analyzeProductImageImpl(imageBytes, mimeType, opts, {
+    openaiClient: getOpenAIClient(),
+    cfg: CFG,
+    defaultModel: OPENAI_MODEL,
+    normMatch,
+    includesToken,
+    offersIndex: OFFERS_INDEX,
+    brandPriority: BRAND_PRIORITY,
+  });
+}
+
+function selectOffersFromVision(hints) {
+  return selectOffersFromVisionImpl(hints, {
+    offersIndex: OFFERS_INDEX,
+    offers: OFFERS,
+    featureAssumeTvOnBrandOnly: FEATURE_ASSUME_TV_ON_BRAND_ONLY,
+    listOffersForBrand,
+    maxOffers: MAX_OFFERS,
+    normMatch,
+    rankOffers,
+    pickCheapestPerBrand,
+  });
+}
+
+async function handleVisionMedia(mediaInput, lang, key, opts = {}) {
+  return handleVisionMediaImpl(mediaInput, lang, key, opts, {
+    normalizeMediaInput,
+    downloadMediaBuffer,
+    visionAnalyzer,
+    cfg: CFG,
+    defaultModel: OPENAI_MODEL,
+    openaiClient: getOpenAIClient(),
+    offersHeader,
+    buildPremiumOffersReply,
+    fallbackWithAgent,
+    titleFromHeader,
+    shortenNoQuestion,
+    ensureNoQuestion,
+    sanitizeDerivedText,
+    tryDirectOfferAnswer,
+    t,
+    stripNonPurchaseUrls,
+    setCtx,
+    buildOfferContextEntries,
+    offersIndex: OFFERS_INDEX,
+    offers: OFFERS,
+    featureAssumeTvOnBrandOnly: FEATURE_ASSUME_TV_ON_BRAND_ONLY,
+    listOffersForBrand,
+    maxOffers: MAX_OFFERS,
+    normMatch,
+    rankOffers,
+    pickCheapestPerBrand,
+    includesToken,
+    brandPriority: BRAND_PRIORITY,
+  });
+}
 
 let visionAnalyzer = analyzeProductImage;
 let mediaFetcherOverride = null;
@@ -3462,517 +3503,559 @@ async function downloadMediaBuffer(mediaInput) {
   };
 }
 
-function parseVisionJson(rawText) {
-  if (rawText && typeof rawText === "object") return { ok: true, obj: rawText };
-  const txt = String(rawText || "").trim();
-  if (!txt) return { ok: false, raw: "" };
-  const cleaned = txt.replace(/^```json\s*/i, "").replace(/```$/g, "").trim();
+function isAudioMime(mime) {
+  const m = String(mime || "").toLowerCase();
+  return m.startsWith("audio/") || m === "application/ogg";
+}
+
+function cleanMimeType(input) {
+  if (!input) return "";
+  const normalized = String(input || "").trim().toLowerCase();
+  if (!normalized) return "";
+  const base = normalized.split(";")[0].trim();
+  if (base === "audio/opus" || base === "application/ogg") return "audio/ogg";
+  return base;
+}
+
+function sanitizeLogSnippet(buffer, maxBytes = 120) {
+  const raw = Buffer.isBuffer(buffer) ? buffer : Buffer.from(buffer || []);
+  return raw
+    .slice(0, maxBytes)
+    .toString("utf8")
+    .replace(/[^\x20-\x7E]+/g, " ")
+    .trim();
+}
+
+function getUrlHost(url) {
+  if (!url) return null;
+  if (String(url).startsWith("data:")) return "data";
   try {
-    const obj = JSON.parse(cleaned);
-    return { ok: true, obj };
-  } catch {}
-
-  const start = cleaned.indexOf("{");
-  const end = cleaned.lastIndexOf("}");
-  if (start >= 0 && end > start) {
-    const slice = cleaned.slice(start, end + 1);
-    try {
-      const obj = JSON.parse(slice);
-      return { ok: true, obj };
-    } catch {}
+    return new URL(String(url)).host || null;
+  } catch {
+    return null;
   }
-
-  return { ok: false, raw: cleaned };
 }
 
-function deriveVisionHintsFromText(rawText) {
-  const txt = String(rawText || "").trim();
-  if (!txt) return null;
-
-  const normalized = normMatch(txt);
-  const out = {
-    category: "other",
-    brand: null,
-    model: null,
-    size_inches: null,
-    capacity_liters: null,
-    confidence: 0.15,
-  };
-
-  const brandsPool = [...new Set([...(OFFERS_INDEX.brands || []), ...(BRAND_PRIORITY || [])])];
-  for (let i = 0; i < brandsPool.length; i += 1) {
-    const b = brandsPool[i];
-    if (includesToken(txt, b)) {
-      out.brand = b;
-      break;
-    }
+function readAudioHeader(filePath, maxBytes = 256) {
+  const fd = fs.openSync(filePath, "r");
+  try {
+    const buf = Buffer.alloc(maxBytes);
+    const bytesRead = fs.readSync(fd, buf, 0, maxBytes, 0);
+    return buf.slice(0, bytesRead);
+  } finally {
+    fs.closeSync(fd);
   }
-
-  const sizeMatch = txt.match(/(\d{2,3})\s*(?:"|pouce|pouces|inch|inches|po|in)?/i);
-  if (sizeMatch) {
-    const sizeNum = Number(sizeMatch[1]);
-    if (Number.isFinite(sizeNum) && sizeNum >= 14 && sizeNum <= 120) {
-      out.size_inches = sizeNum;
-      out.category = out.category === "other" ? "tv" : out.category;
-    }
-  }
-
-  const capMatch = txt.match(/(\d{2,4})\s*(?:l|litre|litres)/i);
-  if (capMatch) {
-    const capNum = Number(capMatch[1]);
-    if (Number.isFinite(capNum) && capNum >= 20 && capNum <= 1200) {
-      out.capacity_liters = capNum;
-      out.category = out.category === "other" ? "refrigerateur" : out.category;
-    }
-  }
-
-  if (/\btv\b|tele|écran|ecran|screen|qled|oled/.test(normalized)) out.category = "tv";
-  else if (/frigo|refrigerateur|réfrigérateur/.test(normalized)) out.category = "refrigerateur";
-  else if (/cuisiniere|four/.test(normalized)) out.category = "cuisiniere";
-  else if (/lave\s*linge|machine\s*a\s*laver/.test(normalized)) out.category = "lave_linge";
-  else if (/clim|climatiseur|ac/.test(normalized)) out.category = "climatiseur";
-
-  if (!out.brand && txt.length <= 80) out.model = txt;
-
-  return out;
 }
 
-function normalizeVisionResult(obj) {
-  const o = obj && typeof obj === "object" ? obj : {};
-  const category = String(o.category || "").toLowerCase();
-  const brand = String(o.brand || "").trim();
-  const model = String(o.model || "").trim();
-  const sizeInches = Number(o.size_inches);
-  const capacityLiters = Number(o.capacity_liters);
-  const confidence = Number(o.confidence);
-
-  return {
-    category,
-    brand: brand || null,
-    model: model || null,
-    size_inches: Number.isFinite(sizeInches) ? sizeInches : null,
-    capacity_liters: Number.isFinite(capacityLiters) ? capacityLiters : null,
-    confidence: Number.isFinite(confidence) && confidence >= 0 && confidence <= 1 ? confidence : 0,
-  };
+function isInvalidAudioPayload(headerBuf) {
+  const txt = (headerBuf || Buffer.alloc(0)).toString("utf8").trim();
+  if (!txt) return false;
+  const lower = txt.toLowerCase();
+  if (lower.startsWith("<html") || lower.startsWith("<?xml") || lower.startsWith("{")) return true;
+  if (lower.includes("forbidden") || lower.includes("access denied")) return true;
+  return false;
 }
 
-function toImageUrlString(image, mime = "image/jpeg") {
-  if (typeof image === "string") {
-    if (/^(https?:|data:)/i.test(image)) return image;
-    throw new Error("Image string must start with http or data:");
-  }
+// Reject tiny or non-audio payloads before transcription to avoid OpenAI 400 errors.
+function validateDownloadedAudio({ filePath, sizeBytes, url, reqId }) {
+  const stats = fs.statSync(filePath);
+  const actualSize = sizeBytes || stats.size || 0;
+  const header = readAudioHeader(filePath, 256);
+  const host = getUrlHost(url);
 
-  if (Buffer.isBuffer(image) || image instanceof Uint8Array) {
-    const buf = Buffer.isBuffer(image) ? image : Buffer.from(image);
-    const b64 = buf.toString("base64");
-    return `data:${mime};base64,${b64}`;
-  }
-
-  if (image && typeof image === "object") {
-    if (typeof image.url === "string") return toImageUrlString(image.url, mime);
-    console.error("Invalid image object keys:", Object.keys(image || {}));
-    throw new Error("Unsupported image object for vision: expected string, Buffer/Uint8Array, or { url }");
-  }
-
-  throw new Error("Unsupported image type for vision input");
-}
-
-async function describeImage({ image, model }, openaiClient) {
-  const client = openaiClient || getOpenAIClient();
-  const imageUrl = toImageUrlString(image);
-  console.log("vision image typeof:", typeof image, "isBuffer:", Buffer.isBuffer(image));
-  if (typeof imageUrl === "string" && /^(data:|https?:)/i.test(imageUrl)) {
-    console.log("vision image_url preview:", imageUrl.slice(0, 80));
-  }
-  const resp = await client.responses.create({
-    model: model || pickVisionModel(),
-    input: [
-      {
-        role: "user",
-        content: [
-          {
-            type: "input_text",
-            text: "Extract brand/model/size/category + any visible text. Return ONE compact line. No URLs. No question marks.",
-          },
-          { type: "input_image", image_url: imageUrl },
-        ],
-      },
-    ],
-  });
-
-  const outText =
-    (resp && (resp.output_text || resp.text)) ||
-    (resp &&
-      resp.output &&
-      Array.isArray(resp.output) &&
-      resp.output[0] &&
-      (resp.output[0].content || resp.output[0].text)) ||
-    "";
-  return String(outText || "").trim();
-}
-
-function isVisionCapableModel(modelName) {
-  const m = String(modelName || "").toLowerCase();
-  return /gpt-4o|gpt-4\.1|o3|vision/.test(m);
-}
-
-function pickVisionModel() {
-  if (CFG.openaiVisionModel && isVisionCapableModel(CFG.openaiVisionModel)) return CFG.openaiVisionModel;
-  if (OPENAI_MODEL && isVisionCapableModel(OPENAI_MODEL)) return OPENAI_MODEL;
-  // Default to a known vision-capable model if none provided
-  return "gpt-4o-mini";
-}
-
-async function analyzeProductImage(imageBytes, mimeType, opts = {}) {
-  const imgBuf = Buffer.isBuffer(imageBytes) ? imageBytes : Buffer.from(imageBytes || []);
-  const safeMime = sniffImageMime(imgBuf) || String(mimeType || "image/jpeg");
-  const model = pickVisionModel();
-  const client = getOpenAIClient();
-  const formattingInstruction =
-    "Identify the product and output strict JSON only with keys: category (tv|refrigerateur|cuisiniere|lave_linge|other), brand, model, size_inches, capacity_liters, confidence (0..1).";
-
-  let resp = null;
-  let formattingEnabled = true;
-  let lastError = null;
-
-  for (let attempt = 0; attempt < 2; attempt += 1) {
-    const enforceJsonNote = formattingEnabled
-      ? ""
-      : " Respond with JSON only. Do not add explanations, code fences, or non-JSON text.";
-    const imageUrl = toImageUrlString(imgBuf, safeMime);
-    console.log("vision image typeof:", typeof imageBytes, "isBuffer:", Buffer.isBuffer(imageBytes));
-    if (typeof imageUrl === "string" && /^(data:|https?:)/i.test(imageUrl)) {
-      console.log("vision image_url preview:", imageUrl.slice(0, 80));
-    }
-    const payload = {
-      model,
-      temperature: 0,
-      input: [
-        {
-          role: "user",
-          content: [
-            {
-              type: "input_text",
-              text: formattingInstruction + enforceJsonNote,
-            },
-            { type: "input_image", image_url: imageUrl },
-          ],
-        },
-      ],
-    };
-
-    if (formattingEnabled) {
-      payload.text = { format: { type: "json_object" } };
-    }
-
-    try {
-      resp = await client.responses.create(payload);
-      break;
-    } catch (err) {
-      lastError = err;
-      const msg = (err && (err.message || err.toString())) || "unknown_error";
-      console.error(
-        JSON.stringify({
-          level: "error",
-          msg: "vision_openai_call_failed",
-          reqId: opts.reqId || null,
-          model,
-          formatting: formattingEnabled,
-          error: msg,
-        })
-      );
-
-      const lowerMsg = String(msg || "").toLowerCase();
-      const formattingUnsupported =
-        formattingEnabled &&
-        (lowerMsg.includes("text.format") || lowerMsg.includes("response_format") || lowerMsg.includes("unsupported"));
-
-      if (formattingUnsupported && attempt === 0) {
-        formattingEnabled = false;
-        continue;
-      }
-
-      throw err;
-    }
-  }
-
-  if (!resp) throw lastError || new Error("vision_no_response");
-
-  let rawOut = "";
-  if (resp && typeof resp.output_text === "string") rawOut = resp.output_text;
-  else if (resp && typeof resp.text === "string") rawOut = resp.text;
-  else if (resp && Array.isArray(resp.output)) rawOut = resp.output.map((it) => (typeof it === "string" ? it : it?.content || it?.text || "")).join("\n");
-
-  const parsed = parseVisionJson(rawOut);
-  if (!parsed.ok) {
-    const fallback = deriveVisionHintsFromText(parsed.raw || rawOut);
+  if (actualSize < 1024) {
     console.error(
       JSON.stringify({
-        level: fallback ? "warn" : "error",
-        msg: "vision_invalid_json",
-        reqId: opts.reqId || null,
-        model,
-        formatting: formattingEnabled,
-        raw: rawOut,
+        level: "error",
+        msg: "audio_invalid_download",
+        reason: "audio_too_small",
+        reqId,
+        downloadHost: host,
+        sizeBytes: actualSize,
+        payloadSnippet: sanitizeLogSnippet(header, 120),
       })
     );
-    if (!fallback) {
-      const e = new Error("vision_invalid_json");
-      e.rawOutput = rawOut;
-      throw e;
-    }
-    const normFallback = normalizeVisionResult(fallback);
-    console.log(
+    return { ok: false, sizeBytes: actualSize, header };
+  }
+
+  if (isInvalidAudioPayload(header)) {
+    console.error(
       JSON.stringify({
-        level: "info",
-        msg: "vision_analyzed_fallback",
-        modelUsed: model,
-        confidence: normFallback.confidence,
+        level: "error",
+        msg: "audio_invalid_download",
+        reason: "invalid_payload",
+        reqId,
+        downloadHost: host,
+        sizeBytes: actualSize,
+        payloadSnippet: sanitizeLogSnippet(header, 120),
       })
     );
-    return normFallback;
+    return { ok: false, sizeBytes: actualSize, header };
   }
 
-  const norm = normalizeVisionResult(parsed.obj);
-
-  console.log(
-    JSON.stringify({
-      level: "info",
-      msg: "vision_analyzed",
-      modelUsed: model,
-      confidence: norm.confidence,
-    })
-  );
-
-  return norm;
+  return { ok: true, sizeBytes: actualSize, header };
 }
 
-function selectOffersFromVision(hints) {
-  const h = hints || {};
-  const mapped = VISION_CATEGORY_MAP[h.category] || { cls: null, category: null };
-  const cls = mapped.cls || h.cls || null;
-  const category = mapped.category || h.categoryReadable || null;
-  const brand = String(h.brand || "").toUpperCase();
-  const size = Number(h.size_inches);
-  const capacity = Number(h.capacity_liters);
-  const sizeNum = Number.isFinite(size) ? size : null;
-  const capNum = Number.isFinite(capacity) ? capacity : null;
-
-  if (brand) {
-    const isBrandOnlyQuery = !cls && !category && !sizeNum && !capNum;
-    const tvCanon = OFFERS_INDEX.classCanon.tv || "Tv";
-    
-    if (FEATURE_ASSUME_TV_ON_BRAND_ONLY && isBrandOnlyQuery) {
-      const resTv = listOffersForBrand(brand, {
-        cls: tvCanon,
-        limit: MAX_OFFERS,
-        withOffers: true,
-        tvOnly: true,
-      });
-      if (resTv?.offers?.length > 0) {
-        return { offers: resTv.offers.map((offer) => ({ brand, offer })) };
+function execFilePromise(cmd, args, opts = {}) {
+  return new Promise((resolve, reject) => {
+    execFile(cmd, args, opts, (err, stdout, stderr) => {
+      if (err) {
+        err.stdout = stdout;
+        err.stderr = stderr;
+        reject(err);
+        return;
       }
-    }
-
-    const res = listOffersForBrand(brand, {
-      cls,
-      category,
-      size: sizeNum,
-      capacityLiters: capNum,
-      limit: MAX_OFFERS,
-      withOffers: true,
+      resolve({ stdout, stderr });
     });
-    if (res && Array.isArray(res.offers) && res.offers.length) {
-      return { offers: res.offers.map((offer) => ({ brand, offer })) };
-    }
-  }
-
-  const items = [];
-  const brands = OFFERS_INDEX.brands || [];
-  for (let i = 0; i < brands.length; i += 1) {
-    const b = brands[i];
-    const arr = ((OFFERS && OFFERS.offers && OFFERS.offers[b]) || [])
-      .map((offer, idx) => ({ brand: b, offer, originalIdx: idx }))
-      .filter((it) => {
-        const o = it.offer || {};
-        if (cls && normMatch(o.class || "") !== normMatch(cls)) return false;
-        if (category && normMatch(o.category || "") !== normMatch(category)) return false;
-        return true;
-      });
-    items.push(...arr);
-  }
-
-  const ranked = rankOffers(items, {
-    size: sizeNum,
-    capacityLiters: capNum,
-    className: cls,
-    limit: null,
   });
-
-  const picked = pickCheapestPerBrand(ranked).slice(0, MAX_OFFERS);
-
-  return { offers: picked.map((r) => ({ brand: r.brand, offer: r.offer })) };
 }
 
-async function handleVisionMedia(mediaInput, lang, key, opts = {}) {
-  const stripUrls = opts.stripUrls === true;
-  const normalizedMedia = normalizeMediaInput(mediaInput);
-  if (!normalizedMedia) throw new Error("media_missing");
-
-  const mime = String(normalizedMedia.mimeType || "").toLowerCase();
-  if (mime && mime.startsWith("audio/")) {
-    console.warn(
-      JSON.stringify({ level: "warn", msg: "vision_blocked_non_image", mimeType: normalizedMedia.mimeType || null })
-    );
-    throw new Error("vision_non_image");
+async function commandExists(cmd) {
+  try {
+    await execFilePromise("which", [cmd]);
+    return true;
+  } catch {
+    return false;
   }
+}
 
-  const downloaded = await downloadMediaBuffer(normalizedMedia);
-  const sniffedMime = sniffImageMime(downloaded.buffer);
-  const downloadedMime = String(downloaded.mimeType || "").toLowerCase();
-  const finalMime = (sniffedMime || downloadedMime || mime || "").toLowerCase();
+function mimeFromProbe(formatName, codecName) {
+  const format = String(formatName || "").toLowerCase();
+  const codec = String(codecName || "").toLowerCase();
+  if (format.includes("ogg") || codec === "opus") return "audio/ogg";
+  if (format.includes("wav")) return "audio/wav";
+  if (format.includes("mp3") || codec === "mp3") return "audio/mpeg";
+  if (format.includes("webm")) return "audio/webm";
+  if (format.includes("3gp")) return "audio/3gpp";
+  if (format.includes("mp4") || format.includes("m4a") || format.includes("mov")) return "audio/mp4";
+  return "";
+}
 
-  if (!finalMime.startsWith("image/")) {
-    const ext = path.extname(normalizedMedia.filename || normalizedMedia.url || "").toLowerCase();
-    const extLooksImage = [".jpg", ".jpeg", ".png", ".gif", ".webp"].includes(ext);
-    if (!extLooksImage && !sniffedMime) {
-      console.warn(
+async function probeAudioInfo(filePath, reqId) {
+  const ffprobeAvailable = await commandExists("ffprobe");
+  if (!ffprobeAvailable) return null;
+  try {
+    const { stdout } = await execFilePromise("ffprobe", [
+      "-v",
+      "error",
+      "-show_entries",
+      "format=format_name",
+      "-show_entries",
+      "stream=codec_name",
+      "-of",
+      "json",
+      filePath,
+    ]);
+    const parsed = JSON.parse(String(stdout || "{}"));
+    const formatName = parsed?.format?.format_name || "";
+    const codecName = Array.isArray(parsed?.streams) ? parsed.streams[0]?.codec_name || "" : "";
+    if (formatName || codecName) {
+      console.log(
         JSON.stringify({
-          level: "warn",
-          msg: "vision_blocked_after_download",
-          mimeType: downloaded.mimeType || null,
-          sniffedMime: sniffedMime || null,
+          level: "info",
+          msg: "audio_probe",
+          reqId,
+          filePath,
+          formatName: formatName || null,
+          codecName: codecName || null,
         })
       );
-      throw new Error("vision_non_image");
     }
-  }
-
-  const logBase = {
-    level: "info",
-    msg: "vision_media",
-    mimeProvided: normalizedMedia.mimeType || null,
-    mimeDownloaded: downloaded.mimeType || null,
-    sniffedMime: sniffedMime || null,
-    sizeBytes: downloaded.buffer.length,
-    reqId: opts.reqId || null,
-  };
-  console.log(JSON.stringify(logBase));
-
-  let vision = null;
-  try {
-    vision = await visionAnalyzer(downloaded.buffer, finalMime || downloaded.mimeType || "image/jpeg", {
-      reqId: opts.reqId || null,
-    });
+    return { formatName, codecName };
   } catch (err) {
     console.error(
       JSON.stringify({
         level: "error",
-        msg: "vision_call_failed",
-        reqId: opts.reqId || null,
+        msg: "audio_probe_fail",
+        reqId,
+        filePath,
         error: (err && err.message) || String(err),
       })
     );
+    return null;
   }
+}
 
-  if (vision && vision.confidence !== undefined) {
+async function resolveAudioMime({ filePath, mimeType, filename, url, sniffedMime, reqId }) {
+  const mimeTypeRaw = String(mimeType || "");
+  const mimeTypeClean = CFG.featureAudioCleanMime ? cleanMimeType(mimeTypeRaw) : mimeTypeRaw.trim().toLowerCase();
+  const extMime = inferMimeFromPath(filename || url || filePath, "");
+  const probeInfo = await probeAudioInfo(filePath, reqId);
+  const probeMime = probeInfo ? mimeFromProbe(probeInfo.formatName, probeInfo.codecName) : "";
+  const sniffed = sniffedMime && isAudioMime(sniffedMime) ? sniffedMime : "";
+  const cleaned = mimeTypeClean && isAudioMime(mimeTypeClean) ? mimeTypeClean : "";
+  const resolved = probeMime || cleaned || extMime || sniffed || "";
+  return { mimeType: resolved, probeInfo };
+}
+
+function shouldConvertAudioToWav(mimeType) {
+  const mimeRaw = String(mimeType || "");
+  const mime = CFG.featureAudioCleanMime ? cleanMimeType(mimeRaw) : mimeRaw.toLowerCase();
+  if (!mime || !isAudioMime(mime)) return true;
+  if (mime === "audio/mpeg" || mime === "audio/wav") return false;
+  return true;
+}
+
+function isAudioMeta(meta) {
+  const m = meta || {};
+  const kind = String(m.kind || "").toLowerCase();
+  const mime = String(m.mimeType || "").toLowerCase();
+  const filename = String(m.filename || "");
+  const url = String(m.url || "");
+  const ext = path.extname(filename || url).replace(/^\./, "").toLowerCase();
+  if (kind === "audio") return true;
+  if (mime && (mime.startsWith("audio/") || mime === "application/ogg")) return true;
+  if (["aac", "amr", "ogg", "opus", "m4a", "mp3", "wav", "webm", "3gp", "3gpp", "caf", "flac"].includes(ext)) return true;
+  return false;
+}
+
+function sniffAudioMime(buf) {
+  const buffer = Buffer.isBuffer(buf) ? buf : Buffer.from(buf || []);
+  if (buffer.length < 4) return "";
+  if (buffer.slice(0, 4).toString("ascii") === "OggS") return "audio/ogg";
+  if (buffer[0] === 0x1a && buffer[1] === 0x45 && buffer[2] === 0xdf && buffer[3] === 0xa3) return "audio/webm";
+  if (buffer.slice(0, 4).toString("ascii") === "RIFF" && buffer.slice(8, 12).toString("ascii") === "WAVE") return "audio/wav";
+  if (buffer.slice(0, 4).toString("ascii") === "fLaC") return "audio/flac";
+  if (buffer.slice(0, 5).toString("ascii") === "#!AMR") return "audio/amr";
+  if (buffer.slice(0, 3).toString("ascii") === "ID3") return "audio/mpeg";
+  if (buffer[0] === 0xff && (buffer[1] & 0xe0) === 0xe0) return "audio/mpeg";
+  if (buffer.slice(4, 8).toString("ascii") === "ftyp") return "audio/mp4";
+  return "";
+}
+
+function extFromAudioMime(mime) {
+  const m = String(mime || "").toLowerCase();
+  if (m.indexOf("audio/ogg") === 0 || m.indexOf("audio/opus") === 0) return ".ogg";
+  if (m.indexOf("audio/3gpp") === 0 || m.indexOf("audio/3gp") === 0) return ".3gp";
+  if (m.indexOf("audio/amr") === 0) return ".amr";
+  if (m.indexOf("audio/mpeg") === 0 || m.indexOf("audio/mp3") === 0) return ".mp3";
+  if (m.indexOf("audio/mp4") === 0 || m.indexOf("audio/aac") === 0) return ".m4a";
+  if (m.indexOf("audio/x-caf") === 0) return ".caf";
+  if (m.indexOf("audio/flac") === 0) return ".flac";
+  if (m.indexOf("audio/wav") === 0) return ".wav";
+  return ".mp3";
+}
+
+function ensureAudioFileExtMatchesMime(filePath, mimeType) {
+  const desiredExt = extFromAudioMime(mimeType || "");
+  const currentExt = path.extname(filePath || "");
+  if (!desiredExt || desiredExt.toLowerCase() === currentExt.toLowerCase()) {
+    return { filePath, ext: currentExt || desiredExt, renamed: false };
+  }
+  const renamedPath = path.join(path.dirname(filePath), `audio${desiredExt}`);
+  fs.renameSync(filePath, renamedPath);
+  return { filePath: renamedPath, ext: desiredExt, renamed: true };
+}
+
+function inferMimeFromPath(filepath, fallbackMime) {
+  const ext = path.extname(String(filepath || "")).toLowerCase();
+  if (!ext) return fallbackMime || "";
+  const map = {
+    ".3gp": "audio/3gpp",
+    ".3gpp": "audio/3gpp",
+    ".ogg": "audio/ogg",
+    ".opus": "audio/ogg",
+    ".amr": "audio/amr",
+    ".aac": "audio/aac",
+    ".caf": "audio/x-caf",
+    ".flac": "audio/flac",
+    ".m4a": "audio/mp4",
+    ".mp3": "audio/mpeg",
+    ".wav": "audio/wav",
+    ".webm": "audio/webm",
+  };
+  return map[ext] || fallbackMime || "";
+}
+
+function shouldConvertAudioToMp3(filePath, mimeType) {
+  const mimeRaw = String(mimeType || "");
+  const mime = CFG.featureAudioCleanMime ? cleanMimeType(mimeRaw) : mimeRaw.toLowerCase();
+  const ext = path.extname(String(filePath || "")).toLowerCase();
+  const oggLike =
+    mime.includes("audio/ogg") ||
+    mime.includes("audio/opus") ||
+    mime.includes("application/ogg") ||
+    mime.includes("audio/webm") ||
+    mime.includes("audio/3gpp") ||
+    mime.includes("audio/3gp") ||
+    mime.includes("audio/amr");
+  if (oggLike) return true;
+  if (isAudioMime(mime) && ext !== ".mp3") return true;
+  return false;
+}
+
+async function convertAudioToMp3(inputPath, outputPath, reqId) {
+  if (typeof audioConverterOverride === "function") {
+    return audioConverterOverride(inputPath, outputPath, reqId);
+  }
+  const args = ["-y", "-i", inputPath, "-vn", "-acodec", "libmp3lame", "-ar", "44100", "-ac", "1", "-b:a", "96k", outputPath];
+  let stderr = "";
+  const maxTail = 3000;
+
+  return new Promise((resolve) => {
+    let settled = false;
+    const proc = spawn("ffmpeg", args);
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      try {
+        proc.kill("SIGKILL");
+      } catch {}
+      resolve({ ok: false, stderrTail: stderr.slice(-maxTail), error: "timeout" });
+    }, 25000);
+
+    proc.stderr.on("data", (chunk) => {
+      stderr += chunk.toString();
+      if (stderr.length > 20000) stderr = stderr.slice(-20000);
+    });
+
+    proc.on("error", (err) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve({ ok: false, stderrTail: stderr.slice(-maxTail), error: (err && err.message) || String(err) });
+    });
+
+    proc.on("close", (code, signal) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      if (code === 0) {
+        resolve({ ok: true, stderrTail: stderr.slice(-maxTail) });
+        return;
+      }
+      resolve({ ok: false, stderrTail: stderr.slice(-maxTail), code, signal });
+    });
+  });
+}
+
+async function convertAudioToWav(inputPath, outputPath, reqId) {
+  if (typeof audioConverterOverride === "function") {
+    return audioConverterOverride(inputPath, outputPath, reqId);
+  }
+  const args = ["-y", "-i", inputPath, "-ac", "1", "-ar", "16000", "-c:a", "pcm_s16le", outputPath];
+  let stderr = "";
+  const maxTail = 3000;
+
+  return new Promise((resolve) => {
+    let settled = false;
+    const proc = spawn("ffmpeg", args);
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      try {
+        proc.kill("SIGKILL");
+      } catch {}
+      resolve({ ok: false, stderrTail: stderr.slice(-maxTail), error: "timeout" });
+    }, 25000);
+
+    proc.stderr.on("data", (chunk) => {
+      stderr += chunk.toString();
+      if (stderr.length > 20000) stderr = stderr.slice(-20000);
+    });
+
+    proc.on("error", (err) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve({ ok: false, stderrTail: stderr.slice(-maxTail), error: (err && err.message) || String(err) });
+    });
+
+    proc.on("close", (code, signal) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      if (code === 0) {
+        resolve({ ok: true, stderrTail: stderr.slice(-maxTail) });
+        return;
+      }
+      resolve({ ok: false, stderrTail: stderr.slice(-maxTail), code, signal });
+    });
+  });
+}
+
+async function downloadToTemp(url, filepath) {
+  const target = path.resolve(filepath);
+  fs.mkdirSync(path.dirname(target), { recursive: true });
+  const fetched = await fetchMedia(url, {
+    maxBytes: CFG.mediaMaxBytesAudio,
+    timeoutMs: CFG.mediaFetchTimeoutMs,
+    allowHttp: CFG.mediaAllowHttp,
+  });
+  const sniffedMime = CFG.featureAudioSniffMime ? sniffAudioMime(fetched.buffer) : "";
+  const mimeTypeRaw = String((fetched && fetched.mimeType) || sniffedMime || "");
+  const mimeTypeClean = CFG.featureAudioCleanMime ? cleanMimeType(mimeTypeRaw) : mimeTypeRaw.trim().toLowerCase();
+  fs.writeFileSync(target, fetched.buffer);
+  return {
+    filePath: target,
+    mimeType: mimeTypeClean,
+    sizeBytes: fetched.sizeBytes || 0,
+  };
+}
+
+async function downloadAudioBuffer(mediaInput, reqId) {
+  if (typeof audioDownloaderOverride === "function") return audioDownloaderOverride(mediaInput, reqId);
+
+  const m = mediaInput || {};
+  const baseUrl = String(CFG.wanotifierMediaUrl || "").replace(/\/$/, "");
+  const url = m.url || (m.id && baseUrl ? `${baseUrl}/${m.id}` : "");
+  if (!url) throw new Error("audio_url_missing");
+
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "wanote-"));
+  const ext = extFromAudioMime(m.mimeType || "");
+  const tmpFile = path.join(dir, `audio${ext}`);
+  let sizeBytes = 0;
+  try {
+    const fetched = await fetchMedia(url, {
+      maxBytes: CFG.mediaMaxBytesAudio,
+      timeoutMs: CFG.mediaFetchTimeoutMs,
+      allowHttp: CFG.mediaAllowHttp,
+    });
+    fs.writeFileSync(tmpFile, fetched.buffer);
+    sizeBytes = fetched.sizeBytes || fetched.buffer.length || 0;
+    const sniffedMime = CFG.featureAudioSniffMime ? sniffAudioMime(fetched.buffer) : "";
+    const mimeTypeResolvedRaw =
+      m.mimeType || String((fetched && fetched.mimeType) || "").trim() || sniffedMime || "application/octet-stream";
+    const mimeTypeResolved = CFG.featureAudioCleanMime ? cleanMimeType(mimeTypeResolvedRaw) : mimeTypeResolvedRaw;
+    const renameInfo = ensureAudioFileExtMatchesMime(tmpFile, mimeTypeResolved);
+
     console.log(
       JSON.stringify({
         level: "info",
-        msg: "vision_result",
-        reqId: opts.reqId || null,
-        confidence: vision.confidence,
-        category: vision.category || null,
-        brand: vision.brand || null,
-        size: vision.size_inches || null,
-        capacity: vision.capacity_liters || null,
+        msg: "audio_download",
+        sizeBytes,
+        contentType: mimeTypeResolved,
+        sniffedMime: sniffedMime || null,
+        reqId,
       })
     );
-  }
 
-  let offerReply = null;
-  if (vision) {
-    const mapped = VISION_CATEGORY_MAP[vision.category] || {};
-    const cls = mapped.cls || null;
-    const category = mapped.category || null;
-    const brand = vision.brand ? String(vision.brand).toUpperCase() : null;
-    const sizeNum = vision.size_inches ? Number(vision.size_inches) : null;
-    const capNum = vision.capacity_liters ? Number(vision.capacity_liters) : null;
-
-    const offers = selectOffersFromVision({
-      category: vision.category,
-      cls,
-      categoryReadable: category,
-      brand,
-      size_inches: sizeNum,
-      capacity_liters: capNum,
-    });
-
-    const header = offersHeader(lang, {
-      brand,
-      cls: cls || category || undefined,
-      category: category || undefined,
-      size: sizeNum || undefined,
-    });
-    const entries = Array.isArray(offers.offers) ? offers.offers : [];
-    const title = titleFromHeader(header);
-    const body = entries.length
-      ? buildPremiumOffersReply({ title, entries, lang, maxChars: CFG.maxReplyChars })
-      : fallbackWithAgent(lang);
-    offerReply = {
-      reply: shortenNoQuestion(body, CFG.maxReplyChars),
-      confidence: vision.confidence || 0,
-      ctx: { brand, cls, category, sizeNum, offers: { offers: entries } },
+    return {
+      filePath: renameInfo.filePath,
+      mimeType: mimeTypeResolved,
+      filename: m.filename || null,
+      tmpDir: dir,
+      sizeBytes,
     };
-  }
-
-  if (!offerReply) {
+  } catch (err) {
     try {
-      const mimeType = finalMime || downloaded.mimeType || "image/jpeg";
-      const dataUrl = `data:${mimeType};base64,${downloaded.buffer.toString("base64")}`;
-      const desc = await describeImage({ image: dataUrl, model: pickVisionModel() }, getOpenAIClient());
-      const safeDesc = ensureNoQuestion(sanitizeDerivedText(desc)).slice(0, 1800);
-      if (safeDesc) {
-        const direct = tryDirectOfferAnswer(safeDesc, [], lang, key);
-        if (direct) {
-          offerReply = { reply: shortenNoQuestion(direct, CFG.maxReplyChars), confidence: 0 };
-        }
-      }
-    } catch (err) {
-      console.error(
-        JSON.stringify({
-          level: "error",
-          msg: "vision_fallback_failed",
-          reqId: opts.reqId || null,
-          error: (err && err.message) || String(err),
-        })
-      );
+      fs.rmSync(dir, { recursive: true, force: true });
+    } catch {}
+    throw err;
+  }
+}
+
+async function transcribeAudioOpenAI(
+  { filePath, model, mimeType = "", filename = "", reqId = null, language = null },
+  openaiClient
+) {
+  const languageHint = normalizeLanguageHint(language);
+  if (typeof audioTranscriberOverride === "function") {
+    return audioTranscriberOverride(filePath, mimeType, languageHint);
+  }
+
+  const client = openaiClient || getOpenAIClient();
+  const fileData = fs.readFileSync(filePath);
+  const bufferSize = fileData.length;
+  const mimeTypeRaw = String(mimeType || "");
+  const mimeTypeClean = CFG.featureAudioCleanMime ? cleanMimeType(mimeTypeRaw) : mimeTypeRaw.trim().toLowerCase();
+  const sniffedMime =
+    CFG.featureAudioSniffMime && (!mimeType || mimeType === "application/octet-stream") ? sniffAudioMime(fileData) : "";
+  const inferredMimeRaw = sniffedMime || inferMimeFromPath(filePath, mimeTypeClean || "");
+  const inferredMime = CFG.featureAudioCleanMime ? cleanMimeType(inferredMimeRaw) : String(inferredMimeRaw || "").toLowerCase();
+  const pathExt = path.extname(filePath || "");
+  const desiredExt = inferredMime ? extFromAudioMime(inferredMime || "") : "";
+  const fallbackExt = pathExt || desiredExt || ".wav";
+  let chosenFilename = filename || `voice${fallbackExt}`;
+  const currentExt = path.extname(chosenFilename || "");
+  if (!currentExt) {
+    chosenFilename = `${chosenFilename || "voice"}${fallbackExt}`;
+  } else if (desiredExt && currentExt.toLowerCase() !== desiredExt.toLowerCase()) {
+    chosenFilename = `${path.basename(chosenFilename, currentExt)}${desiredExt}`;
+  }
+  const chosenModel = model || CFG.openaiTranscribeModel || "gpt-4o-mini-transcribe";
+
+  console.log(
+    JSON.stringify({
+      level: "info",
+      msg: "audio_transcribe_request",
+      mimeType: inferredMime,
+      mimeTypeRaw: mimeTypeRaw || null,
+      mimeTypeClean: inferredMime || null,
+      bufferBytes: bufferSize,
+      filename: chosenFilename,
+      filePath,
+      model: chosenModel,
+      language: languageHint || null,
+      reqId,
+    })
+  );
+
+  try {
+    const file = await toFileImpl(fileData, chosenFilename, inferredMime ? { type: inferredMime } : undefined);
+    const resp = await client.audio.transcriptions.create({
+      file,
+      model: chosenModel,
+      response_format: "text",
+      language: languageHint || undefined,
+    });
+    if (resp && typeof resp === "object" && (resp.text || resp.output_text)) return String(resp.text || resp.output_text || "").trim();
+    return String(resp || "").trim();
+  } catch (err) {
+    console.error(
+      JSON.stringify({
+        level: "error",
+        msg: "audio_transcribe_error",
+        reqId,
+        mimeType: inferredMime,
+        filename: chosenFilename,
+        model: chosenModel,
+        status: (err && (err.status || err.statusCode)) || null,
+        error: (err && err.message) || String(err),
+        openaiError: err && typeof err === "object" ? err.response || err.error || null : null,
+      })
+    );
+    throw err;
+  }
+}
+
+async function transcribeAudioFile(filePath, mimeType, language) {
+  const languageHint = normalizeLanguageHint(language);
+  if (typeof audioTranscriberOverride === "function") return audioTranscriberOverride(filePath, mimeType, languageHint);
+
+  const mimeRaw = String(mimeType || "");
+  const mime = CFG.featureAudioCleanMime ? cleanMimeType(mimeRaw) : mimeRaw.toLowerCase();
+  const ext = path.extname(filePath) || (mime ? extFromAudioMime(mime) : ".wav");
+  const finalPath = filePath || path.join(os.tmpdir(), `audio-fallback${ext || ".wav"}`);
+  return transcribeAudioOpenAI(
+    { filePath: finalPath, model: CFG.openaiTranscribeModel || "gpt-4o-mini-transcribe", mimeType, language: languageHint },
+    getOpenAIClient()
+  );
+}
+
+async function transcribeAudio(filePath, mimeType, language) {
+  return transcribeAudioFile(filePath, mimeType, language);
+}
+
+function buildPipelineTranscriber(reqId) {
+  return async ({ filePath, mimeType: overrideMime, language, model }) => {
+    const out = await transcribeAudioOpenAI({
+      filePath,
+      model,
+      mimeType: overrideMime,
+      language,
+      reqId,
+      filename: path.basename(filePath),
+    });
+    if (out && typeof out === "object") {
+      return {
+        rawTranscript: String(out.text || out.rawTranscript || ""),
+        segments: Array.isArray(out.segments) ? out.segments : null,
+        modelUsed: out.modelUsed || model || "openai",
+      };
     }
-  }
-
-  if (!offerReply) {
-    const ask = shortenNoQuestion(t(lang, "askTextInsteadMedia"), 420);
-    return { reply: ask, confidence: 0 };
-  }
-
-  const finalReplyText = stripUrls
-    ? stripNonPurchaseUrls(String(offerReply.reply || ""))
-    : String(offerReply.reply || "");
-  const finalReply = shortenNoQuestion(finalReplyText, CFG.maxReplyChars);
-  const ctxData = offerReply.ctx || {};
-  const visionEntries = Array.isArray(ctxData.offers && ctxData.offers.offers) ? ctxData.offers.offers : [];
-  const visionOfferCtx = visionEntries.length ? buildOfferContextEntries(visionEntries) : null;
-  setCtx(key, {
-    lastBrand: ctxData.brand || undefined,
-    lastClass: ctxData.cls || undefined,
-    lastCategory: ctxData.category || undefined,
-    lastSize: ctxData.sizeNum || undefined,
-    lastOffersShown: visionOfferCtx ? visionOfferCtx.lastOffersShown : undefined,
-    lastOfferPicks: visionOfferCtx ? visionOfferCtx.lastOfferPicks : undefined,
-    lastOfferItems: visionOfferCtx ? visionOfferCtx.lastOfferItems : undefined,
-  });
-
-  return { reply: finalReply, confidence: offerReply.confidence || 0 };
+    return { rawTranscript: String(out || ""), segments: null, modelUsed: model || "openai" };
+  };
 }
 
 function setVisionAnalyzerForTest(fn) {
