@@ -182,6 +182,25 @@ import {
   VISION_CATEGORY_MAP as VISION_CATEGORY_MAP_IMPL,
 } from './project/src/services/vision/index.js';
 
+import {
+  VOICE_NOT_UNDERSTOOD_TEMPLATE as VOICE_NOT_UNDERSTOOD_TEMPLATE_IMPL,
+  extractMediaMetaFromBody as extractMediaMetaFromBodyImpl,
+} from './project/src/services/media/index.js';
+
+import {
+  extractCompareParts as extractComparePartsImpl,
+  extractDifferenceBetweenParts as extractDifferenceBetweenPartsImpl,
+  resolveAdvice as resolveAdviceImpl,
+  wantsProductDetails as wantsProductDetailsImpl,
+  detailsNoContextReply as detailsNoContextReplyImpl,
+  detailsNeedOptionReply as detailsNeedOptionReplyImpl,
+  formatSpecLine as formatSpecLineImpl,
+  buildProductDetailsReply as buildProductDetailsReplyImpl,
+  parseSelectedOptionNumber as parseSelectedOptionNumberImpl,
+  parseMenuSelection as parseMenuSelectionImpl,
+  isAngryOrProblemIntent as isAngryOrProblemIntentImpl,
+} from './project/src/services/intents/index.js';
+
 let toFileImpl = toFile;
 
 const app = express();
@@ -1980,23 +1999,11 @@ function isOpeningHoursIntent(text) {
 }
 
 function extractCompareParts(text) {
-  const raw = String(text || "");
-  const cleaned = raw.replace(/[\n\r]+/g, " ");
-  const split = cleaned
-    .split(/(?:\bvs\b|versus|contra|مقابل|ضد|ولا| ou | or )/i)
-    .map((s) => s.trim())
-    .filter(Boolean);
-  if (split.length >= 2) return [split[0].slice(0, 40).trim(), split[1].slice(0, 40).trim()];
-  return [null, null];
+  return extractComparePartsImpl(text);
 }
 
 function extractDifferenceBetweenParts(text) {
-  const raw = String(text || "");
-  const match = raw.match(/(?:الفرق|فرق)\s+بين\s+(.+?)\s+و\s+(.+)/i);
-  if (!match) return [null, null];
-  const left = match[1].replace(/[؟?!.،]+/g, " ").trim().slice(0, 40);
-  const right = match[2].replace(/[؟?!.،]+/g, " ").trim().slice(0, 40);
-  return [left || null, right || null];
+  return extractDifferenceBetweenPartsImpl(text);
 }
 
 function resolveAdvice(text, ctxData) {
@@ -2079,94 +2086,7 @@ function resolveAdvice(text, ctxData) {
 }
 
 function isAngryOrProblemIntent(text) {
-  const raw = String(text || "");
-  const s = normalizeIntentText(raw);
-  if (!s) return false;
-
-  if (hasAnyEmoji(raw, ["😡", "🤬", "😠", "😤", "😞", "😢", "😭", "⚠️", "❗", "🚨"])) return true;
-
-  const phrases = [
-    "very angry",
-    "so angry",
-    "really angry",
-    "bad service",
-    "terrible service",
-    "not happy",
-    "late delivery",
-    "delivery late",
-    "wrong item",
-    "wrong product",
-    "service nul",
-    "c est nul",
-    "c'est nul",
-    "pas satisfait",
-    "très mauvais",
-    "tres mauvais",
-    "je suis en colere",
-    "je suis en colère",
-    "je suis fache",
-    "je suis fâché",
-    "retard de livraison",
-    "produit cassé",
-    "produit abimé",
-    "produit abîmé",
-    "mouchkil f tawssil",
-    "mouchkil f tawsil",
-    "mouchkil f livraison",
-    "khayb service",
-    "khayb lkhadma",
-    "machi mzyan",
-    "machi mzin",
-    "خدمة خايبة",
-    "توصيل متأخر",
-    "توصيل غلط",
-    "منتوج غلط",
-    "خدمة سيئة",
-  ];
-
-  if (hasAnyPhrase(s, phrases)) return true;
-
-  const tokens = [
-    "problem",
-    "issue",
-    "bad",
-    "angry",
-    "late",
-    "delay",
-    "delayed",
-    "wrong",
-    "complaint",
-    "complain",
-    "dissatisfied",
-    "upset",
-    "service",
-    "retard",
-    "retardé",
-    "retarde",
-    "mauvais",
-    "probleme",
-    "problème",
-    "colere",
-    "colère",
-    "fache",
-    "fâché",
-    "mouchkil",
-    "mochkil",
-    "mushkil",
-    "khayb",
-    "za3fan",
-    "m9hor",
-    "مشكلة",
-    "مشكل",
-    "غلط",
-    "سيء",
-    "متأخر",
-    "متاخر",
-    "شكوى",
-    "شكاية",
-  ];
-
-  return hasAnyToken(s, tokens);
+  return isAngryOrProblemIntentImpl(text);
 }
 
 // Cache catalog overview intent phrases for performance
@@ -3200,103 +3120,11 @@ function buildPipelineTranscriber(reqId) {
   return buildPipelineTranscriberImpl(reqId, getOpenAIClient, CFG, toFileImpl, normalizeLanguageHintImpl);
 }
 
-function guessMediaKind(meta) {
-  const mime = String((meta && (meta.mime || meta.mimetype || meta.mimeType || meta.contentType || meta.type)) || "").toLowerCase();
-  const type = String((meta && meta.type) || "").toLowerCase();
-  const kindField = String((meta && meta.kind) || "").toLowerCase();
-  const filename = String((meta && (meta.filename || meta.fileName || meta.name)) || "");
-  const url = String((meta && meta.url) || "");
-  if (kindField === "image") return "image";
-  if (kindField === "audio" || type === "voice" || type === "audio") return "audio";
-  if (mime.startsWith("image/")) return "image";
-  if (mime.startsWith("audio/")) return "audio";
-  const ext = path.extname(filename || url).toLowerCase();
-  if ([".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp"].includes(ext)) return "image";
-  if ([".mp3", ".wav", ".ogg", ".opus", ".m4a", ".webm", ".3gp", ".3gpp"].includes(ext)) return "audio";
-  return "unknown";
-}
-
-function normalizeMediaSingle(mediaVal) {
-  if (!mediaVal) return null;
-  if (typeof mediaVal === "string") {
-    const str = String(mediaVal).trim();
-    if (!str) return null;
-    if (str.startsWith("data:")) {
-      const mimeMatch = str.match(/^data:([^;,]+)?;/i);
-      const mime = mimeMatch && mimeMatch[1] ? mimeMatch[1] : "";
-      return { kind: guessMediaKind({ mime }), url: str, mime, raw: mediaVal };
-    }
-    if (/^https?:\/\//i.test(str)) {
-      const kind = guessMediaKind({ url: str });
-      return { kind, url: str, raw: mediaVal };
-    }
-    const base64ish = /^[a-z0-9+/=\s]+$/i.test(str) && str.length > 100;
-    if (base64ish) return { kind: "image", base64: str, raw: { base64: str } };
-    return null;
-  }
-
-  if (Array.isArray(mediaVal)) {
-    let image = null;
-    let audio = null;
-    let first = null;
-    for (let i = 0; i < mediaVal.length; i += 1) {
-      const norm = normalizeMediaSingle(mediaVal[i]);
-      if (!norm) continue;
-      if (!first) first = norm;
-      if (norm.kind === "image" && !image) image = norm;
-      if (norm.kind === "audio" && !audio) audio = norm;
-    }
-    return image || audio || first;
-  }
-
-  if (typeof mediaVal === "object") {
-    const url = String(
-      mediaVal.url ||
-        mediaVal.media_url ||
-        mediaVal.link ||
-        mediaVal.download_url ||
-        mediaVal.downloadUrl ||
-        mediaVal.mediaUrl ||
-        ""
-    ).trim();
-    const mime = String(mediaVal.mime || mediaVal.mimetype || mediaVal.mimeType || mediaVal.contentType || "").trim();
-    const filename = String(mediaVal.filename || mediaVal.fileName || mediaVal.name || "").trim();
-    const base64 = mediaVal.base64 || mediaVal.payload || mediaVal.data || null;
-    const kind = guessMediaKind({ mime, type: mediaVal.type, kind: mediaVal.kind, filename, url });
-    return { kind, url, mime, filename, base64, raw: mediaVal };
-  }
-
-  return null;
-}
-
-function normalizeMedia(mediaVal) {
-  return normalizeMediaSingle(mediaVal);
-}
-
-function normalizeMediaInput(mediaVal) {
-  const norm = normalizeMedia(mediaVal);
-  if (!norm) return null;
-  const raw = norm.raw || {};
-  return {
-    url: norm.url || "",
-    id: String(raw.id || raw.mediaId || raw.media_id || "").trim(),
-    mimeType: norm.mime || String(raw.mimeType || raw.contentType || "").trim(),
-    filename: norm.filename || String(raw.filename || raw.fileName || raw.name || "").trim(),
-    base64: norm.base64 || raw.base64 || raw.payload || raw.data || null,
-    kind: norm.kind || raw.kind || null,
-    raw,
-  };
-}
-
 function isPrivateHost(hostname) {
-  const h = String(hostname || "").toLowerCase();
-  if (!h) return true;
   if (h === "localhost") return true;
   if (h === "::1" || h === "0:0:0:0:0:0:0:1") return true;
   if (/^127\./.test(h)) return true;
   if (/^10\./.test(h)) return true;
-  if (/^192\.168\./.test(h)) return true;
-  if (/^172\.(1[6-9]|2[0-9]|3[0-1])\./.test(h)) return true;
   if (/^169\.254\./.test(h)) return true;
   if (/^100\.(6[4-9]|[7-9]\d|1[0-1]\d|12[0-7])\./.test(h)) return true;
   if (/^198\.(1[8-9])\./.test(h)) return true;
@@ -3331,724 +3159,6 @@ function isPrivateIp(ip) {
   return false;
 }
 
-async function ensurePublicUrl(urlObj) {
-  if (!urlObj) throw new Error("media_url_missing");
-  if (isPrivateHost(urlObj.hostname)) throw new Error("media_ssrf_blocked");
-  if (net.isIP(urlObj.hostname)) {
-    if (isPrivateIp(urlObj.hostname)) throw new Error("media_ssrf_blocked");
-    return;
-  }
-  let addresses = [];
-  try {
-    addresses = await dns.lookup(urlObj.hostname, { all: true, verbatim: true });
-  } catch {
-    throw new Error("media_ssrf_blocked");
-  }
-  if (!addresses.length) throw new Error("media_ssrf_blocked");
-  for (const addr of addresses) {
-    if (isPrivateIp(addr.address)) throw new Error("media_ssrf_blocked");
-  }
-}
-
-async function fetchMedia(url, opts = {}) {
-  if (!url) throw new Error("media_url_missing");
-  const allowHttp = opts.allowHttp ?? CFG.mediaAllowHttp;
-  const maxBytes = opts.maxBytes ?? CFG.mediaMaxBytesImage;
-  const timeoutMs = opts.timeoutMs ?? CFG.mediaFetchTimeoutMs;
-  const maxRedirects = Number.isInteger(opts.redirects) ? opts.redirects : 3;
-
-  if (String(url || "").startsWith("data:")) {
-    const m = String(url || "").match(/^data:([^;,]+)?;base64,(.+)$/i);
-    if (!m || !m[2]) throw new Error("media_data_invalid");
-    const buf = Buffer.from(m[2], "base64");
-    if (buf.length > maxBytes) throw new Error("media_too_large");
-    const sniffedMime = sniffImageMime(buf) || m[1] || "application/octet-stream";
-    return { buffer: buf, mimeType: sniffedMime, sizeBytes: buf.length, sniffedMime };
-  }
-
-  let currentUrl = url;
-  let redirects = 0;
-
-  while (redirects <= maxRedirects) {
-    const u = new URL(currentUrl);
-    if (u.protocol !== "http:" && u.protocol !== "https:") throw new Error("media_protocol_blocked");
-    if (u.protocol === "http:" && !allowHttp) throw new Error("media_http_blocked");
-    await ensurePublicUrl(u);
-
-    let ctrl = null;
-    let timeoutId = null;
-    if (typeof AbortController !== "undefined") ctrl = new AbortController();
-    if (ctrl) timeoutId = setTimeout(() => ctrl.abort(), timeoutMs);
-
-    try {
-      const resp = await getFetch()(currentUrl, { method: "GET", redirect: "manual", signal: ctrl ? ctrl.signal : undefined });
-      if (!resp) throw new Error("media_fetch_failed");
-
-      const status = Number(resp.status || 0);
-      const loc = resp.headers && resp.headers.get && resp.headers.get("location");
-      if ([301, 302, 303, 307, 308].includes(status) && loc && redirects < maxRedirects) {
-        currentUrl = new URL(loc, currentUrl).toString();
-        redirects += 1;
-        continue;
-      }
-
-      if (!resp.ok) throw new Error("media_fetch_failed");
-
-      const mimeType = String((resp.headers && resp.headers.get && resp.headers.get("content-type")) || "").trim();
-      const contentLength = Number((resp.headers && resp.headers.get && resp.headers.get("content-length")) || NaN);
-      if (Number.isFinite(contentLength) && contentLength > maxBytes) {
-        console.warn(JSON.stringify({ level: "warn", msg: "media_blocked_size_header", sizeBytes: contentLength, maxBytes, host: u.hostname }));
-        throw new Error("media_too_large");
-      }
-
-      const chunks = [];
-      let sizeBytes = 0;
-      if (resp.body && typeof resp.body.getReader === "function") {
-        const reader = resp.body.getReader();
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          if (value) {
-            sizeBytes += value.length;
-            if (sizeBytes > maxBytes) {
-              console.warn(JSON.stringify({ level: "warn", msg: "media_blocked_size_stream", sizeBytes, maxBytes, host: u.hostname }));
-              throw new Error("media_too_large");
-            }
-            chunks.push(Buffer.from(value));
-          }
-        }
-      } else if (typeof resp.arrayBuffer === "function") {
-        const arrBuf = await resp.arrayBuffer();
-        const buf = Buffer.from(arrBuf);
-        sizeBytes = buf.length;
-        if (sizeBytes > maxBytes) throw new Error("media_too_large");
-        chunks.push(buf);
-      } else {
-        throw new Error("media_fetch_failed");
-      }
-
-      const buffer = Buffer.concat(chunks);
-      const sniffedMime = sniffImageMime(buffer);
-      const finalMime =
-        sniffedMime || mimeType || (path.extname(u.pathname || "").match(/\.jpe?g|\.png|\.webp|\.gif/i) ? "image/jpeg" : "application/octet-stream");
-
-      console.log(
-        JSON.stringify({
-          level: "info",
-          msg: "media_fetched",
-          host: u.hostname,
-          sizeBytes,
-          contentType: mimeType || null,
-          sniffedMime: sniffedMime || null,
-        })
-      );
-
-      return { buffer, mimeType: finalMime, sizeBytes, sniffedMime };
-    } finally {
-      if (timeoutId) clearTimeout(timeoutId);
-    }
-  }
-
-  throw new Error("media_redirect_loop");
-}
-
-async function downloadMediaBuffer(mediaInput) {
-  const m = mediaInput || {};
-  if (typeof mediaFetcherOverride === "function") return mediaFetcherOverride(m);
-
-  const baseUrl = String(CFG.wanotifierMediaUrl || "").replace(/\/$/, "");
-  const url = m.url || (m.id && baseUrl ? `${baseUrl}/${m.id}` : "");
-  if (!url && !m.base64) throw new Error("media_url_missing");
-
-  if (m.base64 && !url) {
-    const buf = Buffer.from(String(m.base64 || ""), "base64");
-    if (buf.length > CFG.mediaMaxBytesImage) throw new Error("media_too_large");
-    const sniffedMime = sniffImageMime(buf) || m.mimeType || "application/octet-stream";
-    return { buffer: buf, mimeType: sniffedMime, filename: m.filename || null };
-  }
-
-  const fetched = await fetchMedia(url, {
-    maxBytes: CFG.mediaMaxBytesImage,
-    timeoutMs: CFG.mediaFetchTimeoutMs,
-    allowHttp: CFG.mediaAllowHttp,
-  });
-
-  return {
-    buffer: fetched.buffer,
-    mimeType: m.mimeType || fetched.sniffedMime || fetched.mimeType || "application/octet-stream",
-    filename: m.filename || null,
-  };
-}
-
-function isAudioMime(mime) {
-  const m = String(mime || "").toLowerCase();
-  return m.startsWith("audio/") || m === "application/ogg";
-}
-
-function cleanMimeType(input) {
-  if (!input) return "";
-  const normalized = String(input || "").trim().toLowerCase();
-  if (!normalized) return "";
-  const base = normalized.split(";")[0].trim();
-  if (base === "audio/opus" || base === "application/ogg") return "audio/ogg";
-  return base;
-}
-
-function sanitizeLogSnippet(buffer, maxBytes = 120) {
-  const raw = Buffer.isBuffer(buffer) ? buffer : Buffer.from(buffer || []);
-  return raw
-    .slice(0, maxBytes)
-    .toString("utf8")
-    .replace(/[^\x20-\x7E]+/g, " ")
-    .trim();
-}
-
-function getUrlHost(url) {
-  if (!url) return null;
-  if (String(url).startsWith("data:")) return "data";
-  try {
-    return new URL(String(url)).host || null;
-  } catch {
-    return null;
-  }
-}
-
-function readAudioHeader(filePath, maxBytes = 256) {
-  const fd = fs.openSync(filePath, "r");
-  try {
-    const buf = Buffer.alloc(maxBytes);
-    const bytesRead = fs.readSync(fd, buf, 0, maxBytes, 0);
-    return buf.slice(0, bytesRead);
-  } finally {
-    fs.closeSync(fd);
-  }
-}
-
-function isInvalidAudioPayload(headerBuf) {
-  const txt = (headerBuf || Buffer.alloc(0)).toString("utf8").trim();
-  if (!txt) return false;
-  const lower = txt.toLowerCase();
-  if (lower.startsWith("<html") || lower.startsWith("<?xml") || lower.startsWith("{")) return true;
-  if (lower.includes("forbidden") || lower.includes("access denied")) return true;
-  return false;
-}
-
-// Reject tiny or non-audio payloads before transcription to avoid OpenAI 400 errors.
-function validateDownloadedAudio({ filePath, sizeBytes, url, reqId }) {
-  const stats = fs.statSync(filePath);
-  const actualSize = sizeBytes || stats.size || 0;
-  const header = readAudioHeader(filePath, 256);
-  const host = getUrlHost(url);
-
-  if (actualSize < 1024) {
-    console.error(
-      JSON.stringify({
-        level: "error",
-        msg: "audio_invalid_download",
-        reason: "audio_too_small",
-        reqId,
-        downloadHost: host,
-        sizeBytes: actualSize,
-        payloadSnippet: sanitizeLogSnippet(header, 120),
-      })
-    );
-    return { ok: false, sizeBytes: actualSize, header };
-  }
-
-  if (isInvalidAudioPayload(header)) {
-    console.error(
-      JSON.stringify({
-        level: "error",
-        msg: "audio_invalid_download",
-        reason: "invalid_payload",
-        reqId,
-        downloadHost: host,
-        sizeBytes: actualSize,
-        payloadSnippet: sanitizeLogSnippet(header, 120),
-      })
-    );
-    return { ok: false, sizeBytes: actualSize, header };
-  }
-
-  return { ok: true, sizeBytes: actualSize, header };
-}
-
-function execFilePromise(cmd, args, opts = {}) {
-  return new Promise((resolve, reject) => {
-    execFile(cmd, args, opts, (err, stdout, stderr) => {
-      if (err) {
-        err.stdout = stdout;
-        err.stderr = stderr;
-        reject(err);
-        return;
-      }
-      resolve({ stdout, stderr });
-    });
-  });
-}
-
-async function commandExists(cmd) {
-  try {
-    await execFilePromise("which", [cmd]);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function mimeFromProbe(formatName, codecName) {
-  const format = String(formatName || "").toLowerCase();
-  const codec = String(codecName || "").toLowerCase();
-  if (format.includes("ogg") || codec === "opus") return "audio/ogg";
-  if (format.includes("wav")) return "audio/wav";
-  if (format.includes("mp3") || codec === "mp3") return "audio/mpeg";
-  if (format.includes("webm")) return "audio/webm";
-  if (format.includes("3gp")) return "audio/3gpp";
-  if (format.includes("mp4") || format.includes("m4a") || format.includes("mov")) return "audio/mp4";
-  return "";
-}
-
-async function probeAudioInfo(filePath, reqId) {
-  const ffprobeAvailable = await commandExists("ffprobe");
-  if (!ffprobeAvailable) return null;
-  try {
-    const { stdout } = await execFilePromise("ffprobe", [
-      "-v",
-      "error",
-      "-show_entries",
-      "format=format_name",
-      "-show_entries",
-      "stream=codec_name",
-      "-of",
-      "json",
-      filePath,
-    ]);
-    const parsed = JSON.parse(String(stdout || "{}"));
-    const formatName = parsed?.format?.format_name || "";
-    const codecName = Array.isArray(parsed?.streams) ? parsed.streams[0]?.codec_name || "" : "";
-    if (formatName || codecName) {
-      console.log(
-        JSON.stringify({
-          level: "info",
-          msg: "audio_probe",
-          reqId,
-          filePath,
-          formatName: formatName || null,
-          codecName: codecName || null,
-        })
-      );
-    }
-    return { formatName, codecName };
-  } catch (err) {
-    console.error(
-      JSON.stringify({
-        level: "error",
-        msg: "audio_probe_fail",
-        reqId,
-        filePath,
-        error: (err && err.message) || String(err),
-      })
-    );
-    return null;
-  }
-}
-
-async function resolveAudioMime({ filePath, mimeType, filename, url, sniffedMime, reqId }) {
-  const mimeTypeRaw = String(mimeType || "");
-  const mimeTypeClean = CFG.featureAudioCleanMime ? cleanMimeType(mimeTypeRaw) : mimeTypeRaw.trim().toLowerCase();
-  const extMime = inferMimeFromPath(filename || url || filePath, "");
-  const probeInfo = await probeAudioInfo(filePath, reqId);
-  const probeMime = probeInfo ? mimeFromProbe(probeInfo.formatName, probeInfo.codecName) : "";
-  const sniffed = sniffedMime && isAudioMime(sniffedMime) ? sniffedMime : "";
-  const cleaned = mimeTypeClean && isAudioMime(mimeTypeClean) ? mimeTypeClean : "";
-  const resolved = probeMime || cleaned || extMime || sniffed || "";
-  return { mimeType: resolved, probeInfo };
-}
-
-function shouldConvertAudioToWav(mimeType) {
-  const mimeRaw = String(mimeType || "");
-  const mime = CFG.featureAudioCleanMime ? cleanMimeType(mimeRaw) : mimeRaw.toLowerCase();
-  if (!mime || !isAudioMime(mime)) return true;
-  if (mime === "audio/mpeg" || mime === "audio/wav") return false;
-  return true;
-}
-
-function isAudioMime(mime) {
-  const m = String(mime || "").toLowerCase();
-  return m.startsWith("audio/") || m === "application/ogg";
-}
-
-function cleanMimeType(input) {
-  if (!input) return "";
-  const normalized = String(input || "").trim().toLowerCase();
-  if (!normalized) return "";
-  const base = normalized.split(";")[0].trim();
-  if (base === "audio/opus" || base === "application/ogg") return "audio/ogg";
-  return base;
-}
-
-function isAudioMeta(meta) {
-  const m = meta || {};
-  const kind = String(m.kind || "").toLowerCase();
-  const mime = String(m.mimeType || "").toLowerCase();
-  const filename = String(m.filename || "");
-  const url = String(m.url || "");
-  const ext = path.extname(filename || url).replace(/^\./, "").toLowerCase();
-  if (kind === "audio") return true;
-  if (mime && (mime.startsWith("audio/") || mime === "application/ogg")) return true;
-  if (["aac", "amr", "ogg", "opus", "m4a", "mp3", "wav", "webm", "3gp", "3gpp", "caf", "flac"].includes(ext)) return true;
-  return false;
-}
-
-function sniffAudioMime(buf) {
-  const buffer = Buffer.isBuffer(buf) ? buf : Buffer.from(buf || []);
-  if (buffer.length < 4) return "";
-  if (buffer.slice(0, 4).toString("ascii") === "OggS") return "audio/ogg";
-  if (buffer[0] === 0x1a && buffer[1] === 0x45 && buffer[2] === 0xdf && buffer[3] === 0xa3) return "audio/webm";
-  if (buffer.slice(0, 4).toString("ascii") === "RIFF" && buffer.slice(8, 12).toString("ascii") === "WAVE") return "audio/wav";
-  if (buffer.slice(0, 4).toString("ascii") === "fLaC") return "audio/flac";
-  if (buffer.slice(0, 5).toString("ascii") === "#!AMR") return "audio/amr";
-  if (buffer.slice(0, 3).toString("ascii") === "ID3") return "audio/mpeg";
-  if (buffer[0] === 0xff && (buffer[1] & 0xe0) === 0xe0) return "audio/mpeg";
-  if (buffer.slice(4, 8).toString("ascii") === "ftyp") return "audio/mp4";
-  return "";
-}
-
-function extFromAudioMime(mime) {
-  const m = String(mime || "").toLowerCase();
-  if (m.indexOf("audio/ogg") === 0 || m.indexOf("audio/opus") === 0) return ".ogg";
-  if (m.indexOf("audio/3gpp") === 0 || m.indexOf("audio/3gp") === 0) return ".3gp";
-  if (m.indexOf("audio/amr") === 0) return ".amr";
-  if (m.indexOf("audio/mpeg") === 0 || m.indexOf("audio/mp3") === 0) return ".mp3";
-  if (m.indexOf("audio/mp4") === 0 || m.indexOf("audio/aac") === 0) return ".m4a";
-  if (m.indexOf("audio/x-caf") === 0) return ".caf";
-  if (m.indexOf("audio/flac") === 0) return ".flac";
-  if (m.indexOf("audio/wav") === 0) return ".wav";
-  return ".mp3";
-}
-
-function ensureAudioFileExtMatchesMime(filePath, mimeType) {
-  const desiredExt = extFromAudioMime(mimeType || "");
-  const currentExt = path.extname(filePath || "");
-  if (!desiredExt || desiredExt.toLowerCase() === currentExt.toLowerCase()) {
-    return { filePath, ext: currentExt || desiredExt, renamed: false };
-  }
-  const renamedPath = path.join(path.dirname(filePath), `audio${desiredExt}`);
-  fs.renameSync(filePath, renamedPath);
-  return { filePath: renamedPath, ext: desiredExt, renamed: true };
-}
-
-function inferMimeFromPath(filepath, fallbackMime) {
-  const ext = path.extname(String(filepath || "")).toLowerCase();
-  if (!ext) return fallbackMime || "";
-  const map = {
-    ".3gp": "audio/3gpp",
-    ".3gpp": "audio/3gpp",
-    ".ogg": "audio/ogg",
-    ".opus": "audio/ogg",
-    ".amr": "audio/amr",
-    ".aac": "audio/aac",
-    ".caf": "audio/x-caf",
-    ".flac": "audio/flac",
-    ".m4a": "audio/mp4",
-    ".mp3": "audio/mpeg",
-    ".wav": "audio/wav",
-    ".webm": "audio/webm",
-  };
-  return map[ext] || fallbackMime || "";
-}
-
-function shouldConvertAudioToMp3(filePath, mimeType) {
-  const mimeRaw = String(mimeType || "");
-  const mime = CFG.featureAudioCleanMime ? cleanMimeType(mimeRaw) : mimeRaw.toLowerCase();
-  const ext = path.extname(String(filePath || "")).toLowerCase();
-  const oggLike =
-    mime.includes("audio/ogg") ||
-    mime.includes("audio/opus") ||
-    mime.includes("application/ogg") ||
-    mime.includes("audio/webm") ||
-    mime.includes("audio/3gpp") ||
-    mime.includes("audio/3gp") ||
-    mime.includes("audio/amr");
-  if (oggLike) return true;
-  if (isAudioMime(mime) && ext !== ".mp3") return true;
-  return false;
-}
-
-async function convertAudioToMp3(inputPath, outputPath, reqId) {
-  if (typeof audioConverterOverride === "function") {
-    return audioConverterOverride(inputPath, outputPath, reqId);
-  }
-  const args = ["-y", "-i", inputPath, "-vn", "-acodec", "libmp3lame", "-ar", "44100", "-ac", "1", "-b:a", "96k", outputPath];
-  let stderr = "";
-  const maxTail = 3000;
-
-  return new Promise((resolve) => {
-    let settled = false;
-    const proc = spawn("ffmpeg", args);
-    const timer = setTimeout(() => {
-      if (settled) return;
-      settled = true;
-      try {
-        proc.kill("SIGKILL");
-      } catch {}
-      resolve({ ok: false, stderrTail: stderr.slice(-maxTail), error: "timeout" });
-    }, 25000);
-
-    proc.stderr.on("data", (chunk) => {
-      stderr += chunk.toString();
-      if (stderr.length > 20000) stderr = stderr.slice(-20000);
-    });
-
-    proc.on("error", (err) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      resolve({ ok: false, stderrTail: stderr.slice(-maxTail), error: (err && err.message) || String(err) });
-    });
-
-    proc.on("close", (code, signal) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      if (code === 0) {
-        resolve({ ok: true, stderrTail: stderr.slice(-maxTail) });
-        return;
-      }
-      resolve({ ok: false, stderrTail: stderr.slice(-maxTail), code, signal });
-    });
-  });
-}
-
-async function convertAudioToWav(inputPath, outputPath, reqId) {
-  if (typeof audioConverterOverride === "function") {
-    return audioConverterOverride(inputPath, outputPath, reqId);
-  }
-  const args = ["-y", "-i", inputPath, "-ac", "1", "-ar", "16000", "-c:a", "pcm_s16le", outputPath];
-  let stderr = "";
-  const maxTail = 3000;
-
-  return new Promise((resolve) => {
-    let settled = false;
-    const proc = spawn("ffmpeg", args);
-    const timer = setTimeout(() => {
-      if (settled) return;
-      settled = true;
-      try {
-        proc.kill("SIGKILL");
-      } catch {}
-      resolve({ ok: false, stderrTail: stderr.slice(-maxTail), error: "timeout" });
-    }, 25000);
-
-    proc.stderr.on("data", (chunk) => {
-      stderr += chunk.toString();
-      if (stderr.length > 20000) stderr = stderr.slice(-20000);
-    });
-
-    proc.on("error", (err) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      resolve({ ok: false, stderrTail: stderr.slice(-maxTail), error: (err && err.message) || String(err) });
-    });
-
-    proc.on("close", (code, signal) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      if (code === 0) {
-        resolve({ ok: true, stderrTail: stderr.slice(-maxTail) });
-        return;
-      }
-      resolve({ ok: false, stderrTail: stderr.slice(-maxTail), code, signal });
-    });
-  });
-}
-
-async function downloadToTemp(url, filepath) {
-  const target = path.resolve(filepath);
-  fs.mkdirSync(path.dirname(target), { recursive: true });
-  const fetched = await fetchMedia(url, {
-    maxBytes: CFG.mediaMaxBytesAudio,
-    timeoutMs: CFG.mediaFetchTimeoutMs,
-    allowHttp: CFG.mediaAllowHttp,
-  });
-  const sniffedMime = CFG.featureAudioSniffMime ? sniffAudioMime(fetched.buffer) : "";
-  const mimeTypeRaw = String((fetched && fetched.mimeType) || sniffedMime || "");
-  const mimeTypeClean = CFG.featureAudioCleanMime ? cleanMimeType(mimeTypeRaw) : mimeTypeRaw.trim().toLowerCase();
-  fs.writeFileSync(target, fetched.buffer);
-  return {
-    filePath: target,
-    mimeType: mimeTypeClean,
-    sizeBytes: fetched.sizeBytes || 0,
-  };
-}
-
-async function downloadAudioBuffer(mediaInput, reqId) {
-  if (typeof audioDownloaderOverride === "function") return audioDownloaderOverride(mediaInput, reqId);
-
-  const m = mediaInput || {};
-  const baseUrl = String(CFG.wanotifierMediaUrl || "").replace(/\/$/, "");
-  const url = m.url || (m.id && baseUrl ? `${baseUrl}/${m.id}` : "");
-  if (!url) throw new Error("audio_url_missing");
-
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "wanote-"));
-  const ext = extFromAudioMime(m.mimeType || "");
-  const tmpFile = path.join(dir, `audio${ext}`);
-  let sizeBytes = 0;
-  try {
-    const fetched = await fetchMedia(url, {
-      maxBytes: CFG.mediaMaxBytesAudio,
-      timeoutMs: CFG.mediaFetchTimeoutMs,
-      allowHttp: CFG.mediaAllowHttp,
-    });
-    fs.writeFileSync(tmpFile, fetched.buffer);
-    sizeBytes = fetched.sizeBytes || fetched.buffer.length || 0;
-    const sniffedMime = CFG.featureAudioSniffMime ? sniffAudioMime(fetched.buffer) : "";
-    const mimeTypeResolvedRaw =
-      m.mimeType || String((fetched && fetched.mimeType) || "").trim() || sniffedMime || "application/octet-stream";
-    const mimeTypeResolved = CFG.featureAudioCleanMime ? cleanMimeType(mimeTypeResolvedRaw) : mimeTypeResolvedRaw;
-    const renameInfo = ensureAudioFileExtMatchesMime(tmpFile, mimeTypeResolved);
-
-    console.log(
-      JSON.stringify({
-        level: "info",
-        msg: "audio_download",
-        sizeBytes,
-        contentType: mimeTypeResolved,
-        sniffedMime: sniffedMime || null,
-        reqId,
-      })
-    );
-
-    return {
-      filePath: renameInfo.filePath,
-      mimeType: mimeTypeResolved,
-      filename: m.filename || null,
-      tmpDir: dir,
-      sizeBytes,
-    };
-  } catch (err) {
-    try {
-      fs.rmSync(dir, { recursive: true, force: true });
-    } catch {}
-    throw err;
-  }
-}
-
-async function transcribeAudioOpenAI(
-  { filePath, model, mimeType = "", filename = "", reqId = null, language = null },
-  openaiClient
-) {
-  const languageHint = normalizeLanguageHint(language);
-  if (typeof audioTranscriberOverride === "function") {
-    return audioTranscriberOverride(filePath, mimeType, languageHint);
-  }
-
-  const client = openaiClient || getOpenAIClient();
-  const fileData = fs.readFileSync(filePath);
-  const bufferSize = fileData.length;
-  const mimeTypeRaw = String(mimeType || "");
-  const mimeTypeClean = CFG.featureAudioCleanMime ? cleanMimeType(mimeTypeRaw) : mimeTypeRaw.trim().toLowerCase();
-  const sniffedMime =
-    CFG.featureAudioSniffMime && (!mimeType || mimeType === "application/octet-stream") ? sniffAudioMime(fileData) : "";
-  const inferredMimeRaw = sniffedMime || inferMimeFromPath(filePath, mimeTypeClean || "");
-  const inferredMime = CFG.featureAudioCleanMime ? cleanMimeType(inferredMimeRaw) : String(inferredMimeRaw || "").toLowerCase();
-  const pathExt = path.extname(filePath || "");
-  const desiredExt = inferredMime ? extFromAudioMime(inferredMime || "") : "";
-  const fallbackExt = pathExt || desiredExt || ".wav";
-  let chosenFilename = filename || `voice${fallbackExt}`;
-  const currentExt = path.extname(chosenFilename || "");
-  if (!currentExt) {
-    chosenFilename = `${chosenFilename || "voice"}${fallbackExt}`;
-  } else if (desiredExt && currentExt.toLowerCase() !== desiredExt.toLowerCase()) {
-    chosenFilename = `${path.basename(chosenFilename, currentExt)}${desiredExt}`;
-  }
-  const chosenModel = model || CFG.openaiTranscribeModel || "gpt-4o-mini-transcribe";
-
-  console.log(
-    JSON.stringify({
-      level: "info",
-      msg: "audio_transcribe_request",
-      mimeType: inferredMime,
-      mimeTypeRaw: mimeTypeRaw || null,
-      mimeTypeClean: inferredMime || null,
-      bufferBytes: bufferSize,
-      filename: chosenFilename,
-      filePath,
-      model: chosenModel,
-      language: languageHint || null,
-      reqId,
-    })
-  );
-
-  try {
-    const file = await toFileImpl(fileData, chosenFilename, inferredMime ? { type: inferredMime } : undefined);
-    const resp = await client.audio.transcriptions.create({
-      file,
-      model: chosenModel,
-      response_format: "text",
-      language: languageHint || undefined,
-    });
-    if (resp && typeof resp === "object" && (resp.text || resp.output_text)) return String(resp.text || resp.output_text || "").trim();
-    return String(resp || "").trim();
-  } catch (err) {
-    console.error(
-      JSON.stringify({
-        level: "error",
-        msg: "audio_transcribe_error",
-        reqId,
-        mimeType: inferredMime,
-        filename: chosenFilename,
-        model: chosenModel,
-        status: (err && (err.status || err.statusCode)) || null,
-        error: (err && err.message) || String(err),
-        openaiError: err && typeof err === "object" ? err.response || err.error || null : null,
-      })
-    );
-    throw err;
-  }
-}
-
-async function transcribeAudioFile(filePath, mimeType, language) {
-  const languageHint = normalizeLanguageHint(language);
-  if (typeof audioTranscriberOverride === "function") return audioTranscriberOverride(filePath, mimeType, languageHint);
-
-  const mimeRaw = String(mimeType || "");
-  const mime = CFG.featureAudioCleanMime ? cleanMimeType(mimeRaw) : mimeRaw.toLowerCase();
-  const ext = path.extname(filePath) || (mime ? extFromAudioMime(mime) : ".wav");
-  const finalPath = filePath || path.join(os.tmpdir(), `audio-fallback${ext || ".wav"}`);
-  return transcribeAudioOpenAI(
-    { filePath: finalPath, model: CFG.openaiTranscribeModel || "gpt-4o-mini-transcribe", mimeType, language: languageHint },
-    getOpenAIClient()
-  );
-}
-
-async function transcribeAudio(filePath, mimeType, language) {
-  return transcribeAudioFile(filePath, mimeType, language);
-}
-
-function buildPipelineTranscriber(reqId) {
-  return async ({ filePath, mimeType: overrideMime, language, model }) => {
-    const out = await transcribeAudioOpenAI({
-      filePath,
-      model,
-      mimeType: overrideMime,
-      language,
-      reqId,
-      filename: path.basename(filePath),
-    });
-    if (out && typeof out === "object") {
-      return {
-        rawTranscript: String(out.text || out.rawTranscript || ""),
-        segments: Array.isArray(out.segments) ? out.segments : null,
-        modelUsed: out.modelUsed || model || "openai",
-      };
-    }
-    return { rawTranscript: String(out || ""), segments: null, modelUsed: model || "openai" };
-  };
-}
-
 function setVisionAnalyzerForTest(fn) {
   visionAnalyzer = fn;
 }
@@ -4074,10 +3184,6 @@ function setToFileForTest(fn) {
 }
 
 function setFeatureAudioSniffMimeForTest(enabled) {
-  CFG.featureAudioSniffMime = Boolean(enabled);
-}
-
-function handleVisionMediaForTest(mediaInput, lang, key) {
   return handleVisionMedia(mediaInput, lang, key);
 }
 
@@ -4102,10 +3208,6 @@ function pickCheapestPerBrand(items) {
   return pickCheapestPerBrandImpl(items);
 }
 
-function pickFirstPerBrand(items) {
-  return pickFirstPerBrandImpl(items);
-}
-
 
 function offersHeader(lang, ctx) {
   const L = lang || "dzl";
@@ -4122,24 +3224,18 @@ function offersHeader(lang, ctx) {
     if (brand && cls) return "Options " + brand + " (" + cls + ") :";
     if (category) return "Options (" + category + ") :";
     if (sizeTxt) return "Options (" + sizeTxt + ") :";
-    if (cls) return "Options (" + cls + ") :";
-    if (brand) return "Options " + brand + " :";
     return "Options :";
   }
 
   if (L === "ar") {
     if (brand && sizeTxt) return "خيارات " + brand + " " + sizeTxt + ":";
     if (brand && category) return "خيارات " + brand + " (" + category + "):";
-    if (brand && cls) return "خيارات " + brand + " (" + cls + "):";
-    if (category) return "خيارات (" + category + "):";
     if (sizeTxt) return "خيارات (" + sizeTxt + "):";
     if (cls) return "خيارات (" + cls + "):";
     if (brand) return "خيارات " + brand + ":";
     return "خيارات:";
   }
 
-  if (brand && sizeTxt) return "Options dyal " + brand + " " + sizeTxt + " :";
-  if (brand && category) return "Options dyal " + brand + " (" + category + ") :";
   if (brand && cls) return "Options dyal " + brand + " (" + cls + ") :";
   if (category) return "Options (" + category + ") :";
   if (sizeTxt) return "Options (" + sizeTxt + ") :";
@@ -4147,40 +3243,6 @@ function offersHeader(lang, ctx) {
   if (brand) return "Options dyal " + brand + " :";
   return "Options:";
 }
-
-function catalogHeader(lang, ctx) {
-  const L = lang || "dzl";
-  const c = ctx || {};
-  const brand = c.brand;
-  const category = c.category;
-  const cls = c.cls;
-  const size = Number.isFinite(Number(c.size)) ? Number(c.size) : null;
-  const sizeTxt = size ? formatSize(L, size) : "";
-  const label = category || cls || null;
-
-  if (L === "fr") {
-    if (sizeTxt) return "TV " + sizeTxt + " recommandées :";
-    if (brand && label) return "Produits " + brand + " (" + label + ") :";
-    if (label) return "Produits (" + label + ") :";
-    if (brand) return "Produits " + brand + " :";
-    return "Produits disponibles:";
-  }
-
-  if (L === "ar") {
-    if (sizeTxt) return "تلفازات " + sizeTxt + ":";
-    if (brand && label) return "منتجات " + brand + " (" + label + "):";
-    if (label) return "منتجات (" + label + "):";
-    if (brand) return "منتجات " + brand + ":";
-    return "منتجات متوفرة:";
-  }
-
-  if (sizeTxt) return "TV " + sizeTxt + " disponibles :";
-  if (brand && label) return "Produits dyal " + brand + " (" + label + ") :";
-  if (label) return "Produits (" + label + ") :";
-  if (brand) return "Produits dyal " + brand + " :";
-  return "Produits disponibles:";
-}
-
 async function tryWebsiteCatalogAnswer(userText, lang, key) {
   const text = String(userText || "").trim();
   if (!text) return null;
@@ -4208,9 +3270,6 @@ async function tryWebsiteCatalogAnswer(userText, lang, key) {
   const perPage = CFG.wcPerPage;
   const status = CFG.wcStatus;
   const maxPages = 3;
-  const matches = [];
-  const fetchJson = wcFetchJsonOverride || wcFetchJson;
-
   const brandMatches = [];
 
   for (let page = 1; page <= maxPages; page += 1) {
@@ -5355,88 +4414,8 @@ function hasProductInquirySignal(text) {
   );
 }
 
-function isMoreOptionsIntent(text) {
-  const raw = String(text || "");
-  const tokens = [
-    "plus d'options",
-    "plus options",
-    "more options",
-    "other options",
-    "autres options",
-    "option de plus",
-    "options autres",
-    "خيارات اخرى",
-    "خيارات أخرى",
-    "اختيارات اخرى",
-    "اختيارات أخرى",
-  ];
-  return hasAnyPhrase(raw, tokens);
-}
-
 function wantsProductDetails(text, lang) {
-  if (isMoreOptionsIntent(text)) return false;
-  const raw = String(text || "");
-  const basePhrases = [
-    "more info",
-    "more information",
-    "more details",
-    "more about",
-    "more about option",
-    "details",
-    "detail",
-    "specs",
-    "specifications",
-    "product page",
-    "page produit",
-    "fiche technique",
-    "fiche produit",
-    "lien",
-    "link",
-    "send link",
-    "send me the link",
-    "send photo",
-    "send image",
-    "photo",
-    "image",
-    "picture",
-    "détails",
-    "plus d'infos",
-    "plus d info",
-    "plus d’informations",
-    "plus sur",
-    "infos",
-    "معلومات",
-    "تفاصيل",
-    "مواصفات",
-    "رابط",
-    "لينك",
-    "صفحة المنتج",
-    "صور",
-    "صورة",
-    "تصاور",
-    "send photos",
-    "send images",
-  ];
-  const frPhrases = [
-    "plus d'infos",
-    "plus d info",
-    "plus d’informations",
-    "plus d'informations",
-    "plus sur",
-    "plus de détails",
-    "détails",
-    "lien",
-    "url",
-    "fiche produit",
-    "fiche technique",
-  ];
-  const arPhrases = ["معلومات", "تفاصيل", "مواصفات", "رابط", "لينك", "صفحة المنتج", "صور", "صورة", "تصاور"];
-  const dzlPhrases = ["infos", "info", "details", "detail", "lien", "link", "lien produit", "photo", "image"];
-  const phrases = basePhrases.concat(frPhrases, arPhrases, dzlPhrases);
-  const langHint = String(lang || "").toLowerCase();
-  if (langHint === "fr") return hasAnyPhrase(raw, basePhrases.concat(frPhrases));
-  if (langHint === "ar") return hasAnyPhrase(raw, basePhrases.concat(arPhrases));
-  return hasAnyPhrase(raw, phrases);
+  return wantsProductDetailsImpl(text, lang);
 }
 
 function parseSelectedOptionNumber(text) {
@@ -5512,22 +4491,12 @@ function getOfferImageUrl(offer) {
   return null;
 }
 
-function buildDetailsHeader(lang) {
-  if (lang === "fr") return "ℹ️ Détails produit";
-  if (lang === "ar") return "ℹ️ تفاصيل المنتج";
-  return "ℹ️ Product details";
-}
-
 function detailsNeedOptionReply(lang) {
-  if (lang === "fr") return "Envoyez le numéro de l’option 1 2 3 pour recevoir les détails et le lien";
-  if (lang === "ar") return "صيفط رقم الاختيار 1 2 3 باش توصلك التفاصيل والرابط";
-  return "Sift رقم الاختيار 1 2 3 باش توصلك التفاصيل والرابط";
+  return detailsNeedOptionReplyImpl(lang);
 }
 
 function detailsNoContextReply(lang) {
-  if (lang === "fr") return "Aucune liste récente disponible, demandez une liste d’options d’abord";
-  if (lang === "ar") return "ما كايناش لائحة قريبة، طلب لائحة الاختيارات أولا";
-  return "Ma kaynach l-lay7a qريبة، طلب لائحة الاختيارات أولا";
+  return detailsNoContextReplyImpl(lang);
 }
 
 function formatSpecLine(lang, labelFr, labelAr, value) {
@@ -8754,6 +7723,10 @@ app.post("/wanotifier", express.raw({ type: "*/*", limit: "2mb" }), parseWanotif
     return res.status(500).json({ ok: false, error: "Server error" });
   }
 });
+
+function handleVisionMediaForTest(mediaInput, lang, key) {
+  return handleVisionMedia(mediaInput, lang, key);
+}
 
 export {
   rankOffers,
