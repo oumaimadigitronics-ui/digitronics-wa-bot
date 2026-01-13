@@ -158,6 +158,7 @@ import {
   collectTvOffers as collectTvOffersImpl,
   bestGuessOffers as bestGuessOffersImpl,
   defaultTvOffersForReceiver as defaultTvOffersForReceiverImpl,
+  titleFromHeader as titleFromHeaderImpl,
   setFormattingConfig,
   setFormattingHelpers,
   setServiceConfig,
@@ -195,6 +196,8 @@ import {
 import {
   VOICE_NOT_UNDERSTOOD_TEMPLATE as VOICE_NOT_UNDERSTOOD_TEMPLATE_IMPL,
   extractMediaMetaFromBody as extractMediaMetaFromBodyImpl,
+  voiceNotUnderstoodTemplate as voiceNotUnderstoodTemplateImpl,
+  normalizeMediaInput as normalizeMediaInputImpl,
 } from './project/src/services/media/index.js';
 
 import {
@@ -603,7 +606,7 @@ function initializeQueryServices() {
     CFG,
     MAX_OFFERS,
     FEATURE_ASSUME_TV_ON_BRAND_ONLY,
-    bestGuessOffers, // Use the one from offers module
+    bestGuessOffers: bestGuessOffersImpl, // Use the one from offers module
   };
 
   tryDirectOfferAnswerImpl = createTryDirectOfferAnswer(queryDeps);
@@ -2688,6 +2691,10 @@ function formatOfferLine(brand, o, opts = {}) {
 
 function offersHeader(lang, ctx) {
   return offersHeaderImpl(lang, ctx);
+}
+
+function titleFromHeader(header) {
+  return titleFromHeaderImpl(header);
 }
 
 function normalizeOfferForContext(offer) {
