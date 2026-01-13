@@ -211,6 +211,25 @@ import {
   isAngryOrProblemIntent as isAngryOrProblemIntentImpl,
 } from './project/src/services/intents/index.js';
 
+import {
+  buildOfferContextEntries as buildOfferContextEntriesImpl,
+  normalizeBrandOnlyText as normalizeBrandOnlyTextImpl,
+  hasCategoryKeyword as hasCategoryKeywordImpl,
+  isBrandOnlyQuery as isBrandOnlyQueryImpl,
+  isTvOriginIntent as isTvOriginIntentImpl,
+  isTivoliOvenIntent as isTivoliOvenIntentImpl,
+  isTvReceiverIntent as isTvReceiverIntentImpl,
+  tvReceiverAnswerText as tvReceiverAnswerTextImpl,
+  defaultTvOffersForReceiver as defaultTvOffersForReceiverImpl,
+  salesIntro as salesIntroImpl,
+  xiaomiAlternativeReply as xiaomiAlternativeReplyImpl,
+  answerGoogleTvOfficialQuestion as answerGoogleTvOfficialQuestionImpl,
+  handleTvSizePriceFlow as handleTvSizePriceFlowImpl,
+  brandOnlyNoTvIntro as brandOnlyNoTvIntroImpl,
+  tryDirectOfferAnswer as tryDirectOfferAnswerImpl,
+  bestGuessOffers as bestGuessOffersImpl,
+} from './project/src/services/query/index.js';
+
 let toFileImpl = toFile;
 
 const app = express();
