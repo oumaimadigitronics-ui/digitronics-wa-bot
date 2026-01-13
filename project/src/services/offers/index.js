@@ -42,6 +42,7 @@ export {
   offersTemplate,
   buildPremiumOffersReply,
   offersHeader,
+  titleFromHeader,
   setFormattingConfig,
   setFormattingHelpers,
 } from './offersFormatting.js';
