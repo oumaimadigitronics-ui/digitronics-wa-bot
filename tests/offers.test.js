@@ -1916,7 +1916,7 @@ test("wanotifier HMAC uses rawBody including whitespace", async () => {
 
 test("brand query returns 3 TV offers with product names not SKUs sorted by price", async () => {
   const samsungTv1 = {
-    name: "Samsung Led Tv 32\" Hd",
+    name: "Samsung Led TV 32\" HD",
     sku: "SAM32HD",
     price: "899",
     stock_status: "instock",
@@ -1924,7 +1924,7 @@ test("brand query returns 3 TV offers with product names not SKUs sorted by pric
     brands: [{ name: "Samsung" }],
   };
   const samsungTv2 = {
-    name: "Samsung Smart Tv 32\" HD",
+    name: "Samsung Smart TV 32\" HD",
     sku: "SAM32SMART",
     price: "1199",
     stock_status: "instock",
@@ -1932,7 +1932,7 @@ test("brand query returns 3 TV offers with product names not SKUs sorted by pric
     brands: [{ name: "Samsung" }],
   };
   const samsungTv3 = {
-    name: "Samsung Smart TV 40\" Fhd",
+    name: "Samsung Smart TV 40\" FHD",
     sku: "SAM40FHD",
     price: "1989",
     stock_status: "instock",
@@ -1957,7 +1957,7 @@ test("brand query returns 3 TV offers with product names not SKUs sorted by pric
   assert.strictEqual(lines.length, 3, "Should return exactly 3 offers");
   
   // Should show product names, not SKUs
-  assert.ok(reply.includes("Samsung Led Tv 32") || reply.includes("Samsung Led TV 32"), "Should include first TV product name");
+  assert.ok(reply.includes("Samsung Led TV 32") || reply.includes("Samsung Led Tv 32"), "Should include first TV product name");
   assert.ok(reply.includes("Samsung Smart"), "Should include Samsung Smart TV names");
   
   // Should NOT show SKUs as the primary product identifier
