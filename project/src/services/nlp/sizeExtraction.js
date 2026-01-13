@@ -4,6 +4,7 @@
  */
 
 import { arabicIndicToAsciiDigits, normMatch, includesToken } from '../../lib/textUtils.js';
+import { extractAllowedTvSizeFromString as extractAllowedTvSizeFromStringDirect } from '../woocommerce/parser.js';
 
 /**
  * Allowed TV sizes in inches
@@ -64,10 +65,16 @@ export function hasTvSizeContext(text) {
  * @returns {number|null} - TV size in inches or null
  */
 export function extractTvSize(text, opts, offersIndex, extractAllowedTvSizeFromString) {
-  // Validate function parameter
-  if (typeof extractAllowedTvSizeFromString !== 'function') {
-    console.error('[BUG] extractAllowedTvSizeFromString is not a function!', {
-      type: typeof extractAllowedTvSizeFromString,
+  // Use injected function or fallback to direct import
+  const extractFn = typeof extractAllowedTvSizeFromString === 'function' 
+    ? extractAllowedTvSizeFromString 
+    : extractAllowedTvSizeFromStringDirect;
+  
+  // Validate the function exists (either injected or fallback)
+  if (typeof extractFn !== 'function') {
+    console.error('[BUG] extractAllowedTvSizeFromString is not available - both injected and direct import failed!', {
+      injectedType: typeof extractAllowedTvSizeFromString,
+      directType: typeof extractAllowedTvSizeFromStringDirect,
       text: text?.substring(0, 50)
     });
     return null;
@@ -80,6 +87,6 @@ export function extractTvSize(text, opts, offersIndex, extractAllowedTvSizeFromS
   const requireTvHint = opts.requireTvHint === true;
   const externalTvContext = opts.externalTvContext === true || hasTvSizeContext(text);
 
-  const size = extractAllowedTvSizeFromString(s0, { allowNoHint, requireTvHint, externalTvContext });
+  const size = extractFn(s0, { allowNoHint, requireTvHint, externalTvContext });
   return size || null;
 }
