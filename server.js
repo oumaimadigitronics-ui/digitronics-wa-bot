@@ -277,6 +277,8 @@ const __filename = ENTRY_FILE;
 const RUN_SELF_TESTS = String(process.env.RUN_SELF_TESTS || process.env.SELF_TEST || "0") === "1";
 const REQUIRE_ENV = process.argv[1] === ENTRY_FILE && !RUN_SELF_TESTS;
 const MAX_AUDIO_BYTES = Number(process.env.MEDIA_MAX_BYTES_AUDIO || 12000000) || 12000000;
+const MIN_TV_SIZE = 24;
+const MAX_TV_SIZE = 120;
 let systemPromptLoaded = false;
 let systemPromptValue = "";
 const DEFAULT_SYSTEM_PROMPT = "You are DigiBot for Digitronics.ma.";
@@ -3078,7 +3080,7 @@ async function tryWebsiteCatalogAnswer(userText, lang, key) {
 
   for (let page = 1; page <= maxPages; page += 1) {
     const url = buildWooUrl("/wp-json/wc/v3/products", { per_page: perPage, page, status, stock_status: "instock" });
-    const arr = await fetchJson(url);
+    const arr = await wcFetchJson(url);
     if (!Array.isArray(arr) || arr.length === 0) break;
 
     for (let i = 0; i < arr.length; i += 1) {
