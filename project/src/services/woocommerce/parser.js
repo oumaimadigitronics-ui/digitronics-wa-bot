@@ -248,7 +248,7 @@ export function getTvSizeFromProduct(p, offersIndex) {
   }
   
   const hasTvContext =
-    clsNorm === normMatch((offersIndex && offersIndex.classCanon && offersIndex.classCanon.tv) || "tv") ||
+    clsNorm === normMatch(offersIndex?.classCanon?.tv || "tv") ||
     categoryNames.some((n) => normMatch(n || "").indexOf("tv") >= 0 || /t(é|e)l(é|e)/i.test(String(n || "")));
 
   for (let i = 0; i < cats.length; i += 1) {
