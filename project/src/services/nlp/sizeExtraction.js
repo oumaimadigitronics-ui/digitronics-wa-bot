@@ -49,6 +49,15 @@ export function hasTvSizeContext(text) {
  * @returns {number|null} - TV size in inches or null
  */
 export function extractTvSize(text, opts, offersIndex, extractAllowedTvSizeFromString) {
+  // Validate function parameter
+  if (typeof extractAllowedTvSizeFromString !== 'function') {
+    console.error('[BUG] extractAllowedTvSizeFromString is not a function!', {
+      type: typeof extractAllowedTvSizeFromString,
+      text: text?.substring(0, 50)
+    });
+    return null;
+  }
+  
   const s0 = arabicIndicToAsciiDigits(String(text || ""));
   const categoryHint = normMatch(opts.category || opts.categoryHint || "");
   const tvCanonNorm = normMatch(offersIndex?.classCanon?.tv || "tv");
