@@ -242,7 +242,7 @@ export function listOffersForSizeAcrossBrands(size, opts) {
   const limit = Number(o.limit) || MAX_OFFERS;
 
   const items = [];
-  const brands = OFFERS_INDEX.brands || [];
+  const brands = OFFERS_INDEX?.brands || [];
   for (let i = 0; i < brands.length; i += 1) {
     const b = brands[i];
     const arr = ((OFFERS && OFFERS.offers && OFFERS.offers[b]) || [])
@@ -271,7 +271,7 @@ export function collectTvOffers({ brand, size, budget }) {
   const tvCanon = OFFERS_INDEX.classCanon?.tv;
   if (!tvCanon) return [];
 
-  const brands = brand ? [brand] : OFFERS_INDEX.brands || [];
+  const brands = brand ? [brand] : OFFERS_INDEX?.brands || [];
   const items = [];
   for (let i = 0; i < brands.length; i += 1) {
     const b = brands[i];
@@ -349,7 +349,7 @@ export function bestGuessOffers(lang, key, limit = MAX_OFFERS) {
 
   if (ctx.lastCategory) {
     const k = normMatch(ctx.lastCategory);
-    const items0 = OFFERS_INDEX.categoryToOffers?.get(k) || [];
+    const items0 = OFFERS_INDEX?.categoryToOffers?.get(k) || [];
     const items = items0
       .map((it, idx) => Object.assign({}, it, { originalIdx: typeof it.originalIdx === "number" ? it.originalIdx : idx }))
       .filter((it) => Number(((it.offer || {}).stock) || 0) > 0);
@@ -381,7 +381,7 @@ export function bestGuessOffers(lang, key, limit = MAX_OFFERS) {
 
   if (ctx.lastClass) {
     const k = normMatch(ctx.lastClass);
-    const items0 = OFFERS_INDEX.classToOffers?.get(k) || [];
+    const items0 = OFFERS_INDEX?.classToOffers?.get(k) || [];
     const items = items0
       .map((it, idx) => Object.assign({}, it, { originalIdx: typeof it.originalIdx === "number" ? it.originalIdx : idx }))
       .filter((it) => Number(((it.offer || {}).stock) || 0) > 0);

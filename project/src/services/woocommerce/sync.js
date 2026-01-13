@@ -370,9 +370,9 @@ export function setOffersForTest(offersObj, logger, logDebug) {
   if (logDebug && logger) {
     logger.info({
       msg: "set_offers_for_test",
-      brands: (OFFERS_INDEX.brands || []).length,
-      categories: (OFFERS_INDEX.categories || []).length,
-      catBuckets: OFFERS_INDEX.categoryToOffers ? OFFERS_INDEX.categoryToOffers.size : 0,
+      brands: (OFFERS_INDEX?.brands || []).length,
+      categories: (OFFERS_INDEX?.categories || []).length,
+      catBuckets: OFFERS_INDEX?.categoryToOffers?.size || 0,
     });
   }
 }
@@ -418,9 +418,9 @@ export async function syncOffersFromWoo(cfg, logger, logDebug) {
 
   return {
     kept,
-    brands: OFFERS_INDEX.brands.length,
-    classes: OFFERS_INDEX.classes.length,
-    categories: OFFERS_INDEX.categories.length,
+    brands: OFFERS_INDEX?.brands?.length || 0,
+    classes: OFFERS_INDEX?.classes?.length || 0,
+    categories: OFFERS_INDEX?.categories?.length || 0,
   };
 }
 
