@@ -143,8 +143,8 @@ export function inferTvCanonFromOffers(offersObj = {}) {
  */
 export function getTvFilterInfo() {
   const OFFERS_INDEX = getOffersIndex();
-  const tvCanon = (OFFERS_INDEX.classCanon && OFFERS_INDEX.classCanon.tv) || "Tv";
-  const tvCategory = (OFFERS_INDEX.classCanon && OFFERS_INDEX.classCanon.tvCategory) || null;
+  const tvCanon = OFFERS_INDEX.classCanon?.tv || "Tv";
+  const tvCategory = OFFERS_INDEX.classCanon?.tvCategory || null;
   return {
     tvCanon,
     tvCategory,

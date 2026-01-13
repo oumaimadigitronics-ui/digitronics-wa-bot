@@ -120,7 +120,7 @@ export function rankOffers(items, opts) {
     if (Number.isInteger(limitVal) && limitVal >= 0) limit = limitVal;
   }
   const OFFERS_INDEX = getOffersIndex();
-  const tvClassCanon = o.tvClassCanon || (OFFERS_INDEX.classCanon && OFFERS_INDEX.classCanon.tv) || null;
+  const tvClassCanon = o.tvClassCanon || OFFERS_INDEX.classCanon?.tv || null;
 
   const tvClassNorm = normMatch(tvClassCanon || "");
   const isTvContext = Boolean(className && normMatch(className) === tvClassNorm);

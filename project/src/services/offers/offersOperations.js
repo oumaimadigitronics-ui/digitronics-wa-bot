@@ -155,7 +155,7 @@ export function listOffersForBrand(brand, opts) {
   const hasCapacity = Number.isFinite(capacityNum);
   const limit = Number(o.limit) || MAX_OFFERS;
   const withOffers = Boolean(o.withOffers);
-  const useTvFilter = Boolean(o.tvOnly) || (cls && normMatch(cls) === normMatch((OFFERS_INDEX.classCanon && OFFERS_INDEX.classCanon.tv) || ""));
+  const useTvFilter = Boolean(o.tvOnly) || (cls && normMatch(cls) === normMatch(OFFERS_INDEX.classCanon?.tv || ""));
 
   // Find the actual brand key in OFFERS.offers using case-insensitive matching
   let actualBrandKey = brand;
@@ -268,7 +268,7 @@ export function listOffersForSizeAcrossBrands(size, opts) {
  */
 export function collectTvOffers({ brand, size, budget }) {
   const OFFERS_INDEX = getOffersIndex();
-  const tvCanon = OFFERS_INDEX.classCanon && OFFERS_INDEX.classCanon.tv;
+  const tvCanon = OFFERS_INDEX.classCanon?.tv;
   if (!tvCanon) return [];
 
   const brands = brand ? [brand] : OFFERS_INDEX.brands || [];
@@ -304,7 +304,7 @@ export function bestGuessOffers(lang, key, limit = MAX_OFFERS) {
   const ctx = getCtx(key);
   const L = lang || "dzl";
   const max = Number(limit) || MAX_OFFERS;
-  const tvCanon = OFFERS_INDEX.classCanon && OFFERS_INDEX.classCanon.tv;
+  const tvCanon = OFFERS_INDEX.classCanon?.tv;
 
   const sizeVal = Number(ctx.lastSize);
   if (Number.isFinite(sizeVal)) {
@@ -459,7 +459,7 @@ export function bestGuessOffers(lang, key, limit = MAX_OFFERS) {
  */
 export function defaultTvOffersForReceiver(lang, key) {
   const OFFERS_INDEX = getOffersIndex();
-  const tvCanon = (OFFERS_INDEX.classCanon && OFFERS_INDEX.classCanon.tv) || "Tv";
+  const tvCanon = OFFERS_INDEX.classCanon?.tv || "Tv";
   const tvCanonNorm = normMatch(tvCanon || "tv");
   const items0 = OFFERS_INDEX.classToOffers?.get(tvCanonNorm) || [];
   const items = items0
