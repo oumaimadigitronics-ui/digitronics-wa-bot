@@ -3065,7 +3065,15 @@ async function tryWebsiteCatalogAnswer(userText, lang, key) {
   const categoryNorm = normMatch(detectedCategory || "");
   const classNorm = normMatch(detectedClass || "");
   const brandNorm = normMatch(detectedBrand || "");
-  const isTvContext = categoryNorm === tvCanonNorm || classNorm === tvCanonNorm || Number.isFinite(sizeVal);
+  
+  // Check if this is a brand-only query (e.g., "visio")
+  const brandOnlyQuery = Boolean(detectedBrand && isBrandOnlyQuery(text, detectedBrand));
+  
+  // Determine if we should use TV context
+  const isTvContext = categoryNorm === tvCanonNorm || 
+                      classNorm === tvCanonNorm || 
+                      Number.isFinite(sizeVal) ||
+                      (brandOnlyQuery && FEATURE_ASSUME_TV_ON_BRAND_ONLY);
 
   const perPage = CFG.wcPerPage;
   const status = CFG.wcStatus;
@@ -3106,11 +3114,13 @@ async function tryWebsiteCatalogAnswer(userText, lang, key) {
       const brandNormProduct = normMatch(brand || "");
 
       const modelOrTitle = (() => {
-        const sku = String((p && p.sku) || "").trim();
-        if (sku) return sku;
         const nm = String((p && p.name) || "").trim();
-        if (nm.length > 70) return nm.slice(0, 70).trim();
-        return nm;
+        if (nm) {
+          if (nm.length > 70) return nm.slice(0, 70).trim();
+          return nm;
+        }
+        const sku = String((p && p.sku) || "").trim();
+        return sku;
       })();
 
       if (!modelOrTitle) continue;
