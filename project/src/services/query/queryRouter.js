@@ -188,7 +188,7 @@ export function isTvOriginIntent(text, ctx, deps = {}) {
   const s = normMatch(raw);
   if (!s) return false;
   
-  const tvCanonNorm = normMatch((OFFERS_INDEX.classCanon && OFFERS_INDEX.classCanon.tv) || "tv");
+  const tvCanonNorm = normMatch(OFFERS_INDEX?.classCanon?.tv || "tv");
   const ctxClassNorm = normMatch((ctx && ctx.lastClass) || "");
   const ctxCategoryNorm = normMatch((ctx && ctx.lastCategory) || "");
   const hasTvText = hasTvIntentTokens(s) || isTvContext(s);

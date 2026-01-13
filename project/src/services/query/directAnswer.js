@@ -60,7 +60,7 @@ export function createTryDirectOfferAnswer(deps) {
   
   // DEBUG: Log entry to track which code path is being hit
   logger.info({ msg: "tryDirectOfferAnswer_entry", userText: text, brand: parsed.brand, flagValue: FEATURE_ASSUME_TV_ON_BRAND_ONLY });
-  const tvCanon = OFFERS_INDEX.classCanon.tv || "Tv";
+  const tvCanon = OFFERS_INDEX?.classCanon?.tv || "Tv";
   const tvCanonNorm = normMatch(tvCanon || "tv");
   const hasForced = Boolean(parsed.intentCategory || parsed.intentClass);
   if (hasForced) resetCtxForCategoryChange(key, parsed.intentCategory, parsed.intentClass);
@@ -91,7 +91,7 @@ export function createTryDirectOfferAnswer(deps) {
   if (isTvOriginIntent(text, ctx)) {
     const tvItems = [];
     const offersObj = (OFFERS && OFFERS.offers) || {};
-    const tvCanon = OFFERS_INDEX.classCanon.tv || "Tv";
+    const tvCanon = OFFERS_INDEX?.classCanon?.tv || "Tv";
     for (const [brandKey, arr] of Object.entries(offersObj)) {
       for (let j = 0; j < arr.length; j += 1) {
         const offer = arr[j];
@@ -353,7 +353,7 @@ export function createTryDirectOfferAnswer(deps) {
 
   if (!brand && category2) {
     const k = normMatch(category2);
-    let items0 = OFFERS_INDEX.categoryToOffers.get(k) || [];
+    let items0 = OFFERS_INDEX?.categoryToOffers?.get(k) || [];
     if (!items0.length && OFFERS && OFFERS.offers) {
       const brandsAll = Object.keys(OFFERS.offers);
       const rebuilt = [];
@@ -443,7 +443,7 @@ export function createTryDirectOfferAnswer(deps) {
 
   if (!brand && cls2) {
     const k = normMatch(cls2);
-    const items0 = OFFERS_INDEX.classToOffers.get(k) || [];
+    const items0 = OFFERS_INDEX?.classToOffers?.get(k) || [];
     const items = items0
       .map((it, idx) => Object.assign({}, it, { originalIdx: idx }))
       .filter((it) => Number(((it.offer || {}).stock) || 0) > 0);

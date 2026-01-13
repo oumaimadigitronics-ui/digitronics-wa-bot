@@ -53,7 +53,7 @@ export function parseUserQuery(text, opts = {}, dependencies = {}) {
   const explicitBrand = (modelHit && modelHit.brand) || detectBrand(raw, OFFERS_INDEX);
   const ctxBrand = ctx.lastBrand || null;
   const ctxBrandValid = Boolean(ctxBrand && OFFERS && OFFERS.offers && OFFERS.offers[ctxBrand]);
-  const tvCanonNorm = normMatch(OFFERS_INDEX.classCanon.tv || "tv");
+  const tvCanonNorm = normMatch(OFFERS_INDEX?.classCanon?.tv || "tv");
   const ctxCategoryNorm = normMatch(ctx.lastCategory || "");
   const ctxClassNorm = normMatch(ctx.lastClass || "");
   const strictCategory =
@@ -90,12 +90,12 @@ export function parseUserQuery(text, opts = {}, dependencies = {}) {
     (detectedCategory && normMatch(detectedCategory) !== tvCanonNorm && normMatch(detectedCategory) !== "tv") ||
     (detectedClass && normMatch(detectedClass) !== tvCanonNorm);
 
-  const tvClass = OFFERS_INDEX.classCanon.tv || "Tv";
+  const tvClass = OFFERS_INDEX?.classCanon?.tv || "Tv";
   const brand = detectedBrand || null;
   const cls = sizeVal ? tvClass || detectedClass || detectedCategory || null : detectedClass || null;
   const category = sizeVal
     ? detectedCategory ||
-      (cls && normMatch(cls) === normMatch(OFFERS_INDEX.classCanon.tv || "tv") ? cls : OFFERS_INDEX.classCanon.tv || null)
+      (cls && normMatch(cls) === normMatch(OFFERS_INDEX?.classCanon?.tv || "tv") ? cls : OFFERS_INDEX?.classCanon?.tv || null)
     : detectedCategory || null;
   const model = modelHit && modelHit.offer ? modelHit.offer.model || modelHit.offer.sku || modelHit.offer.name || null : null;
   const priceIntent = detectPriceIntent(raw);
