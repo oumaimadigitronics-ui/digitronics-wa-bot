@@ -1913,3 +1913,66 @@ test("wanotifier HMAC uses rawBody including whitespace", async () => {
   assert.ok(json.ok);
   await close();
 });
+
+test("brand query returns 3 TV offers with product names not SKUs sorted by price", async () => {
+  const samsungTv1 = {
+    name: "Samsung Led TV 32\" HD",
+    sku: "SAM32HD",
+    price: "899",
+    stock_status: "instock",
+    categories: [{ name: "Tv" }],
+    brands: [{ name: "Samsung" }],
+  };
+  const samsungTv2 = {
+    name: "Samsung Smart TV 32\" HD",
+    sku: "SAM32SMART",
+    price: "1199",
+    stock_status: "instock",
+    categories: [{ name: "Tv" }],
+    brands: [{ name: "Samsung" }],
+  };
+  const samsungTv3 = {
+    name: "Samsung Smart TV 40\" FHD",
+    sku: "SAM40FHD",
+    price: "1989",
+    stock_status: "instock",
+    categories: [{ name: "Tv" }],
+    brands: [{ name: "Samsung" }],
+  };
+  const samsungFridge = {
+    name: "Samsung Refrigerateur 300L",
+    sku: "SAMFR300",
+    price: "3500",
+    stock_status: "instock",
+    categories: [{ name: "Refrigerateur" }],
+    brands: [{ name: "Samsung" }],
+  };
+
+  setWcFetchJsonForTest(mockWcFetch([[samsungTv1, samsungTv2, samsungTv3, samsungFridge], []]));
+  // Use a query that triggers product inquiry signal and detects brand
+  const reply = await tryWebsiteCatalogAnswer("samsung tv", "dzl", "k-brand-samsung");
+  
+  // Should return 3 TV offers (not the fridge)  
+  const lines = reply.split(/\r?\n/).filter((l) => /^[0-9]️⃣/.test(l.trim()));
+  assert.strictEqual(lines.length, 3, "Should return exactly 3 offers");
+  
+  // Should show product names, not SKUs
+  assert.ok(reply.includes("Samsung Led TV 32") || reply.includes("Samsung Led Tv 32"), "Should include first TV product name");
+  assert.ok(reply.includes("Samsung Smart"), "Should include Samsung Smart TV names");
+  
+  // Should NOT show SKUs as the primary product identifier
+  assert.ok(!reply.match(/\b(SAM32HD|SAM32SMART|SAM40FHD)\b/), "Should not show SKUs as primary identifiers");
+  
+  // Should not show the fridge
+  assert.ok(!reply.includes("Refrigerateur"), "Should not include fridge");
+  assert.ok(!reply.includes("SAMFR300"), "Should not include fridge SKU");
+  
+  // Should be sorted by price (cheapest first)
+  const pos899 = reply.indexOf("899");
+  const pos1199 = reply.indexOf("1199");
+  const pos1989 = reply.indexOf("1989");
+  assert.ok(pos899 > 0 && pos899 < pos1199, "899 dh should appear before 1199 dh");
+  assert.ok(pos1199 < pos1989, "1199 dh should appear before 1989 dh");
+  
+  assertNoQuestionMarks(reply);
+});
