@@ -162,6 +162,16 @@ function isSizeAttrKey(name) {
 export function extractAllowedTvSizeFromString(str, opts = {}) {
   const s0 = arabicIndicToAsciiDigits(String(str || ""));
   if (!s0) return 0;
+  
+  // Early return for bare TV size numbers
+  const trimmed = s0.trim();
+  if (/^\d{2,3}$/.test(trimmed)) {
+    const num = Number(trimmed);
+    if (ALLOWED_TV_SIZES.includes(num)) {
+      return num;
+    }
+  }
+  
   const s = s0.toLowerCase();
   const requireTvHint = opts.requireTvHint === true;
   const allowNoHint = opts.allowNoHint === true;
