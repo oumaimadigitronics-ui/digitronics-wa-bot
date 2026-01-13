@@ -31,6 +31,10 @@ export function findClosestByPrice({ offers = [], targetPrice, limit = resolveLi
  * @param {number} targetPrice - Target price
  * @param {number} limit - Total number of offers to return (default: 3)
  * @returns {Object} - Object with 'below' and 'above' arrays
+ * 
+ * Note: The allocation prioritizes "above" items when limit is odd (e.g., limit=3 → 1 below, 2 above).
+ * This is intentional as users expressing a price typically mean "up to X", making more expensive
+ * options more relevant for upselling, while cheaper options serve as fallback.
  */
 export function findClosestOffersWithRanges({ offers = [], targetPrice, limit = 3 } = {}) {
   if (!Array.isArray(offers) || !Number.isFinite(targetPrice)) {
@@ -52,7 +56,7 @@ export function findClosestOffersWithRanges({ offers = [], targetPrice, limit = 
     .sort((a, b) => a.price - b.price); // Lowest above first
   
   // Allocate limit between below and above
-  // Use floor for both to ensure we don't exceed limit
+  // Prioritize "above" items for upselling when limit is odd
   const belowLimit = Math.floor(limit / 2);
   const aboveLimit = limit - belowLimit; // Remaining goes to above
   

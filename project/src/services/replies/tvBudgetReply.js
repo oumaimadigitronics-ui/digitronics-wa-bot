@@ -86,7 +86,7 @@ export function buildTvBudgetReply({ budget, matches = [], preferredLang = 'dz',
       above.forEach((offer, index) => {
         const price = formatPrice(offer.price);
         const title = offer.title || offer.name || offer.model || offer.sku || 'Model';
-        const line = `${below.length + index + 1}) ${title} — ${price}`;
+        const line = `${index + 1}) ${title} — ${price}`; // Restart numbering from 1 for above section
         const link = offer.url || offer.link;
         parts.push(link ? `${line} (${link})` : line);
       });
