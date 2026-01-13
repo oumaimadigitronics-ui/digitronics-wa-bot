@@ -10,6 +10,80 @@ import {
 } from '../woocommerce/parser.js';
 
 /**
+ * Check if text is a bare number (2-5 digits)
+ * @param {string} text - User input text
+ * @returns {boolean} - True if text is a bare number
+ */
+export function isBareNumber(text) {
+  const trimmed = String(text || "").trim();
+  return /^\d{2,5}$/.test(trimmed);
+}
+
+/**
+ * Check if a bare number is a price (NOT a TV size)
+ * @param {string} text - User input text
+ * @returns {boolean} - True if text is a bare price number
+ */
+export function isBarePrice(text) {
+  const trimmed = String(text || "").trim();
+  if (!isBareNumber(trimmed)) return false;
+  
+  const num = Number(trimmed);
+  
+  // If it's a valid TV size, it's NOT a price
+  if (ALLOWED_TV_SIZES.includes(num)) {
+    return false;
+  }
+  
+  // If it's a price-like number (typically >= 500 or > 100 and not a TV size)
+  if (num >= 500 || (num > 100 && !ALLOWED_TV_SIZES.includes(num))) {
+    return true;
+  }
+  
+  return false;
+}
+
+/**
+ * Generate clarification reply for bare price
+ * @param {string} text - User input text (the bare number)
+ * @param {string} lang - Language code (ar, fr, en, dz)
+ * @returns {string|null} - Clarification message or null if not a bare price
+ */
+export function barePriceClarification(text, lang = 'dz') {
+  if (!isBarePrice(text)) return null;
+  
+  const num = Number(String(text || "").trim());
+  const priceLabel = `${num}dh`;
+  
+  if (lang === 'ar') {
+    return `🤔 ${priceLabel} - شنو بغيتي؟
+📺 تلفاز؟ ثلاجة؟ غسالة؟
+
+كتب "tv ${num}" ولا "frigo ${num}" باش نعاونك!`;
+  }
+  
+  if (lang === 'fr') {
+    return `🤔 ${priceLabel} - qu'est-ce que vous cherchez?
+📺 TV? Frigo? Machine à laver?
+
+Écrivez "tv ${num}" ou "frigo ${num}" pour que je puisse vous aider!`;
+  }
+  
+  if (lang === 'en') {
+    return `🤔 ${priceLabel} - what are you looking for?
+📺 TV? Fridge? Washing machine?
+
+Type "tv ${num}" or "fridge ${num}" so I can help you!`;
+  }
+  
+  // Default Darija
+  return `🤔 ${priceLabel} - chno bghiti?
+📺 TV? Frigo? Machine à laver?
+
+Kteb "tv ${num}" wla "frigo ${num}" bach n3awnk!`;
+}
+
+/**
  * Check if text contains TV intent tokens
  * @param {string} text - User input text
  * @returns {boolean} - True if TV intent detected
