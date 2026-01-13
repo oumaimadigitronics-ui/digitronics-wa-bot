@@ -3077,6 +3077,7 @@ async function tryWebsiteCatalogAnswer(userText, lang, key) {
   const status = CFG.wcStatus;
   const maxPages = 3;
   const brandMatches = [];
+  const matches = [];
 
   for (let page = 1; page <= maxPages; page += 1) {
     const url = buildWooUrl("/wp-json/wc/v3/products", { per_page: perPage, page, status, stock_status: "instock" });
