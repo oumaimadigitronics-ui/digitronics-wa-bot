@@ -21,10 +21,10 @@ const BRAND_PRIORITY = [
   "Tivoli",
 ];
 
-const MIN_TV_SIZE = 24;
-const MAX_TV_SIZE = 120;
-const ALLOWED_TV_SIZES = Object.freeze([24, 27, 32, 40, 42, 43, 49, 50, 55, 58, 60, 65, 70, 75, 77, 82, 83, 85, 95, 98, 100, 115]);
-const TV_SIZE_HINTS = new Set(ALLOWED_TV_SIZES);
+export const MIN_TV_SIZE = 24;
+export const MAX_TV_SIZE = 120;
+export const ALLOWED_TV_SIZES = Object.freeze([24, 27, 32, 40, 42, 43, 49, 50, 55, 58, 60, 65, 70, 75, 77, 82, 83, 85, 95, 98, 100, 115]);
+export const TV_SIZE_HINTS = new Set(ALLOWED_TV_SIZES);
 const SIZE_ATTR_KEYS = ["size", "taille", "pouces", "inch", "screen size", "diagonale", "pa_size"];
 
 /**
@@ -153,12 +153,6 @@ function isSizeAttrKey(name) {
  * @param {Object} opts - Options
  * @returns {number} TV size or 0
  */
-/**
- * Extract allowed TV size from string
- * @param {string} str - String to parse
- * @param {Object} opts - Options
- * @returns {number} TV size or 0
- */
 export function extractAllowedTvSizeFromString(str, opts = {}) {
   const s0 = arabicIndicToAsciiDigits(String(str || ""));
   if (!s0) return 0;
@@ -213,11 +207,6 @@ export function extractAllowedTvSizeFromString(str, opts = {}) {
   return 0;
 }
 
-/**
- * Get TV size from product name and SKU
- * @param {Object} p - WooCommerce product
- * @returns {number} TV size or 0
- */
 /**
  * Get TV size from product name and SKU
  * @param {Object} p - WooCommerce product

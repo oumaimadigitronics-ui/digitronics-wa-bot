@@ -4,12 +4,10 @@
  */
 
 import { arabicIndicToAsciiDigits, normMatch, includesToken } from '../../lib/textUtils.js';
-import { extractAllowedTvSizeFromString as extractAllowedTvSizeFromStringDirect } from '../woocommerce/parser.js';
-
-/**
- * Allowed TV sizes in inches
- */
-const ALLOWED_TV_SIZES = [24, 27, 32, 40, 42, 43, 49, 50, 55, 58, 60, 65, 70, 75, 77, 82, 83, 85, 95, 98, 100, 115];
+import { 
+  extractAllowedTvSizeFromString as extractAllowedTvSizeFromStringDirect,
+  ALLOWED_TV_SIZES
+} from '../woocommerce/parser.js';
 
 /**
  * Check if text contains TV intent tokens
