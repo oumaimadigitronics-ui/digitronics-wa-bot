@@ -54,6 +54,22 @@ import {
 } from './project/src/services/replies/helpers.js';
 
 import {
+  setOfferFormatterConfig,
+  formatSize as formatSizeImpl,
+  offerPriceText as offerPriceTextImpl,
+  buildOfferDisplayName as buildOfferDisplayNameImpl,
+  formatOfferLine as formatOfferLineImpl,
+} from './project/src/services/replies/offerFormatter.js';
+
+import {
+  setListBuilderConfig,
+  buildOfferItemsFromEntries as buildOfferItemsFromEntriesImpl,
+  offersTemplate as offersTemplateImpl,
+  buildPremiumOffersReply as buildPremiumOffersReplyImpl,
+  offersHeader as offersHeaderImpl,
+} from './project/src/services/replies/listBuilder.js';
+
+import {
   normalizeIntentText,
   hasAnyToken,
   hasAnyEmoji,
@@ -137,12 +153,6 @@ import {
   matchTvTitleHint as matchTvTitleHintImpl,
   inferTvCanonFromOffers as inferTvCanonFromOffersImpl,
   getTvFilterInfo as getTvFilterInfoImpl,
-  formatSize as formatSizeImpl,
-  buildOfferDisplayName as buildOfferDisplayNameImpl,
-  formatOfferLine as formatOfferLineImpl,
-  offersHeader as offersHeaderImpl,
-  offersTemplate as offersTemplateImpl,
-  buildPremiumOffersReply as buildPremiumOffersReplyImpl,
   listOffersForBrand as listOffersForBrandImpl,
   listOffersForSizeAcrossBrands as listOffersForSizeAcrossBrandsImpl,
   collectTvOffers as collectTvOffersImpl,
@@ -854,6 +864,10 @@ function formatSize(lang, size) {
   return formatSizeImpl(lang, size);
 }
 
+function buildOfferDisplayName(brand, offer, lang = "dzl") {
+  return buildOfferDisplayNameImpl(brand, offer, lang);
+}
+
 function sanitizeUrlNoQuestion(urlStr) {
   return sanitizeUrlNoQuestionImpl(urlStr);
 }
@@ -966,6 +980,23 @@ setFormattingConfig({
 setFormattingHelpers({
   ensureNoQuestion,
   stripUrlQueriesInText,
+});
+
+// Initialize list builder module
+setListBuilderConfig({
+  CFG,
+  MAX_OFFERS,
+  ORDER_FORM_URL_SAFE,
+  FEATURE_OFFERS_BOX_HEADER,
+  FEATURE_OFFER_TAIL_COMPACT,
+  FEATURE_OFFER_ITEM_EMOJI_FORMAT,
+});
+
+// Initialize offer formatter module
+setOfferFormatterConfig({
+  FEATURE_LEGACY_OFFER_LINE,
+  FEATURE_SHOW_SKU_IN_OFFERS,
+  FEATURE_LEGACY_OFFER_DISPLAY_NAME,
 });
 
 setServiceConfig({
@@ -2602,175 +2633,32 @@ function buildProductLink(product, fallbackName) {
   return `https://digitronics.ma/search?q=${query}`;
 }
 
-function buildOfferDisplayName(brand, offer, lang = "dzl") {
-  return buildOfferDisplayNameImpl(brand, offer, lang);
-}
-
-function boxHeader(title) {
-  const safeTitle = String(title || "").trim() || "Offres Premium";
-  const inner = `   ${safeTitle}   `;
-  const width = Math.max(30, inner.length);
-  const top = `╭${"─".repeat(width)}╮`;
-  const mid = `│${inner}${" ".repeat(width - inner.length)}│`;
-  const bottom = `╰${"─".repeat(width)}╯`;
-  return [top, mid, bottom].join("\n");
-}
-
-const OFFER_INDEX_EMOJI = ["1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "9️⃣", "🔟"];
-const OFFERS_SEPARATOR = "";
-
-function formatOfferIndex(idx) {
-  const n = Number(idx);
-  if (Number.isFinite(n) && n >= 1 && n <= OFFER_INDEX_EMOJI.length) return OFFER_INDEX_EMOJI[n - 1];
-  return `${n}️⃣`;
-}
-
-function formatOfferBlockIndex(idx) {
-  const n = Number(idx);
-  if (Number.isFinite(n) && n >= 1 && n <= OFFER_INDEX_EMOJI.length) return OFFER_INDEX_EMOJI[n - 1];
-  if (Number.isFinite(n)) return `${n}.`;
-  return "";
-}
-
-function formatOfferItem({ idx, name, price }) {
-  const numEmoji = formatOfferIndex(idx);
-  const safeName = String(name || "").trim() || "Produit";
-  const safePrice = String(price || "").trim() || "Prix sur demande";
-  return `${numEmoji} *${safeName}*\n💰 ${safePrice}`;
-}
-
-function formatOfferBlock({ index, brand, offer }) {
-  const safeBrand = String(brand || "").trim();
-  const nameRaw = String((offer && offer.name) || "").trim();
-  const modelRaw = String((offer && offer.model) || "").trim();
-  const skuRaw = String((offer && offer.sku) || "").trim();
-  let displayName = nameRaw;
-  if (!displayName) {
-    displayName = [safeBrand, modelRaw || skuRaw].filter(Boolean).join(" ").trim();
-  }
-  if (!displayName) displayName = safeBrand || modelRaw || skuRaw || "Produit";
-  const priceBase = offerPriceText(offer || {});
-  let pricePart = String(priceBase || "").trim() || "Prix sur demande";
-  if (!/\bdh\b/i.test(pricePart)) {
-    pricePart = `${pricePart} dh`.trim();
-  }
-  const lines = [`${formatOfferBlockIndex(index)} *${displayName}*`];
-  if (skuRaw) lines.push(`  🧾 ${skuRaw}`);
-  lines.push(`  💰 ${pricePart}`);
-  return lines.join("\n").trim();
-}
-
-function purchaseBlock(lang) {
-  const form = ORDER_FORM_URL_SAFE;
-  if (lang === "fr") {
-    return [
-      OFFERS_SEPARATOR,
-      "🌐 Website: https://digitronics.ma",
-      `📝 Direct order form: ${form}`,
-      "✅ Vous pouvez commander sur le site ou remplir le formulaire pour une commande directe",
-    ];
-  }
-  if (lang === "ar") {
-    return [
-      OFFERS_SEPARATOR,
-      "🌐 Website: https://digitronics.ma",
-      `📝 Direct order form: ${form}`,
-      "✅ تقدر تطلب من الموقع أو تعمر الفورم للطلب المباشر",
-    ];
-  }
-  return [
-    OFFERS_SEPARATOR,
-    "🌐 Website: https://digitronics.ma",
-    `📝 Direct order form: ${form}`,
-    "✅ تقدر تطلب من الويبسايت ولا تعمر الفورم للطلب المباشر",
-  ];
-}
-
-function purchaseBlockCompact(lang) {
-  const form = ORDER_FORM_URL_SAFE;
-  if (lang === "fr") {
-    return [OFFERS_SEPARATOR, "🌐 digitronics.ma", `📝 Formulaire: ${form}`];
-  }
-  if (lang === "ar") {
-    return [OFFERS_SEPARATOR, "🌐 digitronics.ma", `📝 فورم الطلب: ${form}`];
-  }
-  return [OFFERS_SEPARATOR, "🌐 digitronics.ma", `📝 فورم الطلب: ${form}`];
-}
-
 function shortenKeepingTail(base, tail, maxChars) {
   return shortenKeepingTailImpl(base, tail, maxChars, { CFG, shortenNoQuestion });
 }
 
-function offersTemplate({ title, subtitleFR, subtitleAR, lines, lang, maxChars }) {
-  const safeTitle = String(title || "").trim() || "Offres Premium";
-  const headerLines = [FEATURE_OFFERS_BOX_HEADER ? boxHeader(title) : `*${safeTitle}*`];
-  if (subtitleFR) headerLines.push(`🇫🇷 ${subtitleFR}`);
-  if (subtitleAR) headerLines.push(`🇲🇦 ${subtitleAR}`);
-  headerLines.push(OFFERS_SEPARATOR);
-
-  const itemLines = Array.isArray(lines) ? lines : [];
-  const tailLines = FEATURE_OFFER_TAIL_COMPACT ? purchaseBlockCompact(lang || "dzl") : purchaseBlock(lang || "dzl");
-  const headerBlock = headerLines.join("\n");
-  const tailBlock = tailLines.join("\n");
-  const limit = Number(maxChars) || CFG.maxReplyChars;
-
-  const candidateLines = itemLines.slice(0, MAX_OFFERS);
-  const buildBlock = (count) => {
-    const items = count > 0 ? candidateLines.slice(0, count).join("\n\n") : "";
-    return [headerBlock, items].filter(Boolean).join("\n\n");
-  };
-
-  let chosenCount = candidateLines.length;
-  for (let count = candidateLines.length; count > 0; count -= 1) {
-    const combined = [buildBlock(count), tailBlock].filter(Boolean).join("\n\n");
-    if (combined.length <= limit) {
-      chosenCount = count;
-      break;
-    }
-  }
-
-  const baseBlock = buildBlock(chosenCount);
-  const output = shortenKeepingTail(baseBlock, tailBlock, limit);
-
-  const cleaned = ensureNoQuestion(stripUrlQueriesInText(output));
-  return cleaned;
-}
-
 function offerPriceText(offer) {
-  const priceNum = Number((offer && offer.price) || NaN);
-  return Number.isFinite(priceNum) ? `${priceNum} dh` : "Prix sur demande";
-}
-
-function titleFromHeader(header) {
-  return String(header || "").replace(/[：:]\s*$/, "").trim();
-}
-
-function defaultOfferSubtitles() {
-  return {
-    subtitleFR: "Sélection premium disponible",
-    subtitleAR: "اختيارات بريميوم متوفرة",
-  };
+  return offerPriceTextImpl(offer);
 }
 
 function buildOfferItemsFromEntries(entries, lang) {
-  const list = Array.isArray(entries) ? entries : [];
-  if (FEATURE_OFFER_ITEM_EMOJI_FORMAT) {
-    return list.map((entry, idx) => {
-      const offer = entry && entry.offer ? entry.offer : entry;
-      const brand = (entry && entry.brand) || (offer && offer.brand) || "";
-      return formatOfferBlock({ index: idx + 1, brand, offer: offer || {} });
-    });
-  }
-  return list.map((entry, idx) => {
-    const offer = entry && entry.offer ? entry.offer : entry;
-    const brand = (entry && entry.brand) || (offer && offer.brand) || "";
-    const displayName = buildOfferDisplayName(brand, offer || {}, lang || "dzl");
-    return formatOfferItem({
-      idx: idx + 1,
-      name: displayName,
-      price: offerPriceText(offer || {}),
-    });
-  });
+  return buildOfferItemsFromEntriesImpl(entries, lang);
+}
+
+function offersTemplate({ title, subtitleFR, subtitleAR, lines, lang, maxChars }) {
+  return offersTemplateImpl({ title, subtitleFR, subtitleAR, lines, lang, maxChars });
+}
+
+function buildPremiumOffersReply({ title, entries, lang, maxChars }) {
+  return buildPremiumOffersReplyImpl({ title, entries, lang, maxChars });
+}
+
+function formatOfferLine(brand, o, opts = {}) {
+  return formatOfferLineImpl(brand, o, opts);
+}
+
+function offersHeader(lang, ctx) {
+  return offersHeaderImpl(lang, ctx);
 }
 
 function normalizeOfferForContext(offer) {
@@ -2821,78 +2709,6 @@ function buildOfferContextEntries(entries) {
       })
       .filter(Boolean),
   };
-}
-
-function buildPremiumOffersReply({ title, entries, lang, maxChars }) {
-  // DEBUG: Log all offers being built into response
-  const offerSummary = entries.slice(0, 3).map(e => ({ 
-    brand: e.brand, 
-    name: (e.offer && e.offer.name) || '', 
-    model: (e.offer && e.offer.model) || '',
-    price: (e.offer && e.offer.price) || 0
-  }));
-  logger.info({ msg: "buildPremiumOffersReply_called", title, offerCount: entries.length, offers: offerSummary });
-  
-  const subtitles = defaultOfferSubtitles();
-  const lines = buildOfferItemsFromEntries(entries, lang);
-  return offersTemplate({
-    title,
-    subtitleFR: subtitles.subtitleFR,
-    subtitleAR: subtitles.subtitleAR,
-    lines,
-    lang,
-    maxChars,
-  });
-}
-
-// RULE #1 no questions
-// Offer message format: simple name + price
-function formatOfferLine(brand, o, opts = {}) {
-  if (FEATURE_LEGACY_OFFER_LINE) {
-    if (FEATURE_SHOW_SKU_IN_OFFERS) {
-      const offer = o || {};
-      const brandName = String(brand || "").trim();
-      const nameRaw = String(offer.name || "").trim();
-      const modelRaw = String(offer.model || "").trim();
-      const skuRaw = String(offer.sku || "").trim();
-      let displayName = nameRaw;
-      if (!displayName) {
-        displayName = [brandName, modelRaw || skuRaw].filter(Boolean).join(" ").trim();
-      }
-      if (!displayName) displayName = brandName || modelRaw || skuRaw || "";
-      const displayNorm = normMatch(displayName);
-      if (skuRaw && !displayNorm.includes(normMatch(skuRaw))) {
-        displayName = `${displayName} (SKU: ${skuRaw})`.trim();
-      } else if (modelRaw && !displayNorm.includes(normMatch(modelRaw))) {
-        displayName = `${displayName} (${modelRaw})`.trim();
-      }
-      const pricePart = offerPriceText(offer);
-      return `• ${displayName} - **${pricePart}**`.trim();
-    }
-
-    let displayName = buildOfferDisplayName(brand, o, opts.lang || "dzl");
-    const typeName = String((o && o.type) || "").trim();
-    if (typeName && !normMatch(displayName).includes(normMatch(typeName))) {
-      displayName = `${displayName} ${typeName}`.trim();
-    }
-    displayName = displayName.replace(/\s+simple\s+/gi, " ").replace(/\s+simple$/i, "").trim();
-    const pricePart = offerPriceText(o || {});
-    return `• ${displayName} - **${pricePart}**`.trim();
-  }
-
-  const offer = o || {};
-  let displayName = "";
-  if (FEATURE_LEGACY_OFFER_DISPLAY_NAME) {
-    displayName = String(offer.name || "").trim();
-    if (!displayName) {
-      displayName = buildOfferDisplayName(brand, offer, opts.lang || "dzl");
-    }
-  } else {
-    displayName = buildOfferDisplayName(brand, offer, opts.lang || "dzl");
-  }
-  displayName = displayName.replace(/\s+simple\s+/gi, " ").replace(/\s+simple$/i, "").trim();
-  const pricePart = offerPriceText(offer);
-  return `• ${displayName} - **${pricePart}**`.trim();
 }
 
 function priceSummaryText(lang, min, max) {
@@ -3209,40 +3025,6 @@ function pickCheapestPerBrand(items) {
 }
 
 
-function offersHeader(lang, ctx) {
-  const L = lang || "dzl";
-  const c = ctx || {};
-  const brand = c.brand;
-  const cls = c.cls;
-  const category = c.category;
-  const size = Number.isFinite(Number(c.size)) ? Number(c.size) : null;
-  const sizeTxt = size ? formatSize(L, size) : "";
-
-  if (L === "fr") {
-    if (brand && sizeTxt) return "Options " + brand + " " + sizeTxt + " :";
-    if (brand && category) return "Options " + brand + " (" + category + ") :";
-    if (brand && cls) return "Options " + brand + " (" + cls + ") :";
-    if (category) return "Options (" + category + ") :";
-    if (sizeTxt) return "Options (" + sizeTxt + ") :";
-    return "Options :";
-  }
-
-  if (L === "ar") {
-    if (brand && sizeTxt) return "خيارات " + brand + " " + sizeTxt + ":";
-    if (brand && category) return "خيارات " + brand + " (" + category + "):";
-    if (sizeTxt) return "خيارات (" + sizeTxt + "):";
-    if (cls) return "خيارات (" + cls + "):";
-    if (brand) return "خيارات " + brand + ":";
-    return "خيارات:";
-  }
-
-  if (brand && cls) return "Options dyal " + brand + " (" + cls + ") :";
-  if (category) return "Options (" + category + ") :";
-  if (sizeTxt) return "Options (" + sizeTxt + ") :";
-  if (cls) return "Options (" + cls + ") :";
-  if (brand) return "Options dyal " + brand + " :";
-  return "Options:";
-}
 async function tryWebsiteCatalogAnswer(userText, lang, key) {
   const text = String(userText || "").trim();
   if (!text) return null;
