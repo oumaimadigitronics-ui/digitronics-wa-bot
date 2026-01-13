@@ -271,7 +271,7 @@ export class BotService {
                           matches,
                           preferredLang: preferredLang || 'dz',
                           allOffers: offers,
-                          showRanges: true,
+                          showRanges: this.cfg?.ENABLE_PRICE_RANGES !== false, // Default to true unless explicitly disabled
                         })
                       : matches.length > 0
                         ? buildPriceReply({

@@ -52,8 +52,9 @@ export function findClosestOffersWithRanges({ offers = [], targetPrice, limit = 
     .sort((a, b) => a.price - b.price); // Lowest above first
   
   // Allocate limit between below and above
-  const belowLimit = Math.ceil(limit / 2);
-  const aboveLimit = Math.floor(limit / 2) + 1;
+  // Use floor for both to ensure we don't exceed limit
+  const belowLimit = Math.floor(limit / 2);
+  const aboveLimit = limit - belowLimit; // Remaining goes to above
   
   const below = belowOffers.slice(0, belowLimit);
   const above = aboveOffers.slice(0, aboveLimit);

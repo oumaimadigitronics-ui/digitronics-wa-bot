@@ -17,14 +17,19 @@ test('findClosestOffersWithRanges splits offers correctly', () => {
   assert.ok(result.below, 'Should have below array');
   assert.ok(result.above, 'Should have above array');
   
+  // With limit=3: belowLimit = floor(3/2) = 1, aboveLimit = 3-1 = 2
+  assert.strictEqual(result.below.length, 1, 'Should have 1 below offer');
+  assert.strictEqual(result.above.length, 2, 'Should have 2 above offers');
+  
+  // Total should not exceed limit
+  assert.ok(result.below.length + result.above.length <= 3, 'Total offers should not exceed limit');
+  
   // Below should have prices <= 1000, sorted highest first
-  assert.strictEqual(result.below.length, 2, 'Should have 2 below offers (ceil(3/2))');
   assert.strictEqual(result.below[0].price, 999, 'First below should be 999');
-  assert.strictEqual(result.below[1].price, 799, 'Second below should be 799');
   
   // Above should have prices > 1000, sorted lowest first
-  assert.ok(result.above.length >= 1, 'Should have at least 1 above offer');
   assert.strictEqual(result.above[0].price, 1199, 'First above should be 1199');
+  assert.strictEqual(result.above[1].price, 1499, 'Second above should be 1499');
 });
 
 test('findClosestOffersWithRanges handles no below offers', () => {

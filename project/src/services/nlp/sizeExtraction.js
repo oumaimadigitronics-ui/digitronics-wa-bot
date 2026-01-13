@@ -10,6 +10,18 @@ import {
 } from '../woocommerce/parser.js';
 
 /**
+ * Minimum price threshold for bare price detection
+ * Numbers >= this value are likely prices (e.g., 500dh, 899dh)
+ */
+const MIN_PRICE_THRESHOLD = 500;
+
+/**
+ * Price detection threshold for numbers not in TV sizes
+ * Numbers > this value that aren't TV sizes are likely prices (e.g., 150, 200)
+ */
+const AMBIGUOUS_NUMBER_THRESHOLD = 100;
+
+/**
  * Check if text is a bare number (2-5 digits)
  * @param {string} text - User input text
  * @returns {boolean} - True if text is a bare number
@@ -35,8 +47,14 @@ export function isBarePrice(text) {
     return false;
   }
   
-  // If it's a price-like number (typically >= 500 or > 100 and not a TV size)
-  if (num >= 500 || (num > 100 && !ALLOWED_TV_SIZES.includes(num))) {
+  // If it's >= MIN_PRICE_THRESHOLD, it's definitely a price (e.g., 500dh, 899dh, 5000dh)
+  if (num >= MIN_PRICE_THRESHOLD) {
+    return true;
+  }
+  
+  // If it's > AMBIGUOUS_NUMBER_THRESHOLD and not a TV size, treat as price
+  // This catches numbers like 150, 200, 250 that could be prices
+  if (num > AMBIGUOUS_NUMBER_THRESHOLD && !ALLOWED_TV_SIZES.includes(num)) {
     return true;
   }
   
