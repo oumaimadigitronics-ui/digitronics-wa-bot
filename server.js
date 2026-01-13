@@ -519,17 +519,23 @@ function rebuildOffersIndex() {
 function setOffersForTest(offersObj) {
   setOffersForTestImpl(offersObj, logger, LOG_DEBUG);
   updateOffersReferences();
+  // Reinitialize query services with updated offers
+  initializeQueryServices();
 }
 
 async function syncOffersFromWoo() {
   const result = await syncOffersFromWooImpl(CFG, logger, LOG_DEBUG);
   updateOffersReferences();
+  // Reinitialize query services with updated offers
+  initializeQueryServices();
   return result;
 }
 
 async function refreshOffersSafe() {
   const result = await refreshOffersSafeImpl(CFG, logger, LOG_DEBUG);
   updateOffersReferences();
+  // Reinitialize query services with updated offers
+  initializeQueryServices();
   return result;
 }
 
@@ -618,6 +624,18 @@ function initializeQueryServices() {
     MAX_OFFERS,
     FEATURE_ASSUME_TV_ON_BRAND_ONLY,
     bestGuessOffers: bestGuessOffersImpl, // Use the one from offers module
+    // ADD MISSING DEPENDENCIES FOR TV INTENT DETECTION
+    hasTvIntentTokens,
+    FEATURE_STRICT_CATEGORY_SWITCH,
+    handleTvSizePriceFlow,
+    answerGoogleTvOfficialQuestion,
+    xiaomiAlternativeReply,
+    isTvReceiverIntent,
+    tvReceiverAnswerText,
+    defaultTvOffersForReceiver,
+    LOG_DEBUG,
+    debugLog,
+    pickFirstPerBrand: pickFirstPerBrandImpl,
   };
 
   tryDirectOfferAnswerImpl = createTryDirectOfferAnswer(queryDeps);
