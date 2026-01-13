@@ -455,57 +455,33 @@ async function wcFetchJson(url) {
   return wcFetchJsonImpl(CFG, url);
 }
 
-function setWcFetchJsonForTest(fn) {
-  return setWcFetchJsonForTestImpl(fn);
-}
+const setWcFetchJsonForTest = (fn) => setWcFetchJsonForTestImpl(fn);
 
-function firstCategoryName(product) {
-  return firstCategoryNameImpl(product);
-}
+const firstCategoryName = (product) => firstCategoryNameImpl(product);
 
-function wcPrice(product) {
-  return wcPriceImpl(product);
-}
+const wcPrice = (product) => wcPriceImpl(product);
 
-function wcInStock(product) {
-  return wcInStockImpl(product);
-}
+const wcInStock = (product) => wcInStockImpl(product);
 
-function getAttr(p, nameOrSlug) {
-  return getAttrImpl(p, nameOrSlug);
-}
+const getAttr = (p, nameOrSlug) => getAttrImpl(p, nameOrSlug);
 
-function getBrandFromWoo(p) {
-  return getBrandFromWooImpl(p);
-}
+const getBrandFromWoo = (p) => getBrandFromWooImpl(p);
 
 function getTvSizeFromProduct(p) {
   return getTvSizeFromProductImpl(p, getOffersIndex());
 }
 
-function getSizeFromNameSku(p) {
-  return getSizeFromNameSkuImpl(p);
-}
+const getSizeFromNameSku = (p) => getSizeFromNameSkuImpl(p);
 
-function extractAllowedTvSizeFromString(str, opts) {
-  return extractAllowedTvSizeFromStringImpl(str, opts);
-}
+const extractAllowedTvSizeFromString = (str, opts) => extractAllowedTvSizeFromStringImpl(str, opts);
 
-function getCapacityFromProduct(p) {
-  return getCapacityFromProductImpl(p);
-}
+const getCapacityFromProduct = (p) => getCapacityFromProductImpl(p);
 
-function extractClassFromAttributes(p) {
-  return extractClassFromAttributesImpl(p);
-}
+const extractClassFromAttributes = (p) => extractClassFromAttributesImpl(p);
 
-function getClassFromCategories(p) {
-  return getClassFromCategoriesImpl(p);
-}
+const getClassFromCategories = (p) => getClassFromCategoriesImpl(p);
 
-function getTypeFromProduct(p) {
-  return getTypeFromProductImpl(p);
-}
+const getTypeFromProduct = (p) => getTypeFromProductImpl(p);
 
 function offerFromWooProduct(p) {
   return offerFromWooProductImpl(p, getOffersIndex(), logger, LOG_DEBUG);
@@ -920,9 +896,7 @@ function parseMenuSelection(text) {
   return cleaned;
 }
 
-function hasArabicScript(text) {
-  return hasArabicScriptImpl(text);
-}
+const hasArabicScript = (text) => hasArabicScriptImpl(text);
 
 function hasSmartToken(text) {
   const s = normMatch(text || "");
@@ -930,50 +904,30 @@ function hasSmartToken(text) {
   return s.indexOf("smart") >= 0 || s.indexOf("سمارت") >= 0 || s.indexOf("عامرة") >= 0;
 }
 
-function stripQuestions(text) {
-  return stripQuestionsImpl(text);
-}
+const stripQuestions = (text) => stripQuestionsImpl(text);
 
-function ensureNoQuestion(text) {
-  return ensureNoQuestionImpl(text);
-}
+const ensureNoQuestion = (text) => ensureNoQuestionImpl(text);
 
 function shortenNoQuestion(text, max, logContext) {
   return shortenNoQuestionImpl(text, max, logContext, { CFG, shorten });
 }
 
-function formatSize(lang, size) {
-  return formatSizeImpl(lang, size);
-}
+const formatSize = (lang, size) => formatSizeImpl(lang, size);
 
-function buildOfferDisplayName(brand, offer, lang = "dzl") {
-  return buildOfferDisplayNameImpl(brand, offer, lang);
-}
+const buildOfferDisplayName = (brand, offer, lang = "dzl") => buildOfferDisplayNameImpl(brand, offer, lang);
 
-function sanitizeUrlNoQuestion(urlStr) {
-  return sanitizeUrlNoQuestionImpl(urlStr);
-}
+const sanitizeUrlNoQuestion = (urlStr) => sanitizeUrlNoQuestionImpl(urlStr);
 
-function stripUrlQueriesInText(text) {
-  return stripUrlQueriesInTextImpl(text);
-}
+const stripUrlQueriesInText = (text) => stripUrlQueriesInTextImpl(text);
 
 // Media service wrappers
-function guessMediaKind(meta) {
-  return guessMediaKindImpl(meta);
-}
+const guessMediaKind = (meta) => guessMediaKindImpl(meta);
 
-function normalizeMediaSingle(mediaVal) {
-  return normalizeMediaSingleImpl(mediaVal);
-}
+const normalizeMediaSingle = (mediaVal) => normalizeMediaSingleImpl(mediaVal);
 
-function normalizeMedia(mediaVal) {
-  return normalizeMediaImpl(mediaVal);
-}
+const normalizeMedia = (mediaVal) => normalizeMediaImpl(mediaVal);
 
-function normalizeMediaInput(mediaVal) {
-  return normalizeMediaInputImpl(mediaVal);
-}
+const normalizeMediaInput = (mediaVal) => normalizeMediaInputImpl(mediaVal);
 
 async function ensurePublicUrl(urlObj) {
   return ensurePublicUrlImpl(urlObj);
@@ -997,17 +951,11 @@ async function downloadMediaBuffer(mediaInput) {
   });
 }
 
-function getUrlHost(url) {
-  return getUrlHostImpl(url);
-}
+const getUrlHost = (url) => getUrlHostImpl(url);
 
-function extractMediaMetaFromBody(body) {
-  return extractMediaMetaFromBodyImpl(body);
-}
+const extractMediaMetaFromBody = (body) => extractMediaMetaFromBodyImpl(body);
 
-function classifyMediaRoute(mediaInfo, msgType) {
-  return classifyMediaRouteImpl(mediaInfo, msgType);
-}
+const classifyMediaRoute = (mediaInfo, msgType) => classifyMediaRouteImpl(mediaInfo, msgType);
 
 function sanitizeDerivedText(text) {
   return sanitizeDerivedTextImpl(text, stripUrlQueriesInText);
@@ -1031,17 +979,11 @@ function fallbackWithAgent(lang) {
   return fallbackWithAgentImpl(lang, CONTACTS);
 }
 
-function audioReminderText(lang) {
-  return audioReminderTextImpl(lang);
-}
+const audioReminderText = (lang) => audioReminderTextImpl(lang);
 
-function voiceNotUnderstoodTemplate() {
-  return voiceNotUnderstoodTemplateImpl();
-}
+const voiceNotUnderstoodTemplate = () => voiceNotUnderstoodTemplateImpl();
 
-function shouldSendAudioReminder(key) {
-  return shouldSendAudioReminderImpl(key);
-}
+const shouldSendAudioReminder = (key) => shouldSendAudioReminderImpl(key);
 
 const ORDER_FORM_URL_SAFE = sanitizeUrlNoQuestion(ORDER_FORM_URL);
 const MAPS_URL_RAW = "https://maps.app.goo.gl/sLuZQCt74KVkq39H7?g_st=aw";
@@ -1168,13 +1110,9 @@ function warrantyTextForBrand(lang, brand, cls) {
 
 // Cache language detection tokens to avoid recreating arrays on every call
 // Language detection - delegated to nlp module
-function detectUserLanguage(text) {
-  return detectUserLanguageImpl(text);
-}
+const detectUserLanguage = (text) => detectUserLanguageImpl(text);
 
-function detectLang(text) {
-  return detectLangImpl(text);
-}
+const detectLang = (text) => detectLangImpl(text);
 
 function resolvePreferredLang({ key, text }) {
   const k = String(key || "");
@@ -1204,13 +1142,9 @@ function resolvePreferredLang({ key, text }) {
   return next;
 }
 
-function normalizeLanguageHint(lang) {
-  return normalizeLanguageHintImpl(lang);
-}
+const normalizeLanguageHint = (lang) => normalizeLanguageHintImpl(lang);
 
-function effectiveReplyLang({ hintLang, userText }) {
-  return effectiveReplyLangImpl({ hintLang, userText });
-}
+const effectiveReplyLang = ({ hintLang, userText }) => effectiveReplyLangImpl({ hintLang, userText });
 
 function t(lang, key, vars) {
   return tImpl(lang, key, vars, { COMPANY, ORDER_FORM_URL_SAFE, MAPS_URL_SAFE, formatSize });
@@ -2111,13 +2045,9 @@ function isOpeningHoursIntent(text) {
   return hasAnyToken(s, tokens);
 }
 
-function extractCompareParts(text) {
-  return extractComparePartsImpl(text);
-}
+const extractCompareParts = (text) => extractComparePartsImpl(text);
 
-function extractDifferenceBetweenParts(text) {
-  return extractDifferenceBetweenPartsImpl(text);
-}
+const extractDifferenceBetweenParts = (text) => extractDifferenceBetweenPartsImpl(text);
 
 function resolveAdvice(text, ctxData) {
   const raw = String(text || "");
@@ -2198,9 +2128,7 @@ function resolveAdvice(text, ctxData) {
   });
 }
 
-function isAngryOrProblemIntent(text) {
-  return isAngryOrProblemIntentImpl(text);
-}
+const isAngryOrProblemIntent = (text) => isAngryOrProblemIntentImpl(text);
 
 // Cache catalog overview intent phrases for performance
 const CATALOG_OVERVIEW_PHRASES = new Set([
@@ -2532,29 +2460,17 @@ function hasCategoryKeyword(text) {
   return hasCategoryKeywordImpl(text, { CATEGORY_ALIASES, APPLIANCE_CATEGORY_KEYWORDS });
 }
 
-function isBrandOnlyQuery(text, brand) {
-  return isBrandOnlyQueryImpl(text, brand);
-}
+const isBrandOnlyQuery = (text, brand) => isBrandOnlyQueryImpl(text, brand);
 
-function matchTvSynonym(text) {
-  return matchTvSynonymImpl(text);
-}
+const matchTvSynonym = (text) => matchTvSynonymImpl(text);
 
-function matchTvTitleHint(text) {
-  return matchTvTitleHintImpl(text);
-}
+const matchTvTitleHint = (text) => matchTvTitleHintImpl(text);
 
-function inferTvCanonFromOffers(offersObj = {}) {
-  return inferTvCanonFromOffersImpl(offersObj);
-}
+const inferTvCanonFromOffers = (offersObj = {}) => inferTvCanonFromOffersImpl(offersObj);
 
-function getTvFilterInfo() {
-  return getTvFilterInfoImpl();
-}
+const getTvFilterInfo = () => getTvFilterInfoImpl();
 
-function isTvOffer(offer, info = null) {
-  return isTvOfferImpl(offer, info);
-}
+const isTvOffer = (offer, info = null) => isTvOfferImpl(offer, info);
 
 function rebuildModelPrefixIndex(modelLookup) {
   const mp = new Map();
@@ -2573,9 +2489,7 @@ function rebuildModelPrefixIndex(modelLookup) {
   return mp;
 }
 
-function tokenizeAlnum(s) {
-  return tokenizeAlnumImpl(s);
-}
+const tokenizeAlnum = (s) => tokenizeAlnumImpl(s);
 
 function detectModel(text) {
   return detectModelImpl(text, OFFERS_INDEX);
@@ -2673,9 +2587,7 @@ function extractTvSize(text, opts = {}) {
   return extractTvSizeImpl(text, opts, OFFERS_INDEX, extractAllowedTvSizeFromString);
 }
 
-function extractCapacityLiters(text) {
-  return extractCapacityLitersImpl(text);
-}
+const extractCapacityLiters = (text) => extractCapacityLitersImpl(text);
 
 // RULE: build product link only when explicitly requested
 function buildProductLink(product, fallbackName) {
@@ -2698,33 +2610,19 @@ function shortenKeepingTail(base, tail, maxChars) {
   return shortenKeepingTailImpl(base, tail, maxChars, { CFG, shortenNoQuestion });
 }
 
-function offerPriceText(offer) {
-  return offerPriceTextImpl(offer);
-}
+const offerPriceText = (offer) => offerPriceTextImpl(offer);
 
-function buildOfferItemsFromEntries(entries, lang) {
-  return buildOfferItemsFromEntriesImpl(entries, lang);
-}
+const buildOfferItemsFromEntries = (entries, lang) => buildOfferItemsFromEntriesImpl(entries, lang);
 
-function offersTemplate({ title, subtitleFR, subtitleAR, lines, lang, maxChars }) {
-  return offersTemplateImpl({ title, subtitleFR, subtitleAR, lines, lang, maxChars });
-}
+const offersTemplate = ({ title, subtitleFR, subtitleAR, lines, lang, maxChars }) => offersTemplateImpl({ title, subtitleFR, subtitleAR, lines, lang, maxChars });
 
-function buildPremiumOffersReply({ title, entries, lang, maxChars }) {
-  return buildPremiumOffersReplyImpl({ title, entries, lang, maxChars });
-}
+const buildPremiumOffersReply = ({ title, entries, lang, maxChars }) => buildPremiumOffersReplyImpl({ title, entries, lang, maxChars });
 
-function formatOfferLine(brand, o, opts = {}) {
-  return formatOfferLineImpl(brand, o, opts);
-}
+const formatOfferLine = (brand, o, opts = {}) => formatOfferLineImpl(brand, o, opts);
 
-function offersHeader(lang, ctx) {
-  return offersHeaderImpl(lang, ctx);
-}
+const offersHeader = (lang, ctx) => offersHeaderImpl(lang, ctx);
 
-function titleFromHeader(header) {
-  return titleFromHeaderImpl(header);
-}
+const titleFromHeader = (header) => titleFromHeaderImpl(header);
 
 function normalizeOfferForContext(offer) {
   if (!offer || typeof offer !== "object") return null;
@@ -2745,9 +2643,7 @@ function normalizeOfferForContext(offer) {
   };
 }
 
-function buildOfferContextEntries(entries) {
-  return buildOfferContextEntriesImpl(entries);
-}
+const buildOfferContextEntries = (entries) => buildOfferContextEntriesImpl(entries);
 
 function priceSummaryText(lang, min, max) {
   const L = lang || "dzl";
@@ -2855,53 +2751,29 @@ let audioTranscriberOverride = null;
 let audioConverterOverride = null;
 
 // Audio service wrapper functions
-function isAudioMime(mime) {
-  return isAudioMimeImpl(mime);
-}
+const isAudioMime = (mime) => isAudioMimeImpl(mime);
 
-function cleanMimeType(input) {
-  return cleanMimeTypeImpl(input);
-}
+const cleanMimeType = (input) => cleanMimeTypeImpl(input);
 
-function sniffAudioMime(buf) {
-  return sniffAudioMimeImpl(buf);
-}
+const sniffAudioMime = (buf) => sniffAudioMimeImpl(buf);
 
-function extFromAudioMime(mime) {
-  return extFromAudioMimeImpl(mime);
-}
+const extFromAudioMime = (mime) => extFromAudioMimeImpl(mime);
 
-function inferMimeFromPath(filepath, fallbackMime) {
-  return inferMimeFromPathImpl(filepath, fallbackMime);
-}
+const inferMimeFromPath = (filepath, fallbackMime) => inferMimeFromPathImpl(filepath, fallbackMime);
 
-function isAudioMeta(meta) {
-  return isAudioMetaImpl(meta);
-}
+const isAudioMeta = (meta) => isAudioMetaImpl(meta);
 
-function mimeFromProbe(formatName, codecName) {
-  return mimeFromProbeImpl(formatName, codecName);
-}
+const mimeFromProbe = (formatName, codecName) => mimeFromProbeImpl(formatName, codecName);
 
-function sanitizeLogSnippet(buffer, maxBytes = 120) {
-  return sanitizeLogSnippetImpl(buffer, maxBytes);
-}
+const sanitizeLogSnippet = (buffer, maxBytes = 120) => sanitizeLogSnippetImpl(buffer, maxBytes);
 
-function readAudioHeader(filePath, maxBytes = 256) {
-  return readAudioHeaderImpl(filePath, maxBytes);
-}
+const readAudioHeader = (filePath, maxBytes = 256) => readAudioHeaderImpl(filePath, maxBytes);
 
-function isInvalidAudioPayload(headerBuf) {
-  return isInvalidAudioPayloadImpl(headerBuf);
-}
+const isInvalidAudioPayload = (headerBuf) => isInvalidAudioPayloadImpl(headerBuf);
 
-function validateDownloadedAudio({ filePath, sizeBytes, url, reqId }) {
-  return validateDownloadedAudioImpl({ filePath, sizeBytes, url, reqId });
-}
+const validateDownloadedAudio = ({ filePath, sizeBytes, url, reqId }) => validateDownloadedAudioImpl({ filePath, sizeBytes, url, reqId });
 
-function execFilePromise(cmd, args, opts = {}) {
-  return execFilePromiseImpl(cmd, args, opts);
-}
+const execFilePromise = (cmd, args, opts = {}) => execFilePromiseImpl(cmd, args, opts);
 
 async function commandExists(cmd) {
   return commandExistsImpl(cmd);
@@ -2931,9 +2803,7 @@ async function resolveAudioMime({ filePath, mimeType, filename, url, sniffedMime
   return resolveAudioMimeImpl({ filePath, mimeType, filename, url, sniffedMime, reqId }, CFG);
 }
 
-function ensureAudioFileExtMatchesMime(filePath, mimeType) {
-  return ensureAudioFileExtMatchesMimeImpl(filePath, mimeType);
-}
+const ensureAudioFileExtMatchesMime = (filePath, mimeType) => ensureAudioFileExtMatchesMimeImpl(filePath, mimeType);
 
 async function downloadToTemp(url, filepath) {
   return downloadToTempImpl(url, filepath, fetchMedia, CFG);
@@ -3042,13 +2912,9 @@ function setFeatureAudioSniffMimeForTest(enabled) {
 }
 
 
-function normalizeOfferItem(brand, offer, originalIdx) {
-  return normalizeOfferItemImpl(brand, offer, originalIdx);
-}
+const normalizeOfferItem = (brand, offer, originalIdx) => normalizeOfferItemImpl(brand, offer, originalIdx);
 
-function rankOffers(items, opts) {
-  return rankOffersImpl(items, opts);
-}
+const rankOffers = (items, opts) => rankOffersImpl(items, opts);
 
 function capacityScoreCmp(a, b) {
   const aScore = Number.isFinite(a.capacityScore) ? a.capacityScore : Number.POSITIVE_INFINITY;
@@ -3058,9 +2924,7 @@ function capacityScoreCmp(a, b) {
 }
 
 // RULE: max 1 offer per brand, cheapest per brand, price order
-function pickCheapestPerBrand(items) {
-  return pickCheapestPerBrandImpl(items);
-}
+const pickCheapestPerBrand = (items) => pickCheapestPerBrandImpl(items);
 
 
 async function tryWebsiteCatalogAnswer(userText, lang, key) {
@@ -3915,13 +3779,9 @@ function isPreferCheapest(text) {
 }
 
 // Price detection - delegated to nlp module
-function detectPriceIntent(text) {
-  return detectPriceIntentImpl(text);
-}
+const detectPriceIntent = (text) => detectPriceIntentImpl(text);
 
-function detectCheapIntent(text) {
-  return detectCheapIntentImpl(text);
-}
+const detectCheapIntent = (text) => detectCheapIntentImpl(text);
 
 function extractMoroccoPhone(text) {
   const ascii = arabicIndicToAsciiDigits(String(text || ""));
@@ -4249,9 +4109,7 @@ function hasProductInquirySignal(text) {
   );
 }
 
-function wantsProductDetails(text, lang) {
-  return wantsProductDetailsImpl(text, lang);
-}
+const wantsProductDetails = (text, lang) => wantsProductDetailsImpl(text, lang);
 
 function parseSelectedOptionNumber(text) {
   const raw = arabicIndicToAsciiDigits(String(text || ""));
@@ -4326,13 +4184,9 @@ function getOfferImageUrl(offer) {
   return null;
 }
 
-function detailsNeedOptionReply(lang) {
-  return detailsNeedOptionReplyImpl(lang);
-}
+const detailsNeedOptionReply = (lang) => detailsNeedOptionReplyImpl(lang);
 
-function detailsNoContextReply(lang) {
-  return detailsNoContextReplyImpl(lang);
-}
+const detailsNoContextReply = (lang) => detailsNoContextReplyImpl(lang);
 
 function formatSpecLine(lang, labelFr, labelAr, value) {
   const safeValue = String(value || "").trim();
@@ -4426,17 +4280,11 @@ function isThankYouMessage(text) {
   return false;
 }
 
-function parseBudget(text) {
-  return parseBudgetImpl(text);
-}
+const parseBudget = (text) => parseBudgetImpl(text);
 
-function hasTvIntentTokens(text) {
-  return hasTvIntentTokensImpl(text);
-}
+const hasTvIntentTokens = (text) => hasTvIntentTokensImpl(text);
 
-function hasTvSizeContext(text) {
-  return hasTvSizeContextImpl(text);
-}
+const hasTvSizeContext = (text) => hasTvSizeContextImpl(text);
 
 function extractSizeInfo(text) {
   const raw = arabicIndicToAsciiDigits(String(text || ""));
@@ -4528,13 +4376,9 @@ function shouldPreferCommerceRouting(text, ctx, opts = {}) {
   };
 }
 
-function detectApplianceCategory(text) {
-  return detectApplianceCategoryImpl(text);
-}
+const detectApplianceCategory = (text) => detectApplianceCategoryImpl(text);
 
-function detectExplicitApplianceCategory(text) {
-  return detectExplicitApplianceCategoryImpl(text);
-}
+const detectExplicitApplianceCategory = (text) => detectExplicitApplianceCategoryImpl(text);
 
 function routeApplianceCategoryOffers(applianceKey, lang, key) {
   const category = APPLIANCE_CATEGORY_CANON[applianceKey];
@@ -5146,9 +4990,7 @@ function asksAboutDeliveryPaymentWarranty(text) {
   return false;
 }
 
-function isPhotoRequestIntent(text) {
-  return isPhotoRequestIntentImpl(text);
-}
+const isPhotoRequestIntent = (text) => isPhotoRequestIntentImpl(text);
 
 function isNoOrderNumberIntent(text) {
   const s = normMatch(arabicIndicToAsciiDigits(String(text || "")));
