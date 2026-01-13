@@ -195,9 +195,22 @@ import {
 
 import {
   VOICE_NOT_UNDERSTOOD_TEMPLATE as VOICE_NOT_UNDERSTOOD_TEMPLATE_IMPL,
-  extractMediaMetaFromBody as extractMediaMetaFromBodyImpl,
-  voiceNotUnderstoodTemplate as voiceNotUnderstoodTemplateImpl,
+  guessMediaKind as guessMediaKindImpl,
+  normalizeMediaSingle as normalizeMediaSingleImpl,
+  normalizeMedia as normalizeMediaImpl,
   normalizeMediaInput as normalizeMediaInputImpl,
+  ensurePublicUrl as ensurePublicUrlImpl,
+  fetchMedia as fetchMediaImpl,
+  downloadMediaBuffer as downloadMediaBufferImpl,
+  getUrlHost as getUrlHostImpl,
+  extractMediaMetaFromBody as extractMediaMetaFromBodyImpl,
+  classifyMediaRoute as classifyMediaRouteImpl,
+  sanitizeDerivedText as sanitizeDerivedTextImpl,
+  deriveMediaText as deriveMediaTextImpl,
+  voiceNotUnderstoodTemplate as voiceNotUnderstoodTemplateImpl,
+  fallbackWithAgent as fallbackWithAgentImpl,
+  audioReminderText as audioReminderTextImpl,
+  shouldSendAudioReminder as shouldSendAudioReminderImpl,
 } from './project/src/services/media/index.js';
 
 import {
