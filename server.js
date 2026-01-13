@@ -3165,7 +3165,7 @@ async function tryWebsiteCatalogAnswer(userText, lang, key) {
     lastOfferItems: undefined,
   });
 
-  const header = catalogHeader(lang, {
+  const header = offersHeader(lang, {
     brand: detectedBrand || undefined,
     category: detectedCategory || undefined,
     cls: detectedClass || undefined,
