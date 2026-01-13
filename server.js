@@ -3162,7 +3162,11 @@ async function tryWebsiteCatalogAnswer(userText, lang, key) {
 
   let sorted = isTvContext ? pool.sort(sortTv) : pool.sort(sortNonTv);
 
-  const picks = pickCheapestPerBrand(sorted).slice(0, MAX_OFFERS);
+  // For single-brand queries, don't filter to one per brand - show multiple offers
+  const uniqueBrands = new Set(sorted.map(it => normMatch(it.brand || "")));
+  const picks = uniqueBrands.size === 1 
+    ? sorted.slice(0, MAX_OFFERS)  // Single brand: show up to MAX_OFFERS from that brand
+    : pickCheapestPerBrand(sorted).slice(0, MAX_OFFERS);  // Multiple brands: one per brand
   if (!picks.length) return null;
 
   setCtx(key, {
