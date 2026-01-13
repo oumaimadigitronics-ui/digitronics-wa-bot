@@ -10,7 +10,6 @@ import { rankOffers, pickCheapestPerBrand, MAX_OFFERS } from './offersRanking.js
 import { isTvOffer } from './offersFiltering.js';
 import { formatOfferLine, formatSize, buildPremiumOffersReply, offersHeader } from './offersFormatting.js';
 
-const OFFERS_INDEX = getOffersIndex();
 let OFFERS = getOffers();
 
 // Feature flags - will be injected from server.js
@@ -146,6 +145,7 @@ function salesIntro(lang, ctx) {
  * @returns {Array|Object} Offer lines or {lines, offers} if withOffers is true
  */
 export function listOffersForBrand(brand, opts) {
+  const OFFERS_INDEX = getOffersIndex();
   const o = opts || {};
   const cls = o.cls || null;
   const category = o.category || null;
@@ -155,7 +155,7 @@ export function listOffersForBrand(brand, opts) {
   const hasCapacity = Number.isFinite(capacityNum);
   const limit = Number(o.limit) || MAX_OFFERS;
   const withOffers = Boolean(o.withOffers);
-  const useTvFilter = Boolean(o.tvOnly) || (cls && normMatch(cls) === normMatch(OFFERS_INDEX.classCanon.tv || ""));
+  const useTvFilter = Boolean(o.tvOnly) || (cls && normMatch(cls) === normMatch((OFFERS_INDEX.classCanon && OFFERS_INDEX.classCanon.tv) || ""));
 
   // Find the actual brand key in OFFERS.offers using case-insensitive matching
   let actualBrandKey = brand;
@@ -236,6 +236,7 @@ export function listOffersForBrand(brand, opts) {
  * @returns {Array} Ranked offers
  */
 export function listOffersForSizeAcrossBrands(size, opts) {
+  const OFFERS_INDEX = getOffersIndex();
   const o = opts || {};
   const cls = o.cls || null;
   const limit = Number(o.limit) || MAX_OFFERS;
@@ -266,10 +267,11 @@ export function listOffersForSizeAcrossBrands(size, opts) {
  * @returns {Array} TV offers
  */
 export function collectTvOffers({ brand, size, budget }) {
-  const tvCanon = OFFERS_INDEX.classCanon.tv;
+  const OFFERS_INDEX = getOffersIndex();
+  const tvCanon = OFFERS_INDEX.classCanon && OFFERS_INDEX.classCanon.tv;
   if (!tvCanon) return [];
 
-  const brands = brand ? [brand] : OFFERS_INDEX.brands || [];
+  const brands = brand ? [brand] : (OFFERS_INDEX.brands || []);
   const items = [];
   for (let i = 0; i < brands.length; i += 1) {
     const b = brands[i];
@@ -296,12 +298,13 @@ export function collectTvOffers({ brand, size, budget }) {
  * @returns {string|null} Formatted offers reply
  */
 export function bestGuessOffers(lang, key, limit = MAX_OFFERS) {
+  const OFFERS_INDEX = getOffersIndex();
   if (!OFFERS || !OFFERS.offers || !Object.keys(OFFERS.offers).length) return null;
 
   const ctx = getCtx(key);
   const L = lang || "dzl";
   const max = Number(limit) || MAX_OFFERS;
-  const tvCanon = OFFERS_INDEX.classCanon.tv;
+  const tvCanon = OFFERS_INDEX.classCanon && OFFERS_INDEX.classCanon.tv;
 
   const sizeVal = Number(ctx.lastSize);
   if (Number.isFinite(sizeVal)) {
@@ -346,7 +349,7 @@ export function bestGuessOffers(lang, key, limit = MAX_OFFERS) {
 
   if (ctx.lastCategory) {
     const k = normMatch(ctx.lastCategory);
-    const items0 = OFFERS_INDEX.categoryToOffers.get(k) || [];
+    const items0 = (OFFERS_INDEX.categoryToOffers && OFFERS_INDEX.categoryToOffers.get(k)) || [];
     const items = items0
       .map((it, idx) => Object.assign({}, it, { originalIdx: typeof it.originalIdx === "number" ? it.originalIdx : idx }))
       .filter((it) => Number(((it.offer || {}).stock) || 0) > 0);
@@ -378,7 +381,7 @@ export function bestGuessOffers(lang, key, limit = MAX_OFFERS) {
 
   if (ctx.lastClass) {
     const k = normMatch(ctx.lastClass);
-    const items0 = OFFERS_INDEX.classToOffers.get(k) || [];
+    const items0 = (OFFERS_INDEX.classToOffers && OFFERS_INDEX.classToOffers.get(k)) || [];
     const items = items0
       .map((it, idx) => Object.assign({}, it, { originalIdx: typeof it.originalIdx === "number" ? it.originalIdx : idx }))
       .filter((it) => Number(((it.offer || {}).stock) || 0) > 0);
@@ -422,7 +425,7 @@ export function bestGuessOffers(lang, key, limit = MAX_OFFERS) {
   }
 
   const tvCanonNorm = normMatch(tvCanon || "tv");
-  const items0 = OFFERS_INDEX.classToOffers.get(tvCanonNorm) || [];
+  const items0 = (OFFERS_INDEX.classToOffers && OFFERS_INDEX.classToOffers.get(tvCanonNorm)) || [];
   const items = items0
     .map((it, idx) => Object.assign({}, it, { originalIdx: typeof it.originalIdx === "number" ? it.originalIdx : idx }))
     .filter((it) => Number(((it.offer || {}).stock) || 0) > 0);
@@ -455,9 +458,10 @@ export function bestGuessOffers(lang, key, limit = MAX_OFFERS) {
  * @returns {string|null} Formatted offers reply
  */
 export function defaultTvOffersForReceiver(lang, key) {
-  const tvCanon = OFFERS_INDEX.classCanon.tv || "Tv";
+  const OFFERS_INDEX = getOffersIndex();
+  const tvCanon = (OFFERS_INDEX.classCanon && OFFERS_INDEX.classCanon.tv) || "Tv";
   const tvCanonNorm = normMatch(tvCanon || "tv");
-  const items0 = OFFERS_INDEX.classToOffers.get(tvCanonNorm) || [];
+  const items0 = (OFFERS_INDEX.classToOffers && OFFERS_INDEX.classToOffers.get(tvCanonNorm)) || [];
   const items = items0
     .map((it, idx) => Object.assign({}, it, { originalIdx: typeof it.originalIdx === "number" ? it.originalIdx : idx }))
     .filter((it) => Number(((it.offer || {}).stock) || 0) > 0);
