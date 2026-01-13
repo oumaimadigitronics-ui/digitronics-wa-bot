@@ -519,17 +519,23 @@ function rebuildOffersIndex() {
 function setOffersForTest(offersObj) {
   setOffersForTestImpl(offersObj, logger, LOG_DEBUG);
   updateOffersReferences();
+  // Reinitialize query services with updated offers
+  initializeQueryServices();
 }
 
 async function syncOffersFromWoo() {
   const result = await syncOffersFromWooImpl(CFG, logger, LOG_DEBUG);
   updateOffersReferences();
+  // Reinitialize query services with updated offers
+  initializeQueryServices();
   return result;
 }
 
 async function refreshOffersSafe() {
   const result = await refreshOffersSafeImpl(CFG, logger, LOG_DEBUG);
   updateOffersReferences();
+  // Reinitialize query services with updated offers
+  initializeQueryServices();
   return result;
 }
 
