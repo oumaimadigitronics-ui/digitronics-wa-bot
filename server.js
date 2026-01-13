@@ -86,6 +86,9 @@ import {
   buildWooUrl as buildWooUrlImpl,
   wcFetchJson as wcFetchJsonImpl,
   setWcFetchJsonForTest as setWcFetchJsonForTestImpl,
+  MIN_TV_SIZE,
+  MAX_TV_SIZE,
+  ALLOWED_TV_SIZES,
   firstCategoryName as firstCategoryNameImpl,
   wcPrice as wcPriceImpl,
   wcInStock as wcInStockImpl,
@@ -277,8 +280,6 @@ const __filename = ENTRY_FILE;
 const RUN_SELF_TESTS = String(process.env.RUN_SELF_TESTS || process.env.SELF_TEST || "0") === "1";
 const REQUIRE_ENV = process.argv[1] === ENTRY_FILE && !RUN_SELF_TESTS;
 const MAX_AUDIO_BYTES = Number(process.env.MEDIA_MAX_BYTES_AUDIO || 12000000) || 12000000;
-const MIN_TV_SIZE = 24;
-const MAX_TV_SIZE = 120;
 let systemPromptLoaded = false;
 let systemPromptValue = "";
 const DEFAULT_SYSTEM_PROMPT = "You are DigiBot for Digitronics.ma.";
@@ -1988,8 +1989,8 @@ function hasTvSizeInQuery(raw) {
   const sizeWithUnitRe = /(\d{2,3})\s*([\"\''″]|pouce|pouces|inch|inches|بوصة|بوص|بوس)/i;
   if (sizeWithUnitRe.test(s)) return true;
   
-  // Check for bare TV size numbers from ALLOWED_TV_SIZES (e.g., "55", "65", "43")
-  // Using the same list defined at module level
+  // Check for bare TV size numbers (e.g., "55", "65", "43")
+  // Uses ALLOWED_TV_SIZES imported from woocommerce/parser.js
   const tvSizes = ALLOWED_TV_SIZES;
   
   // Match 2-3 digit numbers not adjacent to other digits (lookbehind/lookahead used elsewhere in codebase)

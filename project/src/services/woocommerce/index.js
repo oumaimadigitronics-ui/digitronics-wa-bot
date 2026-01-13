@@ -12,6 +12,10 @@ export {
 
 // Parser functions
 export {
+  MIN_TV_SIZE,
+  MAX_TV_SIZE,
+  ALLOWED_TV_SIZES,
+  TV_SIZE_HINTS,
   firstCategoryName,
   wcPrice,
   wcInStock,
