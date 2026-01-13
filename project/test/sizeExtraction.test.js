@@ -1,26 +1,23 @@
 import assert from 'node:assert';
 import test from 'node:test';
 import { extractTvSize, hasTvIntentTokens, hasTvSizeContext } from '../src/services/nlp/sizeExtraction.js';
+import { extractAllowedTvSizeFromString } from '../src/services/woocommerce/parser.js';
 
-test('extractTvSize returns null when extractAllowedTvSizeFromString is not a function', () => {
+test('extractTvSize falls back to direct import when injected function is invalid', () => {
   const mockOffersIndex = { classCanon: { tv: 'TV' } };
   const opts = { allowNoHint: true, requireTvHint: false, externalTvContext: true };
   
-  // Test with undefined function
-  const result1 = extractTvSize('samsung', opts, mockOffersIndex, undefined);
-  assert.strictEqual(result1, null, 'Should return null when function is undefined');
+  // Test with string (should fallback, not extract from "samsung")
+  const result1 = extractTvSize('samsung', opts, mockOffersIndex, 'not a function');
+  assert.strictEqual(result1, null, 'Should return null when no size in text (using fallback)');
   
-  // Test with null function
-  const result2 = extractTvSize('samsung', opts, mockOffersIndex, null);
-  assert.strictEqual(result2, null, 'Should return null when function is null');
+  // Test with number (should fallback, extract size from "65")
+  const result2 = extractTvSize('65', opts, mockOffersIndex, 42);
+  assert.strictEqual(result2, 65, 'Should extract 65 using fallback when function is a number');
   
-  // Test with non-function value
-  const result3 = extractTvSize('samsung', opts, mockOffersIndex, 'not a function');
-  assert.strictEqual(result3, null, 'Should return null when function is a string');
-  
-  // Test with number
-  const result4 = extractTvSize('samsung', opts, mockOffersIndex, 42);
-  assert.strictEqual(result4, null, 'Should return null when function is a number');
+  // Test with string "not a function" but valid size input
+  const result3 = extractTvSize('55', opts, mockOffersIndex, 'not a function');
+  assert.strictEqual(result3, 55, 'Should extract 55 using fallback when function is a string');
 });
 
 test('extractTvSize works correctly with valid function', () => {
@@ -139,4 +136,39 @@ test('extractTvSize works with bare TV size numbers', () => {
   
   const result6 = extractTvSize('99', {}, mockOffersIndex, mockExtractFunction);
   assert.strictEqual(result6, null, 'Should return null for invalid size "99"');
+});
+
+test('extractTvSize works with undefined injected function (uses fallback)', () => {
+  const mockOffersIndex = { classCanon: { tv: 'TV' } };
+  
+  // Test that fallback works with undefined
+  const result1 = extractTvSize('65', { allowNoHint: true }, mockOffersIndex, undefined);
+  assert.strictEqual(result1, 65, 'Should extract 65 using fallback when function is undefined');
+  
+  const result2 = extractTvSize('55', { allowNoHint: true }, mockOffersIndex, undefined);
+  assert.strictEqual(result2, 55, 'Should extract 55 using fallback when function is undefined');
+  
+  const result3 = extractTvSize('haier 43', { allowNoHint: true }, mockOffersIndex, undefined);
+  assert.strictEqual(result3, 43, 'Should extract 43 from "haier 43" using fallback');
+});
+
+test('extractTvSize works with null injected function (uses fallback)', () => {
+  const mockOffersIndex = { classCanon: { tv: 'TV' } };
+  
+  // Test that fallback works with null
+  const result1 = extractTvSize('haier 55', { allowNoHint: true }, mockOffersIndex, null);
+  assert.strictEqual(result1, 55, 'Should extract 55 from "haier 55" using fallback when function is null');
+  
+  const result2 = extractTvSize('tcl 65', { allowNoHint: true }, mockOffersIndex, null);
+  assert.strictEqual(result2, 65, 'Should extract 65 from "tcl 65" using fallback when function is null');
+});
+
+test('extractTvSize prefers injected function over fallback when available', () => {
+  const mockOffersIndex = { classCanon: { tv: 'TV' } };
+  
+  // Mock function that always returns 99 to prove it's being used
+  const mockExtractFunction = () => 99;
+  
+  const result = extractTvSize('65', { allowNoHint: true }, mockOffersIndex, mockExtractFunction);
+  assert.strictEqual(result, 99, 'Should use injected function when available (not fallback)');
 });
