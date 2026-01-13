@@ -53,7 +53,6 @@ export function extractTvSize(text, opts, offersIndex, extractAllowedTvSizeFromS
   if (typeof extractAllowedTvSizeFromString !== 'function') {
     console.error('[BUG] extractAllowedTvSizeFromString is not a function!', {
       type: typeof extractAllowedTvSizeFromString,
-      value: extractAllowedTvSizeFromString,
       text: text?.substring(0, 50)
     });
     return null;
