@@ -7,8 +7,6 @@
 import { normMatch, includesToken } from '../../lib/textUtils.js';
 import { getOffersIndex } from '../woocommerce/index.js';
 
-const OFFERS_INDEX = getOffersIndex();
-
 /**
  * TV class synonyms for matching TV products
  */
@@ -144,8 +142,9 @@ export function inferTvCanonFromOffers(offersObj = {}) {
  * @returns {Object} TV filter context
  */
 export function getTvFilterInfo() {
-  const tvCanon = OFFERS_INDEX.classCanon.tv || "Tv";
-  const tvCategory = OFFERS_INDEX.classCanon.tvCategory || null;
+  const OFFERS_INDEX = getOffersIndex();
+  const tvCanon = OFFERS_INDEX.classCanon?.tv || "Tv";
+  const tvCategory = OFFERS_INDEX.classCanon?.tvCategory || null;
   return {
     tvCanon,
     tvCategory,

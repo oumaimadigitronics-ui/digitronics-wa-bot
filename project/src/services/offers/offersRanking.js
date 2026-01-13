@@ -7,8 +7,6 @@
 import { normMatch } from '../../lib/textUtils.js';
 import { getOffersIndex } from '../woocommerce/index.js';
 
-const OFFERS_INDEX = getOffersIndex();
-
 /**
  * Brand priority list (most preferred brands first)
  */
@@ -121,7 +119,8 @@ export function rankOffers(items, opts) {
     const limitVal = Number(limitRaw);
     if (Number.isInteger(limitVal) && limitVal >= 0) limit = limitVal;
   }
-  const tvClassCanon = o.tvClassCanon || OFFERS_INDEX.classCanon.tv || null;
+  const OFFERS_INDEX = getOffersIndex();
+  const tvClassCanon = o.tvClassCanon || OFFERS_INDEX.classCanon?.tv || null;
 
   const tvClassNorm = normMatch(tvClassCanon || "");
   const isTvContext = Boolean(className && normMatch(className) === tvClassNorm);
