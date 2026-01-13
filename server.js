@@ -2598,7 +2598,7 @@ function findOfferFromLinks(text) {
     const cleaned = sanitizeUrlNoQuestion(urls[i] || "").replace(/\/$/, "");
     const k = cleaned.toLowerCase();
     if (!k) continue;
-    const hit = OFFERS_INDEX.linkLookup.get(k) || OFFERS_INDEX.linkLookup.get(`${k}/`);
+    const hit = OFFERS_INDEX?.linkLookup?.get(k) || OFFERS_INDEX?.linkLookup?.get(`${k}/`);
     if (hit) return hit;
   }
   return null;
@@ -3062,7 +3062,7 @@ async function tryWebsiteCatalogAnswer(userText, lang, key) {
   );
   if (!hasShoppingSignal) return null;
 
-  const tvCanonNorm = normMatch(OFFERS_INDEX.classCanon.tv || "tv");
+  const tvCanonNorm = normMatch(OFFERS_INDEX?.classCanon?.tv || "tv");
   const categoryNorm = normMatch(detectedCategory || "");
   const classNorm = normMatch(detectedClass || "");
   const brandNorm = normMatch(detectedBrand || "");
@@ -3173,7 +3173,7 @@ async function tryWebsiteCatalogAnswer(userText, lang, key) {
   setCtx(key, {
     lastBrand: detectedBrand || undefined,
     lastCategory: detectedCategory || undefined,
-    lastClass: isTvContext ? OFFERS_INDEX.classCanon.tv || detectedClass || undefined : detectedClass || undefined,
+    lastClass: isTvContext ? OFFERS_INDEX?.classCanon?.tv || detectedClass || undefined : detectedClass || undefined,
     lastSize: Number.isFinite(sizeVal) ? sizeVal : undefined,
     lastOffersShown: undefined,
     lastOfferPicks: undefined,
@@ -3301,7 +3301,7 @@ function filterItemsBySizePreference(items, size) {
 }
 
 function collectScopeItems({ brand, category, cls }) {
-  const brands = brand ? [brand] : OFFERS_INDEX.brands || Object.keys((OFFERS && OFFERS.offers) || {});
+  const brands = brand ? [brand] : OFFERS_INDEX?.brands || Object.keys((OFFERS && OFFERS.offers) || {});
   const items = [];
   const categoryNorm = normMatch(category || "");
   const classNorm = normMatch(cls || "");
@@ -3334,7 +3334,7 @@ function pickAlternativesFromItems(items, { size, cls, limit }) {
 
 function collectOutOfStockAlternatives({ status, brand, size, category, cls }) {
   const limit = 3;
-  const tvCanon = OFFERS_INDEX.classCanon.tv || "Tv";
+  const tvCanon = OFFERS_INDEX?.classCanon?.tv || "Tv";
   const clsHint = cls || (Number.isFinite(Number(size)) ? tvCanon : null);
   const categoryHint = category || (clsHint && normMatch(clsHint) === normMatch(tvCanon) ? tvCanon : null);
   const entries = [];
@@ -3542,7 +3542,7 @@ function listOffersForBrand(brand, opts) {
   const hasCapacity = Number.isFinite(capacityNum);
   const limit = Number(o.limit) || MAX_OFFERS;
   const withOffers = Boolean(o.withOffers);
-  const useTvFilter = Boolean(o.tvOnly) || (cls && normMatch(cls) === normMatch(OFFERS_INDEX.classCanon.tv || ""));
+  const useTvFilter = Boolean(o.tvOnly) || (cls && normMatch(cls) === normMatch(OFFERS_INDEX?.classCanon?.tv || ""));
 
   // Find the actual brand key in OFFERS.offers using case-insensitive matching
   let actualBrandKey = brand;
@@ -3622,7 +3622,7 @@ function listOffersForSizeAcrossBrands(size, opts) {
   const limit = Number(o.limit) || MAX_OFFERS;
 
   const items = [];
-  const brands = OFFERS_INDEX.brands || [];
+  const brands = OFFERS_INDEX?.brands || [];
   for (let i = 0; i < brands.length; i += 1) {
     const b = brands[i];
     const arr = ((OFFERS && OFFERS.offers && OFFERS.offers[b]) || [])
@@ -3642,10 +3642,10 @@ function listOffersForSizeAcrossBrands(size, opts) {
 }
 
 function collectTvOffers({ brand, size, budget }) {
-  const tvCanon = OFFERS_INDEX.classCanon.tv;
+  const tvCanon = OFFERS_INDEX?.classCanon?.tv;
   if (!tvCanon) return [];
 
-  const brands = brand ? [brand] : OFFERS_INDEX.brands || [];
+  const brands = brand ? [brand] : OFFERS_INDEX?.brands || [];
   const items = [];
   for (let i = 0; i < brands.length; i += 1) {
     const b = brands[i];
@@ -3698,7 +3698,7 @@ function detectTvOs(offer, brand) {
 }
 
 function collectTvKnowledge({ size } = {}) {
-  const tvCanon = OFFERS_INDEX.classCanon.tv;
+  const tvCanon = OFFERS_INDEX?.classCanon?.tv;
   if (!tvCanon) return { types: [], brands: [] };
 
   const offersObj = (OFFERS && OFFERS.offers) || {};
@@ -3817,7 +3817,7 @@ function pickClosestOfferForPhoto({ brandHint, size, classHint }) {
   const baseOpts = {
     limit: 1,
     className,
-    tvClassCanon: OFFERS_INDEX.classCanon.tv,
+    tvClassCanon: OFFERS_INDEX?.classCanon?.tv,
   };
   if (Number.isFinite(sizeNum)) baseOpts.size = sizeNum;
 
@@ -3843,7 +3843,7 @@ function resolveOfferForPhoto(userText, historyMsgs, key) {
   const forcedIntent = resolveCategoryIntent(text);
   const categoryHint = (forcedIntent && forcedIntent.category) || detectCategory(combined) || ctx.lastCategory || null;
   const classHint = (forcedIntent && forcedIntent.cls) || detectClass(combined) || ctx.lastClass || null;
-  const tvCanonNorm = normMatch(OFFERS_INDEX.classCanon.tv || "tv");
+  const tvCanonNorm = normMatch(OFFERS_INDEX?.classCanon?.tv || "tv");
   const isNonTvContext = Boolean(
     (categoryHint && normMatch(categoryHint) !== tvCanonNorm && normMatch(categoryHint) !== "tv") ||
       (classHint && normMatch(classHint) !== tvCanonNorm)
@@ -4521,7 +4521,7 @@ function routeApplianceCategoryOffers(applianceKey, lang, key) {
   const category = APPLIANCE_CATEGORY_CANON[applianceKey];
   if (!category) return null;
   const k = normMatch(category);
-  let items0 = OFFERS_INDEX.categoryToOffers.get(k) || [];
+  let items0 = OFFERS_INDEX?.categoryToOffers?.get(k) || [];
   if (!items0.length && OFFERS && OFFERS.offers) {
     const brandsAll = Object.keys(OFFERS.offers);
     const rebuilt = [];
@@ -4615,7 +4615,7 @@ function findOfferByModelCode(model, brandHint) {
     const offer = findOfferByBrandModel(brandHint, model);
     if (offer) return { brand: String(brandHint || "").toUpperCase(), offer };
   }
-  const brands = OFFERS_INDEX.brands || Object.keys((OFFERS && OFFERS.offers) || {});
+  const brands = OFFERS_INDEX?.brands || Object.keys((OFFERS && OFFERS.offers) || {});
   for (let i = 0; i < brands.length; i += 1) {
     const b = brands[i];
     const arr = ((OFFERS && OFFERS.offers && OFFERS.offers[b]) || []);
@@ -4641,7 +4641,7 @@ function pickFromLastShown(key, prefer) {
   }
   if (!resolved.length) return null;
 
-  const tvCanon = OFFERS_INDEX.classCanon.tv || "";
+  const tvCanon = OFFERS_INDEX?.classCanon?.tv || "";
   const isTvContext = normMatch(ctx.lastClass || "") === normMatch(tvCanon);
 
   if (prefer === "cheapest") {
@@ -5217,7 +5217,7 @@ function fixedPriceTemplate() {
 function handleTvSizePriceFlow(parsed, lang, key) {
   if (!parsed || !Number.isFinite(parsed.size)) return null;
 
-  const tvCanon = OFFERS_INDEX.classCanon.tv || "Tv";
+  const tvCanon = OFFERS_INDEX?.classCanon?.tv || "Tv";
   const brand = parsed.brand || null;
   const sizeVal = Number(parsed.size);
   const budget = parsed.budgetDh;
@@ -5227,9 +5227,9 @@ function handleTvSizePriceFlow(parsed, lang, key) {
 
   const matches = collectTvOffers({ brand, size: sizeVal, budget });
   if (!matches.length) {
-    const tvCanon = OFFERS_INDEX.classCanon.tv || "Tv";
+    const tvCanon = OFFERS_INDEX?.classCanon?.tv || "Tv";
     const fallbackItems = [];
-    const brandsPool = brand ? [brand] : OFFERS_INDEX.brands || [];
+    const brandsPool = brand ? [brand] : OFFERS_INDEX?.brands || [];
     for (let i = 0; i < brandsPool.length; i += 1) {
       const b = brandsPool[i];
       const arr = ((OFFERS && OFFERS.offers && OFFERS.offers[b]) || [])
@@ -5313,9 +5313,9 @@ function tvReceiverAnswerText(lang) {
 }
 
 function defaultTvOffersForReceiver(lang, key) {
-  const tvCanon = OFFERS_INDEX.classCanon.tv || "Tv";
+  const tvCanon = OFFERS_INDEX?.classCanon?.tv || "Tv";
   const tvCanonNorm = normMatch(tvCanon || "tv");
-  const items0 = OFFERS_INDEX.classToOffers.get(tvCanonNorm) || [];
+  const items0 = OFFERS_INDEX?.classToOffers?.get(tvCanonNorm) || [];
   const items = items0
     .map((it, idx) => Object.assign({}, it, { originalIdx: typeof it.originalIdx === "number" ? it.originalIdx : idx }))
     .filter((it) => Number(((it.offer || {}).stock) || 0) > 0);
@@ -5359,7 +5359,7 @@ function trimOffersForPrompt(arr, opts, brand) {
   const ranked = rankOffers(items, {
     size: o.size || null,
     className: o.className || null,
-    tvClassCanon: o.tvClassCanon || OFFERS_INDEX.classCanon.tv,
+    tvClassCanon: o.tvClassCanon || OFFERS_INDEX?.classCanon?.tv,
     limit: MAX_OFFERS_FOR_PROMPT,
   });
 
@@ -5386,7 +5386,7 @@ function limitOffersForPromptPayload(data) {
   const ranked = rankOffers(items, {
     size: meta.size ?? null,
     className: meta.class || null,
-    tvClassCanon: OFFERS_INDEX.classCanon.tv,
+    tvClassCanon: OFFERS_INDEX?.classCanon?.tv,
     limit: MAX_OFFERS_FOR_PROMPT,
   });
 
@@ -5434,7 +5434,7 @@ function buildOffersSubsetForPrompt(userText, historyMsgs, key) {
   if (!brand && hasFocusBrand() && FOCUS.mode === "preferred") brand = FOCUS.brand;
   if (brand && !(OFFERS && OFFERS.offers && OFFERS.offers[brand])) brand = null;
 
-  const tvCanon = OFFERS_INDEX.classCanon.tv;
+  const tvCanon = OFFERS_INDEX?.classCanon?.tv;
   const tvCanonNorm = normMatch(tvCanon || "tv");
   const categoryNorm = normMatch(category || "");
   const clsNorm = normMatch(cls || "");
@@ -5495,7 +5495,7 @@ function buildOffersSubsetForPrompt(userText, historyMsgs, key) {
 
   if (category) {
     const k = normMatch(category);
-    const items0 = OFFERS_INDEX.categoryToOffers.get(k) || [];
+    const items0 = OFFERS_INDEX?.categoryToOffers?.get(k) || [];
     const items = items0
       .map((it, idx) => Object.assign({}, it, { originalIdx: typeof it.originalIdx === "number" ? it.originalIdx : idx }))
       .filter((it) => Number(((it.offer || {}).stock) || 0) > 0);
@@ -5511,7 +5511,7 @@ function buildOffersSubsetForPrompt(userText, historyMsgs, key) {
 
   if (cls) {
     const k = normMatch(cls);
-    const items0 = OFFERS_INDEX.classToOffers.get(k) || [];
+    const items0 = OFFERS_INDEX?.classToOffers?.get(k) || [];
     const items = items0
       .map((it, idx) => Object.assign({}, it, { originalIdx: typeof it.originalIdx === "number" ? it.originalIdx : idx }))
       .filter((it) => Number(((it.offer || {}).stock) || 0) > 0);
@@ -5970,12 +5970,12 @@ app.get("/offers-status", (_req, res) => {
     lastOffersSync,
     refreshEveryMs: CFG.refreshMs,
     totalRows,
-    brands: (OFFERS_INDEX.brands || []).length,
-    classes: (OFFERS_INDEX.classes || []).length,
-    categories: (OFFERS_INDEX.categories || []).length,
-    sampleBrands: (OFFERS_INDEX.brands || []).slice(0, 12),
-    sampleClasses: (OFFERS_INDEX.classes || []).slice(0, 12),
-    sampleCategories: (OFFERS_INDEX.categories || []).slice(0, 12),
+    brands: (OFFERS_INDEX?.brands || []).length,
+    classes: (OFFERS_INDEX?.classes || []).length,
+    categories: (OFFERS_INDEX?.categories || []).length,
+    sampleBrands: (OFFERS_INDEX?.brands || []).slice(0, 12),
+    sampleClasses: (OFFERS_INDEX?.classes || []).slice(0, 12),
+    sampleCategories: (OFFERS_INDEX?.categories || []).slice(0, 12),
   });
 });
 
