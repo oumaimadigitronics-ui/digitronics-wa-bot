@@ -41,7 +41,7 @@ export function selectOffersFromVision(hints, deps) {
 
   if (brand) {
     const isBrandOnlyQuery = !cls && !category && !sizeNum && !capNum;
-    const tvCanon = offersIndex.classCanon.tv || "Tv";
+    const tvCanon = offersIndex?.classCanon?.tv || "Tv";
     
     if (featureAssumeTvOnBrandOnly && isBrandOnlyQuery) {
       const resTv = listOffersForBrand(brand, {
@@ -69,7 +69,7 @@ export function selectOffersFromVision(hints, deps) {
   }
 
   const items = [];
-  const brands = offersIndex.brands || [];
+  const brands = offersIndex?.brands || [];
   for (let i = 0; i < brands.length; i += 1) {
     const b = brands[i];
     const arr = ((offers && offers.offers && offers.offers[b]) || [])

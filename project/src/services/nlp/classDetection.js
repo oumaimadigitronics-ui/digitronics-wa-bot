@@ -282,7 +282,7 @@ const CATEGORY_CLASS_KEYWORDS = Object.freeze([
  * @returns {Object} - Class aliases object
  */
 export function buildDefaultClassAliases(offersIndex) {
-  const tvCanon = offersIndex.classCanon.tv;
+  const tvCanon = offersIndex?.classCanon?.tv;
   const out = {};
   if (tvCanon) out[tvCanon] = ["tv", "tele", "télé", "television", "télévision", "تلفاز", "تلفزيون", "google tv", "smart tv"];
   return out;
@@ -309,7 +309,7 @@ export function detectClass(text, offersIndex) {
     }
   }
 
-  const classes = offersIndex.classes || [];
+  const classes = offersIndex?.classes || [];
   for (let i = 0; i < classes.length; i += 1) {
     const cls = classes[i];
     const ncls = normMatch(cls);
@@ -330,7 +330,7 @@ export function normalizeCategoryName(name, offersIndex) {
   const base = String(name || "").trim();
   if (!base) return null;
   const k = normMatch(base);
-  const v = offersIndex.categoryNorm.get(k);
+  const v = offersIndex?.categoryNorm?.get(k);
   if (v) return v;
   return base;
 }
@@ -345,7 +345,7 @@ export function normalizeClassName(name, offersIndex) {
   const base = String(name || "").trim();
   if (!base) return null;
   const k = normMatch(base);
-  const v = offersIndex.classNorm.get(k);
+  const v = offersIndex?.classNorm?.get(k);
   if (v) return v;
   return base;
 }
@@ -370,7 +370,7 @@ export function detectCategory(text, offersIndex) {
     }
   }
 
-  const cats = offersIndex.categories || [];
+  const cats = offersIndex?.categories || [];
   for (let i = 0; i < cats.length; i += 1) {
     const cat = cats[i];
     const ncat = normMatch(cat);

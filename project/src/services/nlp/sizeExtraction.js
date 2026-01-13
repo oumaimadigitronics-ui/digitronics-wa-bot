@@ -51,7 +51,7 @@ export function hasTvSizeContext(text) {
 export function extractTvSize(text, opts, offersIndex, extractAllowedTvSizeFromString) {
   const s0 = arabicIndicToAsciiDigits(String(text || ""));
   const categoryHint = normMatch(opts.category || opts.categoryHint || "");
-  const tvCanonNorm = normMatch(offersIndex.classCanon.tv || "tv");
+  const tvCanonNorm = normMatch(offersIndex?.classCanon?.tv || "tv");
   const allowNoHint = Boolean(opts.allowNoHint) || (categoryHint && categoryHint === tvCanonNorm);
   const requireTvHint = opts.requireTvHint === true;
   const externalTvContext = opts.externalTvContext === true || hasTvSizeContext(text);
