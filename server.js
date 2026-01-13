@@ -282,6 +282,7 @@ const MAX_TV_SIZE = 120;
 let systemPromptLoaded = false;
 let systemPromptValue = "";
 const DEFAULT_SYSTEM_PROMPT = "You are DigiBot for Digitronics.ma.";
+let wcFetchJsonOverride = null;
 
 function debugLog(event, payload) {
   if (!LOG_DEBUG) return;

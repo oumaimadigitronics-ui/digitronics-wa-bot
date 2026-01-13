@@ -48,13 +48,13 @@ export function detectModel(text, offersIndex) {
   for (let i = 0; i < tokens.length; i += 1) {
     const tok = tokens[i];
     if (!tok || tok.length < 4) continue;
-    const hit = offersIndex.modelLookup.get(tok);
+    const hit = offersIndex?.modelLookup?.get(tok);
     if (hit) return hit;
 
     if (tok.length >= 6) {
       for (let j = 0; j + 4 <= tok.length; j += 1) {
         const p4 = tok.slice(j, j + 4);
-        const cand = offersIndex.modelPrefix4.get(p4);
+        const cand = offersIndex?.modelPrefix4?.get(p4);
         if (!cand) continue;
         for (let k = 0; k < cand.length; k += 1) {
           const mLower = cand[k].mLower;
