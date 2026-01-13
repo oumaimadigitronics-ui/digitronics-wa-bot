@@ -2587,9 +2587,7 @@ function extractTvSize(text, opts = {}) {
   return extractTvSizeImpl(text, opts, OFFERS_INDEX, extractAllowedTvSizeFromString);
 }
 
-function extractCapacityLiters(text) {
-  return extractCapacityLitersImpl(text);
-}
+const extractCapacityLiters = (text) => extractCapacityLitersImpl(text);
 
 // RULE: build product link only when explicitly requested
 function buildProductLink(product, fallbackName) {
@@ -2612,33 +2610,19 @@ function shortenKeepingTail(base, tail, maxChars) {
   return shortenKeepingTailImpl(base, tail, maxChars, { CFG, shortenNoQuestion });
 }
 
-function offerPriceText(offer) {
-  return offerPriceTextImpl(offer);
-}
+const offerPriceText = (offer) => offerPriceTextImpl(offer);
 
-function buildOfferItemsFromEntries(entries, lang) {
-  return buildOfferItemsFromEntriesImpl(entries, lang);
-}
+const buildOfferItemsFromEntries = (entries, lang) => buildOfferItemsFromEntriesImpl(entries, lang);
 
-function offersTemplate({ title, subtitleFR, subtitleAR, lines, lang, maxChars }) {
-  return offersTemplateImpl({ title, subtitleFR, subtitleAR, lines, lang, maxChars });
-}
+const offersTemplate = ({ title, subtitleFR, subtitleAR, lines, lang, maxChars }) => offersTemplateImpl({ title, subtitleFR, subtitleAR, lines, lang, maxChars });
 
-function buildPremiumOffersReply({ title, entries, lang, maxChars }) {
-  return buildPremiumOffersReplyImpl({ title, entries, lang, maxChars });
-}
+const buildPremiumOffersReply = ({ title, entries, lang, maxChars }) => buildPremiumOffersReplyImpl({ title, entries, lang, maxChars });
 
-function formatOfferLine(brand, o, opts = {}) {
-  return formatOfferLineImpl(brand, o, opts);
-}
+const formatOfferLine = (brand, o, opts = {}) => formatOfferLineImpl(brand, o, opts);
 
-function offersHeader(lang, ctx) {
-  return offersHeaderImpl(lang, ctx);
-}
+const offersHeader = (lang, ctx) => offersHeaderImpl(lang, ctx);
 
-function titleFromHeader(header) {
-  return titleFromHeaderImpl(header);
-}
+const titleFromHeader = (header) => titleFromHeaderImpl(header);
 
 function normalizeOfferForContext(offer) {
   if (!offer || typeof offer !== "object") return null;
@@ -2659,9 +2643,7 @@ function normalizeOfferForContext(offer) {
   };
 }
 
-function buildOfferContextEntries(entries) {
-  return buildOfferContextEntriesImpl(entries);
-}
+const buildOfferContextEntries = (entries) => buildOfferContextEntriesImpl(entries);
 
 function priceSummaryText(lang, min, max) {
   const L = lang || "dzl";
@@ -2930,13 +2912,9 @@ function setFeatureAudioSniffMimeForTest(enabled) {
 }
 
 
-function normalizeOfferItem(brand, offer, originalIdx) {
-  return normalizeOfferItemImpl(brand, offer, originalIdx);
-}
+const normalizeOfferItem = (brand, offer, originalIdx) => normalizeOfferItemImpl(brand, offer, originalIdx);
 
-function rankOffers(items, opts) {
-  return rankOffersImpl(items, opts);
-}
+const rankOffers = (items, opts) => rankOffersImpl(items, opts);
 
 function capacityScoreCmp(a, b) {
   const aScore = Number.isFinite(a.capacityScore) ? a.capacityScore : Number.POSITIVE_INFINITY;
@@ -2946,9 +2924,7 @@ function capacityScoreCmp(a, b) {
 }
 
 // RULE: max 1 offer per brand, cheapest per brand, price order
-function pickCheapestPerBrand(items) {
-  return pickCheapestPerBrandImpl(items);
-}
+const pickCheapestPerBrand = (items) => pickCheapestPerBrandImpl(items);
 
 
 async function tryWebsiteCatalogAnswer(userText, lang, key) {
@@ -4133,9 +4109,7 @@ function hasProductInquirySignal(text) {
   );
 }
 
-function wantsProductDetails(text, lang) {
-  return wantsProductDetailsImpl(text, lang);
-}
+const wantsProductDetails = (text, lang) => wantsProductDetailsImpl(text, lang);
 
 function parseSelectedOptionNumber(text) {
   const raw = arabicIndicToAsciiDigits(String(text || ""));
@@ -4210,13 +4184,9 @@ function getOfferImageUrl(offer) {
   return null;
 }
 
-function detailsNeedOptionReply(lang) {
-  return detailsNeedOptionReplyImpl(lang);
-}
+const detailsNeedOptionReply = (lang) => detailsNeedOptionReplyImpl(lang);
 
-function detailsNoContextReply(lang) {
-  return detailsNoContextReplyImpl(lang);
-}
+const detailsNoContextReply = (lang) => detailsNoContextReplyImpl(lang);
 
 function formatSpecLine(lang, labelFr, labelAr, value) {
   const safeValue = String(value || "").trim();
