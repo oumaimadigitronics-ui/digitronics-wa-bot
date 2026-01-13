@@ -15,6 +15,7 @@ import { buildPriceReply } from '../replies/priceReply.js';
 import { buildTvBudgetReply } from '../replies/tvBudgetReply.js';
 import { buildBotContext } from './context.js';
 import { pickOverride } from './overrides/index.js';
+import { barePriceClarification } from '../nlp/sizeExtraction.js';
 
 function getAudioPayload(body = {}) {
   const media = body.media || {};
@@ -214,24 +215,29 @@ export class BotService {
       if (extractedPhone) {
         reply = phoneConfirmReply(preferredLang || 'dz', extractedPhone);
       } else {
-        const normalizedInput = normalizedText || userText;
-        if (isBatteryTvIntent(normalizedInput)) {
-          reply = powerIntentReply(preferredLang || 'dz');
-        } else if (isThanks(thanksText)) {
-          reply = thanksReply(preferredLang || 'dz', {
-            isBye: hasBye(thanksText),
-          });
+        // Check for bare price (e.g., "899", "5000") before other processing
+        const barePriceClarify = barePriceClarification(userText, preferredLang || 'dz');
+        if (barePriceClarify) {
+          reply = barePriceClarify;
         } else {
-          const greeting = isGreeting(userText);
-          const wantsMenu = isMenuHelpIntent(normalizedInput);
-          const isMenuReply = looksLikeCategoryMenu(reply);
-          const hasWeakCategories = containsAnyKeyword(reply, WEAK_CATEGORY_KEYWORDS);
-          const hasStrongCategories = containsAnyKeyword(reply, STRONG_CATEGORY_KEYWORDS);
-          const shouldOverrideMenu = greeting || wantsMenu || (isMenuReply && hasWeakCategories && !hasStrongCategories);
-
-          if (shouldOverrideMenu) {
-            reply = buildMainMenu({ preferredLang: preferredLang || 'dz' });
+          const normalizedInput = normalizedText || userText;
+          if (isBatteryTvIntent(normalizedInput)) {
+            reply = powerIntentReply(preferredLang || 'dz');
+          } else if (isThanks(thanksText)) {
+            reply = thanksReply(preferredLang || 'dz', {
+              isBye: hasBye(thanksText),
+            });
           } else {
+            const greeting = isGreeting(userText);
+            const wantsMenu = isMenuHelpIntent(normalizedInput);
+            const isMenuReply = looksLikeCategoryMenu(reply);
+            const hasWeakCategories = containsAnyKeyword(reply, WEAK_CATEGORY_KEYWORDS);
+            const hasStrongCategories = containsAnyKeyword(reply, STRONG_CATEGORY_KEYWORDS);
+            const shouldOverrideMenu = greeting || wantsMenu || (isMenuReply && hasWeakCategories && !hasStrongCategories);
+
+            if (shouldOverrideMenu) {
+              reply = buildMainMenu({ preferredLang: preferredLang || 'dz' });
+            } else {
             const guardrailReply = applyGuardrails({
               userText,
               normalizedText,
@@ -265,6 +271,7 @@ export class BotService {
                           matches,
                           preferredLang: preferredLang || 'dz',
                           allOffers: offers,
+                          showRanges: this.cfg?.ENABLE_PRICE_RANGES !== false, // Default to true unless explicitly disabled
                         })
                       : matches.length > 0
                         ? buildPriceReply({
@@ -287,6 +294,7 @@ export class BotService {
               if (catalogResult?.reply) {
                 reply = catalogResult.reply;
               }
+            }
             }
           }
         }

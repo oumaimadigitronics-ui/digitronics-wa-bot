@@ -9,6 +9,7 @@
 import { buildOfferContextEntries } from './queryContext.js';
 import { isTvOriginIntent } from './queryRouter.js';
 import { normMatch } from '../../lib/textUtils.js';
+import { barePriceClarification } from '../nlp/sizeExtraction.js';
 
 /**
  * Factory function to create tryDirectOfferAnswer with dependencies
@@ -66,6 +67,10 @@ export function createTryDirectOfferAnswer(deps) {
   if (!text) return null;
   if (isAcknowledgementMessage(text)) return null;
   if (!OFFERS || !OFFERS.offers || !Object.keys(OFFERS.offers).length) return null;
+
+  // Check for bare price (e.g., "899", "5000") before processing as TV size
+  const clarification = barePriceClarification(text, lang);
+  if (clarification) return clarification;
 
   const ctx = getCtx(key);
   const parsed = parseUserQuery(text, { ctx, key, logContext: opts.logContext || null });
