@@ -7111,12 +7111,13 @@ async function processIncomingMedia({ mediaInfo, mediaMeta, msgType, lang, key, 
       // Use transcribeWithRetry for automatic retry on transient errors
       const transcriptionResult = await transcribeWithRetry(
         async () => {
-          return await transcribeAudioFile(inputPath, safeMime, whisperLang);
+          const text = await transcribeAudioFile(inputPath, safeMime, whisperLang);
+          return { text }; // Wrap string result in object
         },
         { reqId, lang }
       );
       
-      const userTextRaw = String(transcriptionResult?.text || transcriptionResult || "").trim();
+      const userTextRaw = String(transcriptionResult?.text || "").trim();
       const retryCount = transcriptionResult?.retryCount || 0;
       
       if (!userTextRaw) {
@@ -7167,7 +7168,8 @@ async function processIncomingMedia({ mediaInfo, mediaMeta, msgType, lang, key, 
       const errorType = classifyAudioError(e);
       const errorMessage = getAudioErrorMessage(errorType, lang);
       
-      if (e && (e.message === "transcription_low_quality" || e.message === "transcription_empty")) {
+      // Handle empty transcription specially
+      if (e && e.message === "transcription_empty") {
         const reply = ensureNoQuestion(voiceNotUnderstoodTemplate());
         return { ...route, reply };
       }
