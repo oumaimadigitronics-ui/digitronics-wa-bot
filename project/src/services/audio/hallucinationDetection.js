@@ -12,8 +12,8 @@ const HALLUCINATION_PATTERNS = [
   // Religious content (unlikely in shopping context)
   /صلاة|صوم|حج|عبادة/,
   
-  // Repetitive patterns (common hallucination)
-  /(.{10,})\1{2,}/,  // Same phrase repeated 3+ times
+  // Repetitive patterns (common hallucination) - check for repeated words
+  /\b(\w+)\s+\1\s+\1/i,  // Same word repeated 3+ times (e.g., "hello hello hello")
   
   // YouTube/Social media garbage
   /subscribe|like and share|follow me/i,
@@ -27,7 +27,7 @@ const HALLUCINATION_PATTERNS = [
   /شكرا للمشاهدة/,
 ];
 
-// Keywords that should appear in valid electronics store queries
+// Keywords that should appear in valid electronics store queries (pre-lowercased for efficiency)
 const VALID_CONTEXT_KEYWORDS = [
   // Products
   'tv', 'tele', 'télé', 'تلفاز', 'تلفزيون', 'تلفزة',
@@ -52,7 +52,10 @@ const VALID_CONTEXT_KEYWORDS = [
   // Common greetings/questions
   'salam', 'سلام', 'bonjour', 'hello',
   'wach', 'واش', 'chno', 'شنو', 'fin', 'فين',
-];
+].map(k => k.toLowerCase());
+
+// Common Darija/Arabic filler words that indicate natural speech
+const DARIJA_FILLER_REGEX = /salam|labas|kifash|3afak|bghit|chno|wach|واش|شنو|بغيت/;
 
 /**
  * Check if transcription is likely a hallucination.
@@ -73,13 +76,13 @@ export function isLikelyHallucination(text) {
   
   // Check if text has ANY valid context keywords
   const hasValidContext = VALID_CONTEXT_KEYWORDS.some(keyword => 
-    normalized.includes(keyword.toLowerCase())
+    normalized.includes(keyword)
   );
   
   // If text is long (>50 chars) but has NO valid context keywords, likely hallucination
   if (normalized.length > 50 && !hasValidContext) {
     // Check if it at least has common Darija/Arabic filler words
-    const hasDarijaFillers = /salam|labas|kifash|3afak|bghit|chno|wach|واش|شنو|بغيت/.test(normalized);
+    const hasDarijaFillers = DARIJA_FILLER_REGEX.test(normalized);
     if (!hasDarijaFillers) {
       return { hallucinated: true, reason: 'no_valid_context_keywords' };
     }

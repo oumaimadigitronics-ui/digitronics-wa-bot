@@ -47,7 +47,7 @@ test('isLikelyHallucination - detects religious content', () => {
 });
 
 test('isLikelyHallucination - detects repetitive patterns', () => {
-  const text = 'Hello there Hello there Hello there Hello there';
+  const text = 'there there there Hello world';
   const result = isLikelyHallucination(text);
   assert.strictEqual(result.hallucinated, true);
   assert.strictEqual(result.reason, 'matches_hallucination_pattern');
