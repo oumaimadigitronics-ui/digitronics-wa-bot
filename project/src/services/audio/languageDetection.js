@@ -160,11 +160,11 @@ export function correctArabicBrands(text) {
   const brandCorrections = [
     // TCL variations - most common issue
     { pattern: /تساك|تي ساك|تسك|تي سك|تي اس اك/g, replacement: 'TCL' },
-    { pattern: /\bتي سي ال\b/g, replacement: 'TCL' },
+    { pattern: /تي سي ال/g, replacement: 'TCL' },
     
     // Samsung variations
     { pattern: /سامسونغ|سامسونق|سمسونج/g, replacement: 'Samsung' },
-    { pattern: /\bسامسونج\b/g, replacement: 'Samsung' },
+    { pattern: /سامسونج/g, replacement: 'Samsung' },
     
     // LG variations
     { pattern: /ال جي|إل جي|الجي/g, replacement: 'LG' },
