@@ -16,6 +16,7 @@ import { buildTvBudgetReply } from '../replies/tvBudgetReply.js';
 import { buildBotContext } from './context.js';
 import { pickOverride } from './overrides/index.js';
 import { barePriceClarification } from '../nlp/sizeExtraction.js';
+import { getAudioErrorMessage, classifyAudioError } from '../audio/errorMessages.js';
 
 function getAudioPayload(body = {}) {
   const media = body.media || {};
@@ -36,7 +37,14 @@ function getAudioPayload(body = {}) {
   return null;
 }
 
-function sttFallbackReply(preferredLang = 'dz') {
+function sttFallbackReply(preferredLang = 'dz', error = null) {
+  // If an error is provided, classify it and return a specific message
+  if (error) {
+    const errorType = classifyAudioError(error);
+    return getAudioErrorMessage(errorType, preferredLang);
+  }
+  
+  // Default fallback message (for when no error is provided)
   if (preferredLang === 'ar') {
     return 'ماقدرتش نفهم الصوت، كتب ليا السؤال ولا عاود سجل الصوت بوضوح 🙏';
   }
