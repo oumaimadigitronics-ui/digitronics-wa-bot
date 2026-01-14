@@ -64,7 +64,17 @@ export function getAudioErrorMessage(errorType, lang = 'dz') {
  * @returns {string} Error type classification
  */
 export function classifyAudioError(error) {
-  const msg = String(error?.message || error || '').toLowerCase();
+  // Extract error message safely
+  let msg = '';
+  if (typeof error === 'string') {
+    msg = error;
+  } else if (error && typeof error === 'object') {
+    msg = error.message || JSON.stringify(error);
+  } else {
+    msg = String(error || '');
+  }
+  
+  msg = msg.toLowerCase();
   
   // Check for quota/rate limit errors
   if (msg.includes('429') || msg.includes('quota') || msg.includes('rate limit')) {

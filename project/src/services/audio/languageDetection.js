@@ -12,6 +12,20 @@ const ARABIC_PROMPT = `Modern Standard Arabic and Gulf Arabic transcription. Com
 
 const ENGLISH_PROMPT = `English transcription for customer service. Common terms: television, TV, washing machine, refrigerator, air conditioner, price, available, delivery, warranty.`;
 
+// Language indicator word lists for detection
+const FRENCH_INDICATORS = [
+  'je', 'tu', 'il', 'elle', 'nous', 'vous', 'ils', 'elles',
+  'le', 'la', 'les', 'un', 'une', 'des',
+  'est', 'sont', 'avoir', 'être', 'faire', 'aller',
+  'dans', 'pour', 'avec', 'sans', 'sur', 'voudrais', 'bonjour'
+];
+
+const DARIJA_INDICATORS = [
+  'bghit', 'chhal', '3afak', 'wakha', 'mezyan', 'daba', 'hadi',
+  'dyal', 'kayn', 'mashi', 'walo', 'bezzaf', 'chwiya', '3ndek',
+  '3ndi', 'kifash', 'wash', 'fin', 'mnin', 'fash', 'bach'
+];
+
 /**
  * Get transcription prompt for a specific language.
  * @param {string} detectedLang - Language code (dz, fr, ar, en)
@@ -56,6 +70,15 @@ export function mapLangToWhisper(lang) {
 }
 
 /**
+ * Create regex pattern from word list for efficient matching.
+ * @param {string[]} words - List of words
+ * @returns {RegExp} Compiled regex pattern
+ */
+function createWordPattern(words) {
+  return new RegExp(`\\b(${words.join('|')})\\b`, 'gi');
+}
+
+/**
  * Detect language from transcribed text.
  * @param {string} text - Transcribed text
  * @returns {string} Detected language code (dz, ar, fr, en)
@@ -67,9 +90,12 @@ export function detectLanguageFromText(text) {
   const arabicChars = (text.match(/[\u0600-\u06FF]/g) || []).length;
   const latinChars = (text.match(/[a-zA-Z]/g) || []).length;
   
-  // Check for language-specific indicators
-  const frenchIndicators = (text.match(/\b(je|tu|il|elle|nous|vous|ils|elles|le|la|les|un|une|des|est|sont|avoir|être|faire|aller|dans|pour|avec|sans|sur|voudrais|bonjour)\b/gi) || []).length;
-  const darijaIndicators = (text.match(/\b(bghit|chhal|3afak|wakha|mezyan|daba|hadi|dyal|kayn|mashi|walo|bezzaf|chwiya|3ndek|3ndi|kifash|wash|fin|mnin|fash|bach)\b/gi) || []).length;
+  // Check for language-specific indicators using pre-compiled patterns
+  const frenchPattern = createWordPattern(FRENCH_INDICATORS);
+  const darijaPattern = createWordPattern(DARIJA_INDICATORS);
+  
+  const frenchIndicators = (text.match(frenchPattern) || []).length;
+  const darijaIndicators = (text.match(darijaPattern) || []).length;
   
   // High Arabic character ratio suggests Arabic/Darija
   if (arabicChars > latinChars * 2) {
@@ -106,7 +132,8 @@ export function calculateLanguageConfidence(text, lang) {
   }
   
   if (lang === 'fr') {
-    const frenchWords = (text.match(/\b(je|tu|il|nous|vous|le|la|les|un|une|est|sont|avoir|être)\b/gi) || []).length;
+    const frenchPattern = createWordPattern(FRENCH_INDICATORS.slice(0, 8)); // Use common words only
+    const frenchWords = (text.match(frenchPattern) || []).length;
     return Math.min(frenchWords / 10, 1);
   }
   

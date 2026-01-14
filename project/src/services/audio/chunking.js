@@ -14,6 +14,7 @@ const OVERLAP_MS = 2000;
 
 /**
  * Combine transcripts from multiple chunks, removing duplicates at boundaries.
+ * Uses an efficient algorithm to detect overlapping word sequences.
  * @param {Array<Object>} transcripts - Array of transcript objects with index, text, startMs, endMs
  * @returns {string} Combined transcript text
  */
@@ -30,24 +31,26 @@ export function combineChunkTranscripts(transcripts) {
       // First chunk - use as-is
       combined = text;
     } else {
-      // Subsequent chunks - try to detect and remove overlap
-      const prevWords = combined.split(/\s+/).slice(-10);
+      // Subsequent chunks - detect and remove overlap efficiently
+      const prevWords = combined.split(/\s+/).slice(-10); // Only check last 10 words
       const currWords = text.split(/\s+/);
       
-      let overlapStart = 0;
+      // Find longest matching suffix-prefix overlap
+      let maxOverlap = 0;
+      const searchLimit = Math.min(prevWords.length, currWords.length, 10);
       
-      // Look for overlapping word sequences
-      for (let j = 0; j < Math.min(prevWords.length, currWords.length); j++) {
-        const prevSlice = prevWords.slice(-j-1).join(' ').toLowerCase();
-        const currSlice = currWords.slice(0, j+1).join(' ').toLowerCase();
+      for (let len = searchLimit; len > 0; len--) {
+        const prevSlice = prevWords.slice(-len).join(' ').toLowerCase();
+        const currSlice = currWords.slice(0, len).join(' ').toLowerCase();
         
         if (prevSlice === currSlice) {
-          overlapStart = j + 1;
+          maxOverlap = len;
+          break; // Found longest match
         }
       }
       
       // Append non-overlapping portion
-      combined += ' ' + currWords.slice(overlapStart).join(' ');
+      combined += ' ' + currWords.slice(maxOverlap).join(' ');
     }
   }
   

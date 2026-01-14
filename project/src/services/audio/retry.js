@@ -69,8 +69,8 @@ export async function transcribeWithRetry(transcribeFunc, opts = {}) {
         return result;
       }
       
-      // Empty result - treat as error
-      throw new Error('transcription_empty');
+      // Empty result - treat as error with descriptive message
+      throw new Error('Audio transcription returned no text content');
       
     } catch (error) {
       lastError = error;
