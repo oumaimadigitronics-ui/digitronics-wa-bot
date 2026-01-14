@@ -8,7 +8,6 @@ import { BRAND_PRIORITY } from '../offers/offersRanking.js';
 // Arabic brand name mappings (common Arabic spellings of brand names)
 const ARABIC_BRAND_MAPPINGS = {
   'دايكو': 'Daiko',
-  'دايكو': 'Daiko',
   'فيزيو': 'Visio',
   'فيزو': 'Visio',
   'سامسونج': 'Samsung',
@@ -51,6 +50,9 @@ export function containsPersonalContent(text) {
 
 /**
  * Check if a string looks like a valid brand/product name
+ * Note: This function allows both known brands AND product-like strings.
+ * For stricter validation requiring known brands, use validateComparisonParts.
+ * 
  * @param {string} text - Text to validate
  * @param {Array<string>} knownBrands - List of known brand names
  * @returns {boolean} True if valid brand-like string
@@ -82,6 +84,7 @@ export function isValidBrandName(text, knownBrands = BRAND_PRIORITY) {
   }
   
   // Allow if it looks like a product name (short, no sentences)
+  // This allows for generic product names or brand variants not in our list
   // Reject if it has multiple spaces (likely a sentence fragment)
   const spaceCount = (trimmed.match(/\s/g) || []).length;
   if (spaceCount > 2) return false;
