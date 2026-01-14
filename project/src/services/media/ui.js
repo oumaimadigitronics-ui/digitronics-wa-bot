@@ -50,6 +50,31 @@ export function audioReminderText(lang) {
 }
 
 /**
+ * Get audio answer note to append to voice-transcribed replies
+ * Indicates to user that their voice message was transcribed
+ * @param {string} lang - Language code (fr|ar|dzl|en)
+ * @returns {string} - Note text with microphone emoji
+ */
+export function audioAnswerNote(lang) {
+  const L = String(lang || "dzl");
+  
+  if (L === "fr") {
+    return "🎤 *Transcrit depuis votre message vocal*";
+  }
+  
+  if (L === "ar") {
+    return "🎤 *مكتوب من رسالتك الصوتية*";
+  }
+  
+  if (L === "en") {
+    return "🎤 *Transcribed from your voice message*";
+  }
+  
+  // Default: Darija
+  return "🎤 *Transcrit depuis message vocal*";
+}
+
+/**
  * Get voice not understood template
  * @returns {string} - Template string
  */
