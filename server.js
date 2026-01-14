@@ -249,6 +249,7 @@ import {
   transcribeLongAudio,
   checkAudioQuality,
   getAudioDuration,
+  correctArabicBrands,
   isAudioMime as isAudioMimeImpl,
   cleanMimeType as cleanMimeTypeImpl,
   sniffAudioMime as sniffAudioMimeImpl,
@@ -7257,8 +7258,11 @@ async function processIncomingMedia({ mediaInfo, mediaMeta, msgType, lang, key, 
         throw new Error("transcription_empty");
       }
       
+      // Apply Arabic brand corrections to fix common misspellings
+      const userText = correctArabicBrands(userTextRaw);
+      
       // Detect language from transcribed text
-      const detectedLang = detectLanguageFromText(userTextRaw);
+      const detectedLang = detectLanguageFromText(userText);
       
       // Log metrics
       const processingTimeMs = Date.now() - transcribeStart;
@@ -7271,7 +7275,7 @@ async function processIncomingMedia({ mediaInfo, mediaMeta, msgType, lang, key, 
           durationSec: durationMs ? Math.round(durationMs / 1000) : null,
           sizeBytes,
           detectedLang,
-          transcriptLength: userTextRaw.length,
+          transcriptLength: userText.length,
           retryCount,
           chunked: false,
           processingTimeMs,
@@ -7279,7 +7283,7 @@ async function processIncomingMedia({ mediaInfo, mediaMeta, msgType, lang, key, 
         })
       );
       
-      const preview = userTextRaw.slice(0, 120);
+      const preview = userText.slice(0, 120);
       console.log(
         JSON.stringify({
           level: "info",
@@ -7289,11 +7293,11 @@ async function processIncomingMedia({ mediaInfo, mediaMeta, msgType, lang, key, 
           sizeBytes,
           mimeType: safeMime,
           detectedLang,
-          transcriptChars: userTextRaw.length,
+          transcriptChars: userText.length,
         })
       );
 
-      return { ...route, userText: userTextRaw, sizeBytes, transcriptChars: userTextRaw.length, mimeType: safeMime };
+      return { ...route, userText, sizeBytes, transcriptChars: userText.length, mimeType: safeMime };
     } catch (e) {
       console.error(JSON.stringify({ level: "error", msg: "audio_failed", reqId, error: (e && e.message) || String(e) }));
       
