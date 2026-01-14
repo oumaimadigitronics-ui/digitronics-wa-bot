@@ -81,6 +81,7 @@ export {
   detectLanguageFromText,
   calculateLanguageConfidence,
   shouldRetranscribe,
+  correctArabicBrands,
 } from "./languageDetection.js";
 
 // Re-export chunking utilities
@@ -94,3 +95,8 @@ export {
 export {
   checkAudioQuality,
 } from "./qualityCheck.js";
+
+// Re-export hallucination detection utilities
+export {
+  isLikelyHallucination,
+} from "./hallucinationDetection.js";

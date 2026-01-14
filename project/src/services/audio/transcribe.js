@@ -6,6 +6,7 @@ import fs from "fs";
 import path from "path";
 import os from "os";
 import { sniffAudioMime, extFromAudioMime, cleanMimeType, inferMimeFromPath } from "./mime.js";
+import { getTranscriptionPrompt } from "./languageDetection.js";
 
 /**
  * Transcribe audio file using OpenAI Whisper API.
@@ -56,6 +57,9 @@ export async function transcribeAudioOpenAI(
     chosenFilename = `${path.basename(chosenFilename, currentExt)}${desiredExt}`;
   }
   const chosenModel = model || CFG.openaiTranscribeModel || "gpt-4o-mini-transcribe";
+  
+  // Get transcription prompt based on language
+  const transcriptionPrompt = getTranscriptionPrompt(languageHint || 'dz');
 
   console.log(
     JSON.stringify({
@@ -69,6 +73,7 @@ export async function transcribeAudioOpenAI(
       filePath,
       model: chosenModel,
       language: languageHint || null,
+      prompt: transcriptionPrompt ? transcriptionPrompt.substring(0, 50) + "..." : null,
       reqId,
     })
   );
@@ -80,6 +85,7 @@ export async function transcribeAudioOpenAI(
       model: chosenModel,
       response_format: "text",
       language: languageHint || undefined,
+      prompt: transcriptionPrompt || undefined,
     });
     if (resp && typeof resp === "object" && (resp.text || resp.output_text)) return String(resp.text || resp.output_text || "").trim();
     return String(resp || "").trim();

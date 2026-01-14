@@ -1,7 +1,7 @@
 import "dotenv/config";
 import crypto from "crypto";
 import dns from "dns/promises";
-import { execFile, spawn } from "child_process";
+import { execFile } from "child_process";
 import fs from "fs";
 import net from "net";
 import path from "path";
@@ -249,6 +249,8 @@ import {
   transcribeLongAudio,
   checkAudioQuality,
   getAudioDuration,
+  correctArabicBrands,
+  isLikelyHallucination,
   isAudioMime as isAudioMimeImpl,
   cleanMimeType as cleanMimeTypeImpl,
   sniffAudioMime as sniffAudioMimeImpl,
@@ -284,6 +286,40 @@ const __filename = ENTRY_FILE;
 let systemPromptLoaded = false;
 let systemPromptValue = "";
 let wcFetchJsonOverride = null;
+
+function debugLog(event, payload) {
+  if (!LOG_DEBUG) return;
+  const base = typeof payload === "object" && payload !== null ? payload : { detail: payload };
+  try {
+    console.log(JSON.stringify({ level: "debug", event, ...base }));
+  } catch (err) {
+    // Fallback to simple logging if JSON serialization fails
+    console.log("[DEBUG]", event, typeof base === "object" ? "[Object]" : base, "Error:", err?.message || String(err));
+  }
+}
+
+const logger = {
+  info(payload) {
+    try {
+      console.log(JSON.stringify({ level: "info", ...payload }));
+    } catch {
+      // Fallback to simple logging if JSON serialization fails
+      console.log("[INFO]", typeof payload === "object" ? "[Object]" : payload);
+    }
+  },
+  warn(payload) {
+    try {
+      console.warn(JSON.stringify({ level: "warn", ...payload }));
+    } catch {
+      // Fallback to simple logging if JSON serialization fails
+      console.warn("[WARN]", typeof payload === "object" ? "[Object]" : payload);
+    }
+  },
+};
+
+const DEFAULT_ORDER_FORM_URL =
+  "https://docs.google.com/forms/d/e/1FAIpQLScmDNagYSpUPfsIT2s2t35KH7U1OWSNkUCIWmcJJm1R_aITQQ/viewform?usp=header";
+
 const {
   app,
   logger,
@@ -310,13 +346,135 @@ const {
   LOG_DEBUG,
   OFFERS_REFRESH_TOKEN,
   OPENAI_API_KEY,
-  OPENAI_MODEL,
-  ORDER_FORM_URL,
-  REQUIRE_ENV,
-  RUN_SELF_TESTS,
-  SYSTEM_PROMPT,
-  SYSTEM_PROMPT_FILE,
-} = initializeServerContext({ env: process.env, argv: process.argv, entryFile: ENTRY_FILE });
+  OPENAI_MODEL = "gpt-4o-mini",
+
+  OFFERS_REFRESH_MS = "300000",
+  OFFERS_REFRESH_TOKEN = "",
+
+  WC_BASE_URL = "",
+  WC_CONSUMER_KEY = "",
+  WC_CONSUMER_SECRET = "",
+  WC_PER_PAGE = "100",
+  WC_STATUS = "publish",
+
+  ORDER_FORM_URL = DEFAULT_ORDER_FORM_URL,
+
+  RATE_LIMIT_WINDOW_MS = "60000",
+  RATE_LIMIT_MAX = "25",
+
+  MEMORY_TTL_HOURS = "24",
+  MEMORY_MAX_MESSAGES = "12",
+  MEMORY_PERSIST = "0",
+  MEMORY_DIR = "./data",
+
+  FOCUS_BRAND = "",
+  FOCUS_MODE = "preferred",
+
+  MAX_WA_REPLY_CHARS = "6000",
+
+  WANOTIFIER_TOKEN = "",
+  WANOTIFIER_HMAC_SECRET = "",
+  WANOTIFIER_HMAC_HEADER = "x-signature",
+  WANOTIFIER_TS_HEADER = "x-timestamp",
+  WANOTIFIER_MAX_SKEW_SECONDS = "300",
+  WANOTIFIER_MEDIA_URL = "",
+
+  MEDIA_MODE = "auto",
+  MEDIA_FETCH_TIMEOUT_MS = "8000",
+  MEDIA_MAX_BYTES_IMAGE = "4000000",
+  MEDIA_MAX_BYTES_AUDIO = "12000000",
+  MEDIA_ALLOW_INSECURE_HTTP = "0",
+
+  OPENAI_VISION_MODEL = "",
+  OPENAI_TRANSCRIBE_MODEL = "gpt-4o-mini-transcribe",
+  AUDIO_MIN_SCORE = "0.45",
+  FEATURE_AUDIO_SNIFF_MIME = "0",
+  FEATURE_AUDIO_CLEAN_MIME = "1",
+  FEATURE_GREETING_FOLLOWUP_OFFERS = "0",
+  FEATURE_GREETING_LANG_FROM_TEXT = "0",
+  FEATURE_GREETING_I18N = "0",
+  FEATURE_FORCE_AR_FR = "0",
+
+  SYSTEM_PROMPT = "",
+  SYSTEM_PROMPT_FILE = "",
+} = process.env;
+
+const configuredMaxReplyChars = Number(MAX_WA_REPLY_CHARS) || 6000;
+const maxReplyCharsConfigured = FEATURE_WA_HARD_CAP_4096
+  ? Math.min(configuredMaxReplyChars, 4096)
+  : configuredMaxReplyChars;
+
+// Add after imports, before app initialization
+function validateRequiredEnvVars() {
+  const required = ['OPENAI_API_KEY'];
+  const missing = required.filter(key => !process.env[key]);
+  
+  if (missing.length > 0) {
+    console.error(JSON.stringify({
+      level: 'fatal',
+      msg: 'missing_required_env_vars',
+      missing
+    }));
+    process.exit(1);
+  }
+}
+
+if (REQUIRE_ENV && !OPENAI_API_KEY) {
+  console.error("Missing env var: OPENAI_API_KEY (OpenAI responses will fail until set).");
+}
+
+if (REQUIRE_ENV && (!WC_BASE_URL || !WC_CONSUMER_KEY || !WC_CONSUMER_SECRET)) {
+  console.error(
+    "Missing WooCommerce env vars: WC_BASE_URL, WC_CONSUMER_KEY, WC_CONSUMER_SECRET (offers sync will fail until set)."
+  );
+}
+
+const CFG = {
+  port: Number(process.env.PORT || PORT) || 3000,
+  refreshMs: Number(OFFERS_REFRESH_MS) || 300000,
+  rateWindowMs: Number(RATE_LIMIT_WINDOW_MS) || 60000,
+  rateMax: Number(RATE_LIMIT_MAX) || 25,
+  maxReplyChars: Math.max(200, maxReplyCharsConfigured),
+
+  memoryTtlMs: (Number(MEMORY_TTL_HOURS) || 24) * 60 * 60 * 1000,
+  memoryMaxMessages: Math.max(6, Number(MEMORY_MAX_MESSAGES) || 12),
+  memoryPersist: String(MEMORY_PERSIST || "0") === "1",
+  memoryDir: String(MEMORY_DIR || "./data"),
+
+  wanotifierToken: String(WANOTIFIER_TOKEN || "").trim(),
+  wanotifierHmacSecret: String(WANOTIFIER_HMAC_SECRET || "").trim(),
+  wanotifierHmacHeader: String(WANOTIFIER_HMAC_HEADER || "x-signature").toLowerCase(),
+  wanotifierTsHeader: String(WANOTIFIER_TS_HEADER || "x-timestamp").toLowerCase(),
+  wanotifierMaxSkewSec: Math.max(30, Number(WANOTIFIER_MAX_SKEW_SECONDS) || 300),
+  wanotifierMediaUrl: String(WANOTIFIER_MEDIA_URL || "").trim(),
+
+  mediaMode: String(MEDIA_MODE || "auto").toLowerCase(),
+  mediaFetchTimeoutMs: Math.max(1000, Number(MEDIA_FETCH_TIMEOUT_MS) || 8000),
+  mediaMaxBytesImage: Number(MEDIA_MAX_BYTES_IMAGE) || 4000000,
+  mediaMaxBytesAudio: Number(MEDIA_MAX_BYTES_AUDIO) || MAX_AUDIO_BYTES,
+  mediaAllowHttp: String(MEDIA_ALLOW_INSECURE_HTTP || "0") === "1",
+
+  openaiVisionModel: String(OPENAI_VISION_MODEL || "").trim(),
+  openaiTranscribeModel: String(OPENAI_TRANSCRIBE_MODEL || "gpt-4o-mini-transcribe").trim(),
+  audioMinScore: Math.max(0, Math.min(1, Number(AUDIO_MIN_SCORE) || 0.45)),
+  featureAudioSniffMime: String(FEATURE_AUDIO_SNIFF_MIME || "0") === "1",
+  featureAudioCleanMime: String(FEATURE_AUDIO_CLEAN_MIME || "1") === "1",
+  featureGreetingFollowupOffers: String(FEATURE_GREETING_FOLLOWUP_OFFERS || "0") === "1",
+  featureGreetingLangFromText: String(FEATURE_GREETING_LANG_FROM_TEXT || "0") === "1",
+  featureGreetingI18n: String(FEATURE_GREETING_I18N || "0") === "1",
+  featureForceArFr: String(FEATURE_FORCE_AR_FR || "0") === "1",
+
+  wcBase: String(WC_BASE_URL || "").replace(/\/$/g, ""),
+  wcKey: String(WC_CONSUMER_KEY || ""),
+  wcSecret: String(WC_CONSUMER_SECRET || ""),
+  wcPerPage: Math.max(10, Math.min(100, Number(WC_PER_PAGE) || 100)),
+  wcStatus: String(WC_STATUS || "publish"),
+};
+
+const FOCUS = {
+  brand: String(FOCUS_BRAND || "").trim().toUpperCase(),
+  mode: String(FOCUS_MODE || "preferred").trim().toLowerCase(),
+};
 
 // Initialize offers service modules with configuration
 // (This needs to be after CFG, logger, debugLog are defined but before wrapper functions)
@@ -400,12 +558,14 @@ async function refreshOffersSafe() {
 let OFFERS = getOffers();
 let OFFERS_INDEX = getOffersIndex();
 let lastOffersSync = getLastOffersSync();
+let offersVersion = 0; // Version counter for race condition detection
 
 // Update references after sync operations
 function updateOffersReferences() {
   OFFERS = getOffers();
   OFFERS_INDEX = getOffersIndex();
   lastOffersSync = getLastOffersSync();
+  offersVersion++; // Increment version on each update
   // Update offers module reference
   refreshOffersReference();
 }
@@ -2092,6 +2252,7 @@ function isGreetingLikeOpener(text) {
   if (/(^|\s)(bonjour|salut|hello)/i.test(raw)) return true;
   if (/(^|\s)(salam|salem|selam|slm)(\s|$)/i.test(raw)) return true;
   if (/kifach n3awnk/i.test(raw)) return true;
+  return false;
 }
 
 function isForcedGreeting(text) {
@@ -2147,6 +2308,7 @@ function handleGreetingMessage({ key, lang, text, preferredLang }) {
 const pendingOrderStore = new Map();
 const lastOrderAckStore = new Map();
 const PENDING_TTL_MS = 30 * 60 * 1000;
+const MAX_PENDING_STORE_SIZE = 10000;
 
 const supportModeStore = new Map();
 const SUPPORT_TTL_MS = 30 * 60 * 1000;
@@ -5400,6 +5562,7 @@ async function callOpenAIChat(messages, maxOut) {
       max_completion_tokens: maxTokens,
     });
   } catch (_e) {
+    console.log(JSON.stringify({ level: "warn", msg: "openai_max_completion_tokens_fallback", error: _e?.message || String(_e) }));
     return await getOpenAIClient().chat.completions.create({
       model: OPENAI_MODEL,
       messages,
@@ -5523,7 +5686,12 @@ async function digibotVoiceLLMReply(userText, historyMsgs, lang, key) {
   let intent = null;
   try {
     intent = await extractVoiceIntent(transcript, lang);
-  } catch {
+  } catch (err) {
+    console.error(JSON.stringify({ 
+      level: 'error', 
+      msg: 'voice_intent_extraction_failed', 
+      error: err?.message || String(err) 
+    }));
     intent = null;
   }
 
@@ -5619,35 +5787,73 @@ function startMaintenanceTimer() {
   maintenanceTimer = setInterval(() => {
     const now = Date.now();
 
-    memory.cleanup();
-
-    for (const [k, v] of rateStore.entries()) {
-      if (!v || !v.windowStart || now - v.windowStart > CFG.rateWindowMs * 2) rateStore.delete(k);
+    try {
+      memory.cleanup();
+    } catch (err) {
+      console.error(JSON.stringify({ level: "error", msg: "maintenance_memory_cleanup_failed", error: err?.message || String(err) }));
     }
 
-    for (const [k, v] of ipRateStore.entries()) {
-      if (!v || !v.windowStart || now - v.windowStart > CFG.rateWindowMs * 2) ipRateStore.delete(k);
+    try {
+      for (const [k, v] of rateStore.entries()) {
+        if (!v || !v.windowStart || now - v.windowStart > CFG.rateWindowMs * 2) rateStore.delete(k);
+      }
+    } catch (err) {
+      console.error(JSON.stringify({ level: "error", msg: "maintenance_rate_store_cleanup_failed", error: err?.message || String(err) }));
     }
 
-    pruneMapSize(rateStore, MAX_RATE_STORE_SIZE);
-    pruneMapSize(ipRateStore, MAX_RATE_STORE_SIZE);
-
-    for (const [k, v] of fallbackStrikeStore.entries()) {
-      if (!v || !v.at || now - v.at > FALLBACK_TTL_MS) fallbackStrikeStore.delete(k);
+    try {
+      for (const [k, v] of ipRateStore.entries()) {
+        if (!v || !v.windowStart || now - v.windowStart > CFG.rateWindowMs * 2) ipRateStore.delete(k);
+      }
+    } catch (err) {
+      console.error(JSON.stringify({ level: "error", msg: "maintenance_ip_rate_store_cleanup_failed", error: err?.message || String(err) }));
     }
 
-    cleanupContextsImpl(now);
-
-    for (const [k, v] of supportModeStore.entries()) {
-      if (!v || !v.at || now - v.at > SUPPORT_TTL_MS) supportModeStore.delete(k);
+    try {
+      pruneMapSize(rateStore, MAX_RATE_STORE_SIZE);
+      pruneMapSize(ipRateStore, MAX_RATE_STORE_SIZE);
+    } catch (err) {
+      console.error(JSON.stringify({ level: "error", msg: "maintenance_prune_failed", error: err?.message || String(err) }));
     }
 
-    for (const [k, v] of pendingOrderStore.entries()) {
-      if (!v || !v.at || now - v.at > PENDING_TTL_MS) pendingOrderStore.delete(k);
+    try {
+      for (const [k, v] of fallbackStrikeStore.entries()) {
+        if (!v || !v.at || now - v.at > FALLBACK_TTL_MS) fallbackStrikeStore.delete(k);
+      }
+    } catch (err) {
+      console.error(JSON.stringify({ level: "error", msg: "maintenance_fallback_store_cleanup_failed", error: err?.message || String(err) }));
     }
 
-    for (const [k, v] of lastOrderAckStore.entries()) {
-      if (!v || !v.at || now - v.at > PENDING_TTL_MS) lastOrderAckStore.delete(k);
+    try {
+      cleanupContextsImpl(now);
+    } catch (err) {
+      console.error(JSON.stringify({ level: "error", msg: "maintenance_contexts_cleanup_failed", error: err?.message || String(err) }));
+    }
+
+    try {
+      for (const [k, v] of supportModeStore.entries()) {
+        if (!v || !v.at || now - v.at > SUPPORT_TTL_MS) supportModeStore.delete(k);
+      }
+    } catch (err) {
+      console.error(JSON.stringify({ level: "error", msg: "maintenance_support_mode_cleanup_failed", error: err?.message || String(err) }));
+    }
+
+    try {
+      for (const [k, v] of pendingOrderStore.entries()) {
+        if (!v || !v.at || now - v.at > PENDING_TTL_MS) pendingOrderStore.delete(k);
+      }
+      pruneMapSize(pendingOrderStore, MAX_PENDING_STORE_SIZE);
+    } catch (err) {
+      console.error(JSON.stringify({ level: "error", msg: "maintenance_pending_order_cleanup_failed", error: err?.message || String(err) }));
+    }
+
+    try {
+      for (const [k, v] of lastOrderAckStore.entries()) {
+        if (!v || !v.at || now - v.at > PENDING_TTL_MS) lastOrderAckStore.delete(k);
+      }
+      pruneMapSize(lastOrderAckStore, MAX_PENDING_STORE_SIZE);
+    } catch (err) {
+      console.error(JSON.stringify({ level: "error", msg: "maintenance_last_order_ack_cleanup_failed", error: err?.message || String(err) }));
     }
   }, 10 * 60 * 1000);
 }
@@ -6864,9 +7070,11 @@ async function processIncomingMedia({ mediaInfo, mediaMeta, msgType, lang, key, 
   if (route.audioLikely && normalizedMedia) {
     let audioDl = null;
     let tmpDir = null;
+    const tempPaths = []; // Track all temp files/dirs for guaranteed cleanup
     try {
       const dir = fs.mkdtempSync(path.join(os.tmpdir(), "wanotifier-audio-"));
       tmpDir = dir;
+      tempPaths.push(dir);
       const ext = path.extname(normalizedMedia.filename || normalizedMedia.url || "") || extFromAudioMime(normalizedMedia.mimeType || "");
       const tmpFile = path.join(dir, `audio${ext || ".ogg"}`);
       let sizeBytes = 0;
@@ -6880,6 +7088,9 @@ async function processIncomingMedia({ mediaInfo, mediaMeta, msgType, lang, key, 
           mimeType = audioDl.mimeType || mimeType;
           sizeBytes = audioDl.sizeBytes || sizeBytes;
         }
+        if (audioDl && audioDl.tmpDir && !tempPaths.includes(audioDl.tmpDir)) {
+          tempPaths.push(audioDl.tmpDir);
+        }
       } else if (normalizedMedia.base64) {
         const buf = Buffer.from(String(normalizedMedia.base64 || ""), "base64");
         sizeBytes = buf.length;
@@ -6891,6 +7102,9 @@ async function processIncomingMedia({ mediaInfo, mediaMeta, msgType, lang, key, 
         const dlMime = audioDl.mimeType || "";
         mimeType = mimeType || (CFG.featureAudioCleanMime ? cleanMimeType(dlMime) : dlMime) || "";
         sizeBytes = audioDl.sizeBytes || 0;
+        if (audioDl && audioDl.tmpDir && !tempPaths.includes(audioDl.tmpDir)) {
+          tempPaths.push(audioDl.tmpDir);
+        }
       } else {
         throw new Error("audio_url_missing");
       }
@@ -7029,8 +7243,24 @@ async function processIncomingMedia({ mediaInfo, mediaMeta, msgType, lang, key, 
         throw new Error("transcription_empty");
       }
       
+      // Check for hallucinated transcriptions (e.g., from silent audio)
+      const hallucinationCheck = isLikelyHallucination(userTextRaw);
+      if (hallucinationCheck.hallucinated) {
+        console.log(JSON.stringify({
+          level: 'warn',
+          msg: 'hallucination_detected',
+          reqId,
+          reason: hallucinationCheck.reason,
+          textPreview: userTextRaw.slice(0, 100),
+        }));
+        throw new Error('hallucination_detected');
+      }
+      
+      // Apply Arabic brand corrections to fix common misspellings
+      const userText = correctArabicBrands(userTextRaw);
+      
       // Detect language from transcribed text
-      const detectedLang = detectLanguageFromText(userTextRaw);
+      const detectedLang = detectLanguageFromText(userText);
       
       // Log metrics
       const processingTimeMs = Date.now() - transcribeStart;
@@ -7043,7 +7273,7 @@ async function processIncomingMedia({ mediaInfo, mediaMeta, msgType, lang, key, 
           durationSec: durationMs ? Math.round(durationMs / 1000) : null,
           sizeBytes,
           detectedLang,
-          transcriptLength: userTextRaw.length,
+          transcriptLength: userText.length,
           retryCount,
           chunked: false,
           processingTimeMs,
@@ -7051,7 +7281,7 @@ async function processIncomingMedia({ mediaInfo, mediaMeta, msgType, lang, key, 
         })
       );
       
-      const preview = userTextRaw.slice(0, 120);
+      const preview = userText.slice(0, 120);
       console.log(
         JSON.stringify({
           level: "info",
@@ -7061,11 +7291,11 @@ async function processIncomingMedia({ mediaInfo, mediaMeta, msgType, lang, key, 
           sizeBytes,
           mimeType: safeMime,
           detectedLang,
-          transcriptChars: userTextRaw.length,
+          transcriptChars: userText.length,
         })
       );
 
-      return { ...route, userText: userTextRaw, sizeBytes, transcriptChars: userTextRaw.length, mimeType: safeMime };
+      return { ...route, userText, sizeBytes, transcriptChars: userText.length, mimeType: safeMime };
     } catch (e) {
       console.error(JSON.stringify({ level: "error", msg: "audio_failed", reqId, error: (e && e.message) || String(e) }));
       
@@ -7092,12 +7322,16 @@ async function processIncomingMedia({ mediaInfo, mediaMeta, msgType, lang, key, 
       const reply = ensureNoQuestion(parts.join("\n"));
       return { ...route, reply };
     } finally {
-      try {
-        if (audioDl && audioDl.tmpDir) fs.rmSync(audioDl.tmpDir, { recursive: true, force: true });
-      } catch {}
-      try {
-        if (tmpDir) fs.rmSync(tmpDir, { recursive: true, force: true });
-      } catch {}
+      // Clean up all tracked temp paths
+      for (const p of tempPaths) {
+        try {
+          if (p && fs.existsSync(p)) {
+            fs.rmSync(p, { recursive: true, force: true });
+          }
+        } catch (cleanupErr) {
+          console.error(JSON.stringify({ level: "error", msg: "temp_cleanup_failed", path: p, error: cleanupErr?.message || String(cleanupErr) }));
+        }
+      }
     }
   }
 
@@ -7170,6 +7404,10 @@ if (process.argv[1] === ENTRY_FILE) {
       console.error("SELF_TESTS_FAILED", (e && e.message) || String(e));
       process.exit(1);
     }
+  }
+  // Call before main() if not in test mode
+  if (!IS_TEST_ENV) {
+    validateRequiredEnvVars();
   }
   main().catch((e) => {
     console.error("Fatal startup error:", (e && e.message) || String(e));

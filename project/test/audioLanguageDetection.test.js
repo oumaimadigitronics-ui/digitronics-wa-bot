@@ -9,7 +9,8 @@ import {
   mapLangToWhisper,
   getTranscriptionPrompt,
   calculateLanguageConfidence,
-  shouldRetranscribe
+  shouldRetranscribe,
+  correctArabicBrands
 } from '../src/services/audio/languageDetection.js';
 
 test('detectLanguageFromText - detects Arabic script', () => {
@@ -98,4 +99,89 @@ test('shouldRetranscribe - returns false for low confidence', () => {
   const shortText = 'hi';
   const result = shouldRetranscribe(shortText, 'en');
   assert.strictEqual(result, false);
+});
+
+test('correctArabicBrands - corrects TCL variations', () => {
+  assert.strictEqual(correctArabicBrands('بغيت تلفازة تساك 55 بوصة'), 'بغيت تلفازة TCL 55 بوصة');
+  assert.strictEqual(correctArabicBrands('تي سي ال 43 بوصة'), 'TCL 43 بوصة');
+  assert.strictEqual(correctArabicBrands('تي ساك تلفزيون'), 'TCL تلفزيون');
+});
+
+test('correctArabicBrands - corrects Samsung variations', () => {
+  assert.strictEqual(correctArabicBrands('سامسونج تلفزيون'), 'Samsung تلفزيون');
+  assert.strictEqual(correctArabicBrands('سامسونغ 65 بوصة'), 'Samsung 65 بوصة');
+});
+
+test('correctArabicBrands - corrects LG variations', () => {
+  assert.strictEqual(correctArabicBrands('ال جي تلفزيون'), 'LG تلفزيون');
+  assert.strictEqual(correctArabicBrands('إل جي 55 بوصة'), 'LG 55 بوصة');
+});
+
+test('correctArabicBrands - corrects Hisense variations', () => {
+  assert.strictEqual(correctArabicBrands('هايسنس تلفزيون'), 'Hisense تلفزيون');
+  assert.strictEqual(correctArabicBrands('هيسنس 50 بوصة'), 'Hisense 50 بوصة');
+});
+
+test('correctArabicBrands - corrects Haier variations', () => {
+  assert.strictEqual(correctArabicBrands('هاير ثلاجة'), 'Haier ثلاجة');
+  assert.strictEqual(correctArabicBrands('حاير غسالة'), 'Haier غسالة');
+});
+
+test('correctArabicBrands - corrects Daiko variations', () => {
+  assert.strictEqual(correctArabicBrands('دايكو مكيف'), 'Daiko مكيف');
+});
+
+test('correctArabicBrands - corrects Xiaomi variations', () => {
+  assert.strictEqual(correctArabicBrands('شياومي تلفزيون'), 'Xiaomi تلفزيون');
+});
+
+test('correctArabicBrands - corrects Candy variations', () => {
+  assert.strictEqual(correctArabicBrands('كاندي غسالة'), 'Candy غسالة');
+});
+
+test('correctArabicBrands - corrects Beko variations', () => {
+  assert.strictEqual(correctArabicBrands('بيكو ثلاجة'), 'Beko ثلاجة');
+});
+
+test('correctArabicBrands - handles mixed text with multiple brands', () => {
+  const input = 'بغيت تساك أو سامسونج أو ال جي';
+  const expected = 'بغيت TCL أو Samsung أو LG';
+  assert.strictEqual(correctArabicBrands(input), expected);
+});
+
+test('correctArabicBrands - handles empty or null input', () => {
+  assert.strictEqual(correctArabicBrands(''), '');
+  assert.strictEqual(correctArabicBrands(null), null);
+});
+
+test('correctArabicBrands - preserves text without brand names', () => {
+  const text = 'مرحبا كيف حالك';
+  assert.strictEqual(correctArabicBrands(text), text);
+});
+
+test('getTranscriptionPrompt - includes brand names in all prompts', () => {
+  const dzPrompt = getTranscriptionPrompt('dz');
+  assert.ok(dzPrompt.includes('TCL'));
+  assert.ok(dzPrompt.includes('Samsung'));
+  assert.ok(dzPrompt.includes('تي سي ال'));
+  
+  const frPrompt = getTranscriptionPrompt('fr');
+  assert.ok(frPrompt.includes('TCL'));
+  assert.ok(frPrompt.includes('Samsung'));
+  
+  const arPrompt = getTranscriptionPrompt('ar');
+  assert.ok(arPrompt.includes('TCL'));
+  assert.ok(arPrompt.includes('تي سي ال'));
+  
+  const enPrompt = getTranscriptionPrompt('en');
+  assert.ok(enPrompt.includes('TCL'));
+  assert.ok(enPrompt.includes('Samsung'));
+});
+
+test('getTranscriptionPrompt - includes TV sizes in prompts', () => {
+  const dzPrompt = getTranscriptionPrompt('dz');
+  assert.ok(dzPrompt.includes('32'));
+  assert.ok(dzPrompt.includes('55'));
+  assert.ok(dzPrompt.includes('65'));
+  assert.ok(dzPrompt.includes('pouces'));
 });
