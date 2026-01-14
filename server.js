@@ -979,7 +979,9 @@ const hasArabicScript = (text) => hasArabicScriptImpl(text);
 function hasSmartToken(text) {
   const s = normMatch(text || "");
   if (!s) return false;
-  return s.indexOf("smart") >= 0 || s.indexOf("سمارت") >= 0 || s.indexOf("عامرة") >= 0;
+  return s.indexOf("smart") >= 0 || s.indexOf("سمارت") >= 0 || s.indexOf("عامرة") >= 0 ||
+         s.indexOf("smarat") >= 0 || s.indexOf("smat") >= 0 || 
+         s.indexOf("smarte") >= 0 || s.indexOf("smarti") >= 0;
 }
 
 const stripQuestions = (text) => stripQuestionsImpl(text);
@@ -4444,6 +4446,14 @@ function isTvContext(text) {
     "غوغل",
     "كيو ال اي دي",
     "اوليد",
+    "wifi",
+    "wi-fi",
+    "connect",
+    "connecte",
+    "connectée",
+    "internet",
+    "smarat",
+    "smat",
   ];
   for (let i = 0; i < tokens.length; i += 1) {
     if (includesToken(s, tokens[i])) return true;
@@ -4847,19 +4857,12 @@ function isNegotiationIntent(text) {
   const s = normMatch(arabicIndicToAsciiDigits(raw));
   if (!s) return false;
 
-  // "mazal" / "مزل" = "still/yet" - asking about availability, NOT negotiation
-  // Exclude availability questions early before checking negotiation tokens
-  const availabilityTokens = [
-    "mazal", "mzl", "مزل", "مازال", "مزال",
-    "baqi", "باقي", "باقى",  // "still"
-    "kayn", "kayna", "كاين", "كاينة",  // "is there"
-    "disponible", "available", "متوفر", "متاح"
-  ];
-  
-  for (const token of availabilityTokens) {
-    if (includesToken(s, token)) {
-      return false;  // This is availability question, not negotiation
-    }
+  // Exclude Smart TV/WiFi queries from negotiation detection
+  if (hasSmartToken(raw) || 
+      s.indexOf("wifi") >= 0 || 
+      s.indexOf("android") >= 0 ||
+      s.indexOf("google") >= 0) {
+    return false;
   }
 
   const normalized = s.replace(/[^a-z0-9\u0600-\u06ff\s]/gi, " ").replace(/\s+/g, " ").trim();

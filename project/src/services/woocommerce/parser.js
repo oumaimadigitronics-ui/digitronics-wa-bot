@@ -390,7 +390,9 @@ export function getClassFromCategories(p) {
 function hasSmartToken(text) {
   const s = normMatch(text || "");
   if (!s) return false;
-  return s.indexOf("smart") >= 0 || s.indexOf("سمارت") >= 0 || s.indexOf("عامرة") >= 0;
+  return s.indexOf("smart") >= 0 || s.indexOf("سمارت") >= 0 || s.indexOf("عامرة") >= 0 ||
+         s.indexOf("smarat") >= 0 || s.indexOf("smat") >= 0 || 
+         s.indexOf("smarte") >= 0 || s.indexOf("smarti") >= 0;
 }
 
 /**
