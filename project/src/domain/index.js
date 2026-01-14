@@ -20,7 +20,15 @@ export {
   isBuyIntent,
   hasQuantitySignal,
   isOrderStatusIntent,
-  isProductAdviceIntent
+  isProductAdviceIntent,
+  isThanksIntent,
+  isFarewellIntent,
+  isAffirmationIntent,
+  isCatalogIntent,
+  isReturnIntent,
+  isInstallationIntent,
+  isSizeGuideIntent,
+  isComparisonIntent
 } from './intents.js';
 
 // Re-export routing function

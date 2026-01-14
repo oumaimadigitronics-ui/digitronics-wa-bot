@@ -162,3 +162,83 @@ export const SUPPORT_TEMPLATE = [
   "",
   "✨ Support fiable, الحل مضمون."
 ].join("\n");
+
+/**
+ * Template for thanks/acknowledgment messages
+ * Provides helpful next step prompts
+ */
+export const THANKS_TEMPLATE = {
+  dzl: "Choukran! 🙏 Ila bghiti chi produit, sift l-marque ola l-size.",
+  fr: "Merci ! 🙏 Si vous cherchez un produit, envoyez la marque ou la taille.",
+  ar: "شكراً! 🙏 إذا كنت تبحث عن منتج، أرسل الماركة أو الحجم."
+};
+
+/**
+ * Template for farewell/goodbye messages
+ * Provides order form link for future reference
+ */
+export const FAREWELL_TEMPLATE = {
+  dzl: "Bslama! 👋 Nchallah nchofok 9rib.",
+  fr: "Au revoir ! 👋 À bientôt.",
+  ar: "مع السلامة! 👋 نتمنى نشوفوك قريب."
+};
+
+/**
+ * Template for affirmation/agreement messages (ok, oui, d'accord, نعم)
+ * Prompts user to continue with their query
+ */
+export const AFFIRMATION_TEMPLATE = {
+  dzl: "Tmam ✅ Chnou bghiti t3ref? Sift l-marque/size/budget.",
+  fr: "Parfait ✅ Que souhaitez-vous savoir ? Envoyez marque/taille/budget.",
+  ar: "تمام ✅ شنو بغيتي تعرف؟ أرسل الماركة/الحجم/الميزانية."
+};
+
+/**
+ * Template for catalog overview requests (what do you have?)
+ * Lists main product categories with emojis
+ */
+export const CATALOG_OVERVIEW_TEMPLATE = {
+  dzl: "3andna:\n📺 TV (TCL, Samsung, Haier, Daiko...)\n🧊 Frigo\n🌀 Machine à laver\n❄️ Climatiseur\n\nSift l-catégorie li bghiti!",
+  fr: "Nous avons:\n📺 TV (TCL, Samsung, Haier, Daiko...)\n🧊 Réfrigérateurs\n🌀 Machines à laver\n❄️ Climatiseurs\n\nEnvoyez la catégorie souhaitée!",
+  ar: "عندنا:\n📺 تلفاز (TCL, Samsung, Haier, Daiko...)\n🧊 ثلاجات\n🌀 غسالات\n❄️ مكيفات\n\nأرسل الصنف اللي بغيتي!"
+};
+
+/**
+ * Template for return policy inquiries
+ * Explains return/exchange policy and warranty terms
+ */
+export const RETURN_POLICY_TEMPLATE = {
+  dzl: "🔄 Politique retour:\n✅ Tbdil f 7 jours ila l-produit fih 3ib\n✅ Garantie 1 an (2 ans DAIKO TV)\n📞 Contactez-nous pour plus d'infos",
+  fr: "🔄 Politique retour:\n✅ Échange sous 7 jours si produit défectueux\n✅ Garantie 1 an (2 ans TV DAIKO)\n📞 Contactez-nous pour plus d'infos",
+  ar: "🔄 سياسة الإرجاع:\n✅ استبدال خلال 7 أيام إذا كان المنتج معيب\n✅ ضمان سنة (سنتين TV DAIKO)\n📞 اتصل بنا للمزيد من المعلومات"
+};
+
+/**
+ * Template for installation inquiries
+ * Describes installation services and wall mount availability
+ */
+export const INSTALLATION_TEMPLATE = {
+  dzl: "🔧 Installation:\n✅ Bracket (support mural) gratuit m3a TV\n✅ Livraison + installation de base\n📞 Contactez-nous pour assistance",
+  fr: "🔧 Installation:\n✅ Support mural gratuit avec TV\n✅ Livraison inclut installation de base\n📞 Contactez-nous pour assistance",
+  ar: "🔧 التركيب:\n✅ براكيط مجاني مع التلفاز\n✅ التوصيل يتضمن التركيب الأساسي\n📞 اتصل بنا للمساعدة"
+};
+
+/**
+ * Template for size guide requests
+ * Shows TV size conversions from inches to centimeters
+ */
+export const SIZE_GUIDE_TEMPLATE = {
+  dzl: "📏 Guide des tailles TV:\n• 32\" = 81 cm\n• 43\" = 109 cm\n• 50\" = 127 cm\n• 55\" = 140 cm\n• 65\" = 165 cm\n• 75\" = 190 cm\n\nSift l-size li bghiti!",
+  fr: "📏 Guide des tailles TV:\n• 32\" = 81 cm\n• 43\" = 109 cm\n• 50\" = 127 cm\n• 55\" = 140 cm\n• 65\" = 165 cm\n• 75\" = 190 cm\n\nEnvoyez la taille souhaitée!",
+  ar: "📏 دليل أحجام التلفاز:\n• 32\" = 81 سم\n• 43\" = 109 سم\n• 50\" = 127 سم\n• 55\" = 140 سم\n• 65\" = 165 سم\n• 75\" = 190 سم\n\nأرسل الحجم اللي بغيتي!"
+};
+
+/**
+ * Template for brand comparison requests
+ * Encourages user to share budget for better recommendation
+ */
+export const COMPARISON_TEMPLATE = {
+  dzl: "🔄 Comparaison:\nKol marque 3andha l-avantages dyalha. Sift l-budget dyalk bach n3tik l'a7san khiyar.",
+  fr: "🔄 Comparaison:\nChaque marque a ses avantages. Envoyez votre budget pour la meilleure recommandation.",
+  ar: "🔄 مقارنة:\nكل ماركة عندها مميزاتها. أرسل ميزانيتك باش نعطيك أحسن خيار."
+};
