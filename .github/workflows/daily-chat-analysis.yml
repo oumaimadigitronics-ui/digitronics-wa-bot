@@ -1,0 +1,100 @@
+name: Daily Chat Analysis & Auto-Fix
+
+on:
+  schedule:
+    - cron: '0 23 * * *'  # Every day at 23:00 UTC
+  workflow_dispatch:       # Manual trigger
+
+jobs:
+  analyze-and-fix:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Download today's chat logs
+        run: |
+          DATE=$(date +%Y-%m-%d)
+          echo "ANALYSIS_DATE=$DATE" >> $GITHUB_ENV
+          curl -s -H "Authorization: Bearer ${{ secrets.ADMIN_API_TOKEN }}" \
+            "${{ secrets.BOT_URL }}/admin/analyze?date=$DATE" \
+            -o analysis-report.json
+        continue-on-error: true
+
+      - name: Check if fixes needed
+        id: check-fixes
+        run: |
+          if [ -f analysis-report.json ]; then
+            FIXES=$(jq '.autoFixes | length' analysis-report.json)
+            echo "fixes_count=$FIXES" >> $GITHUB_OUTPUT
+            if [ "$FIXES" -gt "0" ]; then
+              echo "has_fixes=true" >> $GITHUB_OUTPUT
+              # Extract PR body from report, with fallback
+              if jq -e '.prBody' analysis-report.json > /dev/null 2>&1; then
+                jq -r '.prBody' analysis-report.json > pr-body.md
+              else
+                echo "## Automated Daily Chat Analysis" > pr-body.md
+                echo "" >> pr-body.md
+                echo "Analysis completed but report body is not available." >> pr-body.md
+                echo "Check the analysis-report.json artifact for details." >> pr-body.md
+              fi
+            else
+              echo "has_fixes=false" >> $GITHUB_OUTPUT
+            fi
+          else
+            echo "has_fixes=false" >> $GITHUB_OUTPUT
+            echo "fixes_count=0" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Apply auto-fixes
+        if: steps.check-fixes.outputs.has_fixes == 'true'
+        run: |
+          node scripts/apply-auto-fixes.js analysis-report.json
+
+      - name: Create Pull Request
+        if: steps.check-fixes.outputs.has_fixes == 'true'
+        uses: peter-evans/create-pull-request@v5
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          commit-message: "[Auto] Daily intent fixes from chat analysis"
+          title: "[Auto] Daily Intent Fixes - ${{ env.ANALYSIS_DATE }}"
+          body-path: pr-body.md
+          branch: auto-fix/daily-${{ env.ANALYSIS_DATE }}
+          labels: |
+            auto-fix
+            needs-review
+            copilot
+
+      - name: Send email notification
+        if: always()
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: smtp.gmail.com
+          server_port: 465
+          secure: true
+          username: ${{ secrets.EMAIL_USERNAME }}
+          password: ${{ secrets.EMAIL_PASSWORD }}
+          subject: "🤖 [Digitronics Bot] Daily Analysis - ${{ steps.check-fixes.outputs.fixes_count }} fixes"
+          to: ${{ secrets.NOTIFY_EMAIL }}
+          from: Digitronics Bot <bot@digitronics.ma>
+          body: |
+            Daily Chat Analysis Complete!
+            
+            Date: ${{ env.ANALYSIS_DATE }}
+            Fixes Applied: ${{ steps.check-fixes.outputs.fixes_count }}
+            
+            Review PR: https://github.com/${{ github.repository }}/pulls
