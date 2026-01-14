@@ -1,5 +1,4 @@
 import "dotenv/config";
-import express from "express";
 import crypto from "crypto";
 import dns from "dns/promises";
 import { execFile } from "child_process";
@@ -11,6 +10,7 @@ import assert from "assert";
 import { fileURLToPath } from "url";
 import { getFetch, getOpenAI, getNowMs, setDepsForTests } from "./src/deps.js";
 import { toFile } from "openai/uploads";
+import { initializeServerContext } from "./src/server/bootstrap.js";
 
 // Import modular code from project/src/
 import {
@@ -280,49 +280,11 @@ import {
 
 let toFileImpl = toFile;
 
-const app = express();
-app.set("trust proxy", true);
-
-process.on("unhandledRejection", (reason) => {
-  console.error("Unhandled promise rejection:", reason);
-});
-
-process.on("uncaughtException", (err) => {
-  console.error("Uncaught exception:", err);
-});
-
-// --- META (Facebook Messenger) ENV ---
-const {
-  META_VERIFY_TOKEN = "",
-  META_PAGE_ACCESS_TOKEN = "",
-  META_APP_SECRET = "",
-  META_GRAPH_VERSION = "v21.0",
-} = process.env;
-
-const IS_TEST_ENV = String(process.env.NODE_ENV || "").toLowerCase() === "test";
-const LOG_DEBUG = String(process.env.LOG_DEBUG || "0") === "1";
-const FEATURE_STRICT_CATEGORY_SWITCH = String(process.env.FEATURE_STRICT_CATEGORY_SWITCH || "0") === "1";
-const FEATURE_OFFER_TAIL_COMPACT = String(process.env.FEATURE_OFFER_TAIL_COMPACT || "0") === "1";
-const FEATURE_STRICT_STOCK_FILTER = String(process.env.FEATURE_STRICT_STOCK_FILTER || "0") === "1";
-const FEATURE_SHOW_SKU_IN_OFFERS = String(process.env.FEATURE_SHOW_SKU_IN_OFFERS || "0") === "1";
-const FEATURE_LEGACY_OFFER_LINE = String(process.env.FEATURE_LEGACY_OFFER_LINE || "0") === "1";
-const FEATURE_LEGACY_OFFER_DISPLAY_NAME = String(process.env.FEATURE_LEGACY_OFFER_DISPLAY_NAME || "0") === "1";
-const FEATURE_OFFER_ITEM_EMOJI_FORMAT = String(process.env.FEATURE_OFFER_ITEM_EMOJI_FORMAT || "0") === "1";
-const FEATURE_OFFERS_BOX_HEADER = String(process.env.FEATURE_OFFERS_BOX_HEADER || (IS_TEST_ENV ? "1" : "0")) === "1";
-const FEATURE_WA_HARD_CAP_4096 = String(process.env.FEATURE_WA_HARD_CAP_4096 || "0") === "1";
-const FEATURE_ALLOW_MAPS_URLS = String(process.env.FEATURE_ALLOW_MAPS_URLS || "0") === "1";
-const FEATURE_CATALOG_OVERVIEW_INTENT = String(process.env.FEATURE_CATALOG_OVERVIEW_INTENT || "0") === "1";
-const FEATURE_ASSUME_TV_ON_BRAND_ONLY = String(process.env.FEATURE_ASSUME_TV_ON_BRAND_ONLY || "1") === "1";
 const WANOTIFIER_FOLLOWUP_FIELD = "followups";
-const IS_TEST = IS_TEST_ENV;
 const ENTRY_FILE = fileURLToPath(import.meta.url);
 const __filename = ENTRY_FILE;
-const RUN_SELF_TESTS = String(process.env.RUN_SELF_TESTS || process.env.SELF_TEST || "0") === "1";
-const REQUIRE_ENV = process.argv[1] === ENTRY_FILE && !RUN_SELF_TESTS;
-const MAX_AUDIO_BYTES = Number(process.env.MEDIA_MAX_BYTES_AUDIO || 12000000) || 12000000;
 let systemPromptLoaded = false;
 let systemPromptValue = "";
-const DEFAULT_SYSTEM_PROMPT = "You are DigiBot for Digitronics.ma.";
 let wcFetchJsonOverride = null;
 
 function debugLog(event, payload) {
@@ -359,8 +321,30 @@ const DEFAULT_ORDER_FORM_URL =
   "https://docs.google.com/forms/d/e/1FAIpQLScmDNagYSpUPfsIT2s2t35KH7U1OWSNkUCIWmcJJm1R_aITQQ/viewform?usp=header";
 
 const {
-  PORT = "3000",
-
+  app,
+  logger,
+  debugLog,
+  META_VERIFY_TOKEN,
+  META_PAGE_ACCESS_TOKEN,
+  META_APP_SECRET,
+  META_GRAPH_VERSION,
+  CFG,
+  FOCUS,
+  DEFAULT_SYSTEM_PROMPT,
+  FEATURE_ALLOW_MAPS_URLS,
+  FEATURE_ASSUME_TV_ON_BRAND_ONLY,
+  FEATURE_CATALOG_OVERVIEW_INTENT,
+  FEATURE_LEGACY_OFFER_DISPLAY_NAME,
+  FEATURE_LEGACY_OFFER_LINE,
+  FEATURE_OFFER_ITEM_EMOJI_FORMAT,
+  FEATURE_OFFERS_BOX_HEADER,
+  FEATURE_OFFER_TAIL_COMPACT,
+  FEATURE_SHOW_SKU_IN_OFFERS,
+  FEATURE_STRICT_CATEGORY_SWITCH,
+  FEATURE_STRICT_STOCK_FILTER,
+  IS_TEST,
+  LOG_DEBUG,
+  OFFERS_REFRESH_TOKEN,
   OPENAI_API_KEY,
   OPENAI_MODEL = "gpt-4o-mini",
 
