@@ -34,8 +34,9 @@ export function isAngryOrProblemIntent(text) {
   ];
   if (hasAnyPhrase(s, avoidDelayPhrases)) return false;
 
-  // Also exclude if it's a question about delays (has ? or ؟)
-  if (s.includes("retard") && /[?؟]/.test(raw) && !hasAnyPhrase(s, ["tres retard", "very late", "متأخر بزاف"])) {
+  // Exclude if it's a question about delays (has ? or ؟), unless it's a clear complaint
+  const hasComplaintPhrase = hasAnyPhrase(s, ["tres retard", "very late", "متأخر بزاف", "retard de livraison"]);
+  if (s.includes("retard") && /[?؟]/.test(raw) && !hasComplaintPhrase) {
     return false; // Asking about delays, not complaining
   }
 
@@ -58,6 +59,8 @@ export function isAngryOrProblemIntent(text) {
     "pas satisfait",
     "très mauvais",
     "tres mauvais",
+    "tres retard",
+    "très retard",
     "je suis en colere",
     "je suis en colère",
     "je suis fache",
