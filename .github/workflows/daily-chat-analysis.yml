@@ -43,8 +43,15 @@ jobs:
             echo "fixes_count=$FIXES" >> $GITHUB_OUTPUT
             if [ "$FIXES" -gt "0" ]; then
               echo "has_fixes=true" >> $GITHUB_OUTPUT
-              # Extract PR body from report
-              jq -r '.prBody' analysis-report.json > pr-body.md
+              # Extract PR body from report, with fallback
+              if jq -e '.prBody' analysis-report.json > /dev/null 2>&1; then
+                jq -r '.prBody' analysis-report.json > pr-body.md
+              else
+                echo "## Automated Daily Chat Analysis" > pr-body.md
+                echo "" >> pr-body.md
+                echo "Analysis completed but report body is not available." >> pr-body.md
+                echo "Check the analysis-report.json artifact for details." >> pr-body.md
+              fi
             else
               echo "has_fixes=false" >> $GITHUB_OUTPUT
             fi

@@ -27,7 +27,7 @@ for (const fix of report.autoFixes) {
       
       // Add new intent function before the last export
       const insertPoint = content.lastIndexOf('export {');
-      if (insertPoint > 0) {
+      if (insertPoint >= 0) {
         content = content.slice(0, insertPoint) + fix.code + '\n\n' + content.slice(insertPoint);
         
         // Add to exports

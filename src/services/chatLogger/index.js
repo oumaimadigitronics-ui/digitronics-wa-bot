@@ -175,7 +175,7 @@ function redactPhone(phone) {
   if (!phone) return null;
   const str = String(phone);
   if (str.length < 6) return '***';
-  return str.substring(0, 3) + '*****' + str.substring(str.length - 3);
+  return str.slice(0, 3) + '*****' + str.slice(-3);
 }
 
 /**
