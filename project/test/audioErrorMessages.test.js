@@ -71,3 +71,28 @@ test('getAudioErrorMessage - falls back to transcription_failed for unknown erro
   const msg = getAudioErrorMessage('unknown_error', 'dz');
   assert.ok(msg.includes('Ma fhemtch l-audio'));
 });
+
+test('getAudioErrorMessage - returns hallucination_detected message for Darija', () => {
+  const msg = getAudioErrorMessage('hallucination_detected', 'dz');
+  assert.ok(msg.includes('Ma fhemtch l-message dyalk'));
+});
+
+test('getAudioErrorMessage - returns hallucination_detected message for Arabic', () => {
+  const msg = getAudioErrorMessage('hallucination_detected', 'ar');
+  assert.ok(msg.includes('ما فهمتش الرسالة ديالك'));
+});
+
+test('getAudioErrorMessage - returns hallucination_detected message for French', () => {
+  const msg = getAudioErrorMessage('hallucination_detected', 'fr');
+  assert.ok(msg.includes('Je n\'ai pas compris votre message'));
+});
+
+test('getAudioErrorMessage - returns hallucination_detected message for English', () => {
+  const msg = getAudioErrorMessage('hallucination_detected', 'en');
+  assert.ok(msg.includes('I didn\'t understand your message'));
+});
+
+test('classifyAudioError - hallucination detected', () => {
+  assert.strictEqual(classifyAudioError({ message: 'hallucination_detected' }), 'hallucination_detected');
+  assert.strictEqual(classifyAudioError('hallucination_detected'), 'hallucination_detected');
+});
