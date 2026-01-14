@@ -3,3 +3,4 @@ node_modules
 project/node_modules
 project/package-lock.json
 *.bak
+push.bat

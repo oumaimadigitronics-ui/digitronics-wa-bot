@@ -1,5 +1,5 @@
 @echo off
-cd /d C:\Users\abuye\digitronics-wa-bot
+cd /d "%~dp0"
 
 git status
 git add .
