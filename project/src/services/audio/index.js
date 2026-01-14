@@ -88,3 +88,8 @@ export {
   transcribeLongAudio,
   combineChunkTranscripts,
 } from "./chunking.js";
+
+// Re-export quality check utilities
+export {
+  checkAudioQuality,
+} from "./qualityCheck.js";

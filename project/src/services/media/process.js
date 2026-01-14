@@ -43,9 +43,9 @@ export async function deriveMediaText(mediaInput, lang, reqId, deps) {
   const raw = (normalized && normalized.raw) || {};
   const baseKind = normalized.kind || guessMediaKind({ mime: normalized.mime, type: raw.type, kind: raw.kind });
   if (baseKind === "audio") {
-    // Audio functionality removed - return failure so fallback message is used
-    console.log(JSON.stringify({ level: "info", msg: "audio_disabled", reqId }));
-    return { ok: false, reason: "audio_disabled", path: "audio" };
+    // Audio processing is now enabled - will be handled by the audio transcription pipeline
+    console.log(JSON.stringify({ level: "info", msg: "audio_processing_enabled", reqId }));
+    return { ok: true, path: "audio", kind: "audio", normalized };
   }
 
   if (baseKind === "image" || baseKind === "unknown") {
