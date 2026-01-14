@@ -190,8 +190,8 @@ export function isContactIntent(text) {
   
   // Skip if this looks like a product query with TV size indicators and numbers
   // نمرة/رقم followed by 2-digit numbers suggests TV size, not phone number
-  const hasTvSizeWithNumber = /(?:نمرة|النمرة)\s*[\d٠-٩]{2,3}(?!\d)/i.test(raw);
-  const hasTvKeywordWithNumber = /(تلفاز|تلفزيون|بوصة|pouce|inch)\s*[\d٠-٩]|[\d٠-٩]\s*(تلفاز|تلفزيون|بوصة|pouce|inch)/i.test(raw);
+  const hasTvSizeWithNumber = /(?:نمرة|النمرة)\s*\d{2,3}(?!\d)/i.test(raw);
+  const hasTvKeywordWithNumber = /(تلفاز|تلفزيون|بوصة|pouce|inch)\s*\d|\d\s*(تلفاز|تلفزيون|بوصة|pouce|inch)/i.test(raw);
   const hasApplianceKeyword = /(?:frigo|ثلاجة|refriger|machine à laver|غسالة|طياب)/i.test(raw);
   
   if (hasTvSizeWithNumber || hasTvKeywordWithNumber || hasApplianceKeyword) return false;
