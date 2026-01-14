@@ -33,6 +33,7 @@ import {
   isInstallationIntent,
   isSizeGuideIntent,
   isComparisonIntent,
+  isThankYouIntent,
   routeTemplate
 } from './project/src/domain/index.js';
 
@@ -52,7 +53,9 @@ import {
   RETURN_POLICY_TEMPLATE,
   INSTALLATION_TEMPLATE,
   SIZE_GUIDE_TEMPLATE,
-  COMPARISON_TEMPLATE
+  COMPARISON_TEMPLATE,
+  THANK_YOU_TEMPLATE,
+  thankYouTemplate
 } from './project/src/services/replies/templates.js';
 
 import {
@@ -6353,6 +6356,14 @@ app.post("/wanotifier", express.raw({ type: "*/*", limit: "2mb" }), parseWanotif
       return res.json({ ok: true, reply });
     }
 
+    // Check for thank you / blessing / farewell (end of chat) - high priority
+    if (isThankYouIntent(userTextRaw)) {
+      const reply = thankYouTemplate(lang);
+      memory.push(key, "assistant", reply);
+      resetStrikes(key);
+      return res.json({ ok: true, reply });
+    }
+
     if (!offersAvailable) {
       const reply = finalizeReply(t(lang, "cannot3"), 420);
       console.error(JSON.stringify({ level: "error", msg: "offers_unavailable", lastOffersSync }));
@@ -6955,6 +6966,7 @@ export {
   isSupportIntent,
   isBuyIntent,
   isProductAdviceIntent,
+  isThankYouIntent,
   detectTechTopic,
   buildTechTopicAnswer,
   hasQuantitySignal,

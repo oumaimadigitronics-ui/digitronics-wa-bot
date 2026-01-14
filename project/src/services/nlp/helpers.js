@@ -6,6 +6,23 @@
 import { normMatch, arabicIndicToAsciiDigits } from '../../lib/textUtils.js';
 
 /**
+ * Price keywords that should NEVER be treated as model names
+ * These are common price-related terms that users might include in queries
+ */
+const PRICE_KEYWORDS_NOT_MODELS = [
+  "s7al", "sh7al", "ch7al", "chhal", "bch7al", "bsh7al",
+  "شحال", "بشحال",
+  "taman", "thaman", "تمن", "ثمن", "الثمن",
+  "prix", "price", "combien", "cost", "cout", "coût",
+  "السعر", "سعر", "سوم", "سومة"
+];
+
+// Pre-normalize price keywords for faster lookup
+const NORMALIZED_PRICE_KEYWORDS = new Set(
+  PRICE_KEYWORDS_NOT_MODELS.map(k => normMatch(k)).filter(Boolean)
+);
+
+/**
  * Tokenize text into alphanumeric tokens
  * @param {string} s - Text to tokenize
  * @returns {string[]} - Array of alphanumeric tokens
@@ -44,10 +61,22 @@ export function detectModel(text, offersIndex) {
   const s = normMatch(text);
   if (!s) return null;
 
+  // Don't treat price keywords as models - early exit check
+  if (NORMALIZED_PRICE_KEYWORDS.has(s)) {
+    return null;
+  }
+
   const tokens = tokenizeAlnum(s);
   for (let i = 0; i < tokens.length; i += 1) {
     const tok = tokens[i];
     if (!tok || tok.length < 4) continue;
+    
+    // Skip if this token is a price keyword
+    const tokNorm = normMatch(tok);
+    if (NORMALIZED_PRICE_KEYWORDS.has(tokNorm)) {
+      continue;
+    }
+    
     const hit = offersIndex?.modelLookup?.get(tok);
     if (hit) return hit;
 

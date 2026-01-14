@@ -28,7 +28,8 @@ export {
   isReturnIntent,
   isInstallationIntent,
   isSizeGuideIntent,
-  isComparisonIntent
+  isComparisonIntent,
+  isThankYouIntent
 } from './intents.js';
 
 // Re-export routing function
