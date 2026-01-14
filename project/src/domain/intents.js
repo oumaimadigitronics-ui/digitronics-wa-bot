@@ -963,8 +963,7 @@ export function isFarewellIntent(text) {
     "à bientôt",
     "a bientot",
     "see you",
-    "باي",
-    "bay"
+    "باي"
   ];
 
   return hasAnyToken(s, tokens) || hasAnyPhrase(s, tokens);
@@ -995,8 +994,6 @@ export function isAffirmationIntent(text) {
     "واخا",
     "wakha",
     "mashi mouchkil",
-    "machi mouchkil",
-    "mashi mushkil",
     "yes",
     "yep",
     "yeah",
