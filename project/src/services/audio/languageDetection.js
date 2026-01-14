@@ -220,7 +220,8 @@ export function correctArabicBrands(text) {
     { pattern: /(^|\s)(تساك|تي ساك|تسك|تي سك|تي اس اك|تيساك|تسياك)(\s|$)/g, replacement: '$1TCL$3' },
     { pattern: /(^|\s)(تي سي ال)(\s|$)/g, replacement: '$1TCL$3' },
     
-    // Visio variations - NEW (careful not to match تلفزيون)
+    // Visio variations - Safe: won't match تلفزيون (television) because فزيون appears mid-word there
+    // The pattern requires space/start before and space/end after, so it only matches standalone words
     { pattern: /(^|\s)(فيزيون|فيجيون|فيزيو|فيجيو|فزيو|فزيون|فيزن|فيجن)(\s|$)/g, replacement: '$1Visio$3' },
     
     // Samsung variations
