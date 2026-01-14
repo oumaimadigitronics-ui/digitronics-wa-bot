@@ -7116,7 +7116,8 @@ async function processIncomingMedia({ mediaInfo, mediaMeta, msgType, lang, key, 
         { reqId, lang }
       );
       
-      const userTextRaw = String(transcriptionResult || "").trim();
+      const userTextRaw = String(transcriptionResult?.text || transcriptionResult || "").trim();
+      const retryCount = transcriptionResult?.retryCount || 0;
       
       if (!userTextRaw) {
         throw new Error("transcription_empty");
@@ -7137,7 +7138,7 @@ async function processIncomingMedia({ mediaInfo, mediaMeta, msgType, lang, key, 
           sizeBytes,
           detectedLang,
           transcriptLength: userTextRaw.length,
-          retryCount: 0,
+          retryCount,
           chunked: false,
           processingTimeMs,
           downloadMs,

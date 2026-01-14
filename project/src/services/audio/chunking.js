@@ -236,6 +236,14 @@ async function extractAudioChunk(inputPath, outputPath, startMs, endMs) {
       if (code === 0) {
         resolve();
       } else {
+        // Log full stderr for debugging
+        if (errorOutput.length > 500) {
+          console.error(JSON.stringify({
+            level: 'debug',
+            msg: 'ffmpeg_full_stderr',
+            stderr: errorOutput
+          }));
+        }
         reject(new Error(`ffmpeg chunk extraction failed with code ${code}: ${errorOutput.slice(-500)}`));
       }
     });

@@ -3,7 +3,9 @@
  * Validates duration and file size to prevent unnecessary API calls.
  */
 
-const MIN_AUDIO_DURATION_MS = 1000;  // 1 second minimum
+// Note: Minimum is lenient (1s) to catch very short accidental recordings,
+// while error message suggests 5s as best practice for clear transcription
+const MIN_AUDIO_DURATION_MS = 1000;  // 1 second minimum (technical limit)
 const MAX_AUDIO_DURATION_MS = 5 * 60 * 1000;  // 5 minutes maximum
 const MIN_AUDIO_SIZE_BYTES = 1000;  // ~1KB minimum
 

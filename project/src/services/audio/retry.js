@@ -66,7 +66,8 @@ export async function transcribeWithRetry(transcribeFunc, opts = {}) {
             attempt
           }));
         }
-        return result;
+        // Add retry count to result
+        return { ...result, retryCount: attempt };
       }
       
       // Empty result - treat as error with descriptive message
