@@ -418,6 +418,21 @@ const maxReplyCharsConfigured = FEATURE_WA_HARD_CAP_4096
   ? Math.min(configuredMaxReplyChars, 4096)
   : configuredMaxReplyChars;
 
+// Add after imports, before app initialization
+function validateRequiredEnvVars() {
+  const required = ['OPENAI_API_KEY'];
+  const missing = required.filter(key => !process.env[key]);
+  
+  if (missing.length > 0) {
+    console.error(JSON.stringify({
+      level: 'fatal',
+      msg: 'missing_required_env_vars',
+      missing
+    }));
+    process.exit(1);
+  }
+}
+
 if (REQUIRE_ENV && !OPENAI_API_KEY) {
   console.error("Missing env var: OPENAI_API_KEY (OpenAI responses will fail until set).");
 }
@@ -5680,7 +5695,12 @@ async function digibotVoiceLLMReply(userText, historyMsgs, lang, key) {
   let intent = null;
   try {
     intent = await extractVoiceIntent(transcript, lang);
-  } catch {
+  } catch (err) {
+    console.error(JSON.stringify({ 
+      level: 'error', 
+      msg: 'voice_intent_extraction_failed', 
+      error: err?.message || String(err) 
+    }));
     intent = null;
   }
 
@@ -7327,6 +7347,10 @@ if (process.argv[1] === ENTRY_FILE) {
       console.error("SELF_TESTS_FAILED", (e && e.message) || String(e));
       process.exit(1);
     }
+  }
+  // Call before main() if not in test mode
+  if (!IS_TEST_ENV) {
+    validateRequiredEnvVars();
   }
   main().catch((e) => {
     console.error("Fatal startup error:", (e && e.message) || String(e));
