@@ -1,7 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert';
 import fs from 'fs';
-import path from 'path';
 import { logMessage, getDailyLogs, getIssues } from '../src/services/chatLogger/index.js';
 import { autoAnalyzer } from '../src/services/analytics/autoAnalyzer.js';
 
