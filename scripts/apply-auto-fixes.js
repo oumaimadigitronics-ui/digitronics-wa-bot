@@ -33,8 +33,10 @@ for (const fix of report.autoFixes) {
         // Add to exports
         const exportMatch = content.match(/export \{([^}]+)\}/);
         if (exportMatch) {
-          const exports = exportMatch[1];
-          const newExports = exports.trimEnd() + `,\n  ${fix.intentName}`;
+          const exports = exportMatch[1].trim();
+          // Add comma only if there are existing exports
+          const separator = exports.length > 0 ? ',\n  ' : '\n  ';
+          const newExports = exports + separator + fix.intentName;
           content = content.replace(exportMatch[0], `export {${newExports}}`);
         }
         

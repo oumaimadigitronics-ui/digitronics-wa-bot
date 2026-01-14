@@ -35,7 +35,7 @@ export function logMessage(data) {
   const date = timestamp.split('T')[0];
 
   const messageLog = {
-    id: `msg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+    id: `msg_${Date.now()}_${Math.random().toString(36).slice(2, 11)}`,
     conversationId,
     customerId: redactPhone(customerId),
     customerName: redactName(customerName),

@@ -8,6 +8,9 @@ on:
 jobs:
   analyze-and-fix:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
     
     steps:
       - name: Checkout repository
@@ -26,6 +29,7 @@ jobs:
       - name: Download today's chat logs
         run: |
           DATE=$(date +%Y-%m-%d)
+          echo "ANALYSIS_DATE=$DATE" >> $GITHUB_ENV
           curl -s -H "Authorization: Bearer ${{ secrets.ADMIN_API_TOKEN }}" \
             "${{ secrets.BOT_URL }}/admin/analyze?date=$DATE" \
             -o analysis-report.json
@@ -39,11 +43,14 @@ jobs:
             echo "fixes_count=$FIXES" >> $GITHUB_OUTPUT
             if [ "$FIXES" -gt "0" ]; then
               echo "has_fixes=true" >> $GITHUB_OUTPUT
+              # Extract PR body from report
+              jq -r '.prBody' analysis-report.json > pr-body.md
             else
               echo "has_fixes=false" >> $GITHUB_OUTPUT
             fi
           else
             echo "has_fixes=false" >> $GITHUB_OUTPUT
+            echo "fixes_count=0" >> $GITHUB_OUTPUT
           fi
 
       - name: Apply auto-fixes
@@ -57,9 +64,9 @@ jobs:
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           commit-message: "[Auto] Daily intent fixes from chat analysis"
-          title: "[Auto] Daily Intent Fixes - $(date +%Y-%m-%d)"
-          body-path: analysis-report.json
-          branch: auto-fix/daily-$(date +%Y-%m-%d)
+          title: "[Auto] Daily Intent Fixes - ${{ env.ANALYSIS_DATE }}"
+          body-path: pr-body.md
+          branch: auto-fix/daily-${{ env.ANALYSIS_DATE }}
           labels: |
             auto-fix
             needs-review
@@ -80,7 +87,7 @@ jobs:
           body: |
             Daily Chat Analysis Complete!
             
-            Date: $(date +%Y-%m-%d)
+            Date: ${{ env.ANALYSIS_DATE }}
             Fixes Applied: ${{ steps.check-fixes.outputs.fixes_count }}
             
             Review PR: https://github.com/${{ github.repository }}/pulls
