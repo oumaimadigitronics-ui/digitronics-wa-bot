@@ -25,6 +25,14 @@ import {
   hasQuantitySignal,
   isOrderStatusIntent,
   isProductAdviceIntent,
+  isThanksIntent,
+  isFarewellIntent,
+  isAffirmationIntent,
+  isCatalogIntent,
+  isReturnIntent,
+  isInstallationIntent,
+  isSizeGuideIntent,
+  isComparisonIntent,
   routeTemplate
 } from './project/src/domain/index.js';
 
@@ -36,7 +44,15 @@ import {
   ESCALATION_TEMPLATE,
   CLARITY_TEMPLATE,
   SUPPORT_TEMPLATE,
-  BUY_INTENT_TEMPLATE
+  BUY_INTENT_TEMPLATE,
+  THANKS_TEMPLATE,
+  FAREWELL_TEMPLATE,
+  AFFIRMATION_TEMPLATE,
+  CATALOG_OVERVIEW_TEMPLATE,
+  RETURN_POLICY_TEMPLATE,
+  INSTALLATION_TEMPLATE,
+  SIZE_GUIDE_TEMPLATE,
+  COMPARISON_TEMPLATE
 } from './project/src/services/replies/templates.js';
 
 import {
@@ -802,10 +818,23 @@ async function handleMetaTextMessage(userText, senderId) {
     return reply;
   }
 
+  // Try template-based routing first
+  const templateReply = routeTemplate(userText, { 
+    lang, 
+    resolveAdviceFn: (text) => tryProductAdviceAnswer(text, history, lang, key)
+  });
+  if (templateReply) {
+    const reply = shortenNoQuestion(templateReply, 520);
+    memory.push(key, "assistant", reply);
+    resetStrikes(key);
+    return reply;
+  }
+
+  // Try direct offer answer or website catalog, then fallback to offers
   let reply =
     tryDirectOfferAnswer(userText, history, lang, key) ||
     (await tryWebsiteCatalogAnswer(userText, lang, key)) ||
-    (await digibotLLMReply(userText, history, lang, key));
+    offersFallbackMessage(lang);
 
   reply = shortenNoQuestion(reply, 520);
   memory.push(key, "assistant", reply);
@@ -5601,6 +5630,13 @@ function withTimeout(promise, ms) {
   });
 }
 
+/**
+ * @deprecated This function is no longer used. LLM responses have been replaced with 
+ * deterministic template-based responses to eliminate hallucinations, reduce costs,
+ * and improve response consistency. Use routeTemplate() and offersFallbackMessage() instead.
+ * 
+ * Legacy function kept for reference only.
+ */
 async function digibotLLMReply(userText, historyMsgs, lang, key) {
   const hist = Array.isArray(historyMsgs) ? historyMsgs : [];
 
@@ -5711,6 +5747,13 @@ async function extractVoiceIntent(transcript, lang) {
   return parseJsonBlock(choice);
 }
 
+/**
+ * @deprecated This function is no longer used. Audio messages now use offersFallbackMessage()
+ * instead of LLM to prevent hallucinations and off-topic responses. Template-based routing
+ * handles all audio messages deterministically.
+ * 
+ * Legacy function kept for reference only.
+ */
 async function digibotVoiceLLMReply(userText, historyMsgs, lang, key) {
   const transcript = String(userText || "").trim();
   if (!transcript) return ensureNoQuestion(fallbackWithAgent(lang));
@@ -6777,9 +6820,20 @@ app.post("/wanotifier", express.raw({ type: "*/*", limit: "2mb" }), parseWanotif
       return res.json({ ok: true, reply });
     }
 
-    let reply = isAudioMessage
-      ? offersFallbackMessage(lang)
-      : await digibotLLMReply(userTextRaw, history, lang, key);
+    // Try template-based routing for common intents (thanks, farewell, affirmation, etc.)
+    const templateReply = routeTemplate(userTextRaw, { 
+      lang, 
+      resolveAdviceFn: (text) => tryProductAdviceAnswer(text, history, lang, key)
+    });
+    if (templateReply) {
+      const reply = finalizeReply(templateReply, 520);
+      memory.push(key, "assistant", reply);
+      resetStrikes(key);
+      return res.json({ ok: true, reply });
+    }
+
+    // No LLM - use offers fallback for any unmatched query
+    let reply = offersFallbackMessage(lang);
 
     if (looksLikeFallback(reply)) {
       const n = addStrike(key);

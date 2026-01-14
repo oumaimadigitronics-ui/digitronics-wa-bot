@@ -907,3 +907,293 @@ export function hasQuantitySignal(raw) {
   }
   return false;
 }
+
+/**
+ * Detects if the user is saying thanks/thank you
+ * Recognizes thank you messages in multiple languages.
+ * 
+ * @param {string} text - The user's message text
+ * @returns {boolean} True if thanks intent is detected
+ */
+export function isThanksIntent(text) {
+  const raw = String(text || "");
+  const s = normalizeIntentText(raw);
+  if (!s) return false;
+
+  const tokens = [
+    "merci",
+    "شكرا",
+    "شكراً",
+    "choukran",
+    "chokran",
+    "thanks",
+    "thank you",
+    "ok merci",
+    "ok شكرا",
+    "ok thanks",
+    "شكراً جزيلاً",
+    "شكرا بزاف",
+    "merci beaucoup",
+    "thank you very much",
+    "thanks a lot"
+  ];
+
+  return hasAnyToken(s, tokens) || hasAnyPhrase(s, tokens);
+}
+
+/**
+ * Detects if the user is saying goodbye/farewell
+ * Recognizes farewell messages in multiple languages.
+ * 
+ * @param {string} text - The user's message text
+ * @returns {boolean} True if farewell intent is detected
+ */
+export function isFarewellIntent(text) {
+  const raw = String(text || "");
+  const s = normalizeIntentText(raw);
+  if (!s) return false;
+
+  const tokens = [
+    "bye",
+    "au revoir",
+    "مع السلامة",
+    "bslama",
+    "besslama",
+    "bslama",
+    "goodbye",
+    "à bientôt",
+    "a bientot",
+    "see you",
+    "مع السلامة",
+    "باي",
+    "bay"
+  ];
+
+  return hasAnyToken(s, tokens) || hasAnyPhrase(s, tokens);
+}
+
+/**
+ * Detects if the user is affirming/agreeing (ok, oui, yes, نعم)
+ * Recognizes affirmation messages in multiple languages.
+ * 
+ * @param {string} text - The user's message text
+ * @returns {boolean} True if affirmation intent is detected
+ */
+export function isAffirmationIntent(text) {
+  const raw = String(text || "").trim();
+  const s = normalizeIntentText(raw);
+  if (!s) return false;
+
+  // Skip if it's a more specific intent
+  if (isBuyIntent(raw)) return false;
+  if (isThanksIntent(raw)) return false;
+
+  const tokens = [
+    "ok",
+    "oui",
+    "نعم",
+    "d'accord",
+    "daccord",
+    "واخا",
+    "wakha",
+    "mashi mouchkil",
+    "machi mouchkil",
+    "mashi mushkil",
+    "yes",
+    "yep",
+    "yeah",
+    "okay",
+    "tmam",
+    "تمام",
+    "mzyan",
+    "مزيان"
+  ];
+
+  // Check if the message is short and consists mainly of affirmation words
+  const words = s.split(/\s+/).filter(w => w.length > 0);
+  if (words.length <= 3) {
+    return hasAnyToken(s, tokens);
+  }
+
+  return false;
+}
+
+/**
+ * Detects if the user is asking what products are available (catalog overview)
+ * Recognizes catalog inquiry messages in multiple languages.
+ * 
+ * @param {string} text - The user's message text
+ * @returns {boolean} True if catalog intent is detected
+ */
+export function isCatalogIntent(text) {
+  const raw = String(text || "");
+  const s = normalizeIntentText(raw);
+  if (!s) return false;
+
+  const phrases = [
+    "شنو كاين",
+    "شنو عندكم",
+    "qu'est-ce que vous avez",
+    "qu est ce que vous avez",
+    "what do you have",
+    "chnou kayn",
+    "chno kayn",
+    "3andkom",
+    "3andkum",
+    "عندكم شنو",
+    "عندكم ايش",
+    "catalogue",
+    "catalog",
+    "les produits",
+    "vos produits",
+    "what products",
+    "شنو المنتجات",
+    "ايش عندكم"
+  ];
+
+  return hasAnyPhrase(s, phrases);
+}
+
+/**
+ * Detects if the user is asking about return/refund policy
+ * Recognizes return policy inquiries in multiple languages.
+ * 
+ * @param {string} text - The user's message text
+ * @returns {boolean} True if return intent is detected
+ */
+export function isReturnIntent(text) {
+  const raw = String(text || "");
+  const s = normalizeIntentText(raw);
+  if (!s) return false;
+
+  const tokens = [
+    "retour",
+    "return",
+    "رجع",
+    "إرجاع",
+    "ارجاع",
+    "استرجاع",
+    "rembourser",
+    "remboursement",
+    "refund",
+    "politique retour",
+    "return policy",
+    "politique de retour",
+    "سياسة الإرجاع",
+    "سياسة الارجاع",
+    "tbdil",
+    "تبديل",
+    "échange",
+    "exchange"
+  ];
+
+  return hasAnyToken(s, tokens);
+}
+
+/**
+ * Detects if the user is asking about installation
+ * Recognizes installation inquiries in multiple languages.
+ * 
+ * @param {string} text - The user's message text
+ * @returns {boolean} True if installation intent is detected
+ */
+export function isInstallationIntent(text) {
+  const raw = String(text || "");
+  const s = normalizeIntentText(raw);
+  if (!s) return false;
+
+  const tokens = [
+    "installation",
+    "installer",
+    "تركيب",
+    "ركب",
+    "mount",
+    "monter",
+    "bracket",
+    "support mural",
+    "wall mount",
+    "حامل",
+    "براكيط",
+    "براكت",
+    "support tv",
+    "تثبيت"
+  ];
+
+  return hasAnyToken(s, tokens);
+}
+
+/**
+ * Detects if the user is asking for size guide/dimensions
+ * Recognizes size guide inquiries in multiple languages.
+ * 
+ * @param {string} text - The user's message text
+ * @returns {boolean} True if size guide intent is detected
+ */
+export function isSizeGuideIntent(text) {
+  const raw = String(text || "");
+  const s = normalizeIntentText(raw);
+  if (!s) return false;
+
+  const phrases = [
+    "quelle taille",
+    "quel taille",
+    "أي حجم",
+    "اي حجم",
+    "size guide",
+    "guide taille",
+    "guide des tailles",
+    "دليل الأحجام",
+    "دليل الاحجام"
+  ];
+
+  const tokens = [
+    "dimensions",
+    "dimension",
+    "cm",
+    "centimetre",
+    "centimeter",
+    "سنتيمتر",
+    "pouce",
+    "inch",
+    "بوصة",
+    "قياس",
+    "قياسات",
+    "الأبعاد",
+    "الابعاد"
+  ];
+
+  return hasAnyPhrase(s, phrases) || hasAnyToken(s, tokens);
+}
+
+/**
+ * Detects if the user is comparing brands/products
+ * Recognizes comparison inquiries in multiple languages.
+ * 
+ * @param {string} text - The user's message text
+ * @returns {boolean} True if comparison intent is detected
+ */
+export function isComparisonIntent(text) {
+  const raw = String(text || "");
+  const s = normalizeIntentText(raw);
+  if (!s) return false;
+
+  const tokens = [
+    "vs",
+    "versus",
+    "ou",
+    "أو",
+    "ولا",
+    "wla",
+    "ola",
+    "comparaison",
+    "compare",
+    "difference",
+    "différence",
+    "الفرق",
+    "فرق بين",
+    "فرق",
+    "مقارنة"
+  ];
+
+  return hasAnyToken(s, tokens);
+}
