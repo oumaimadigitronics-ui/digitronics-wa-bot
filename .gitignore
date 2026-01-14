@@ -6,3 +6,4 @@ project/package-lock.json
 push.bat
 .DS_Store
 verify-llm-removal.js
+logs/
