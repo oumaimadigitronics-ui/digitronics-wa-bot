@@ -6795,7 +6795,7 @@ app.post("/wanotifier", express.raw({ type: "*/*", limit: "2mb" }), parseWanotif
     }
 
     let reply = isAudioMessage
-      ? await digibotVoiceLLMReply(userTextRaw, history, lang, key)
+      ? offersFallbackMessage(lang)
       : await digibotLLMReply(userTextRaw, history, lang, key);
 
     if (looksLikeFallback(reply)) {
