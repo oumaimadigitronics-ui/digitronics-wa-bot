@@ -17,6 +17,11 @@ const PRICE_KEYWORDS_NOT_MODELS = [
   "السعر", "سعر", "سوم", "سومة"
 ];
 
+// Pre-normalize price keywords for faster lookup
+const NORMALIZED_PRICE_KEYWORDS = new Set(
+  PRICE_KEYWORDS_NOT_MODELS.map(k => normMatch(k)).filter(Boolean)
+);
+
 /**
  * Tokenize text into alphanumeric tokens
  * @param {string} s - Text to tokenize
@@ -57,11 +62,8 @@ export function detectModel(text, offersIndex) {
   if (!s) return null;
 
   // Don't treat price keywords as models - early exit check
-  for (const keyword of PRICE_KEYWORDS_NOT_MODELS) {
-    const normalizedKeyword = normMatch(keyword);
-    if (normalizedKeyword && s === normalizedKeyword) {
-      return null;
-    }
+  if (NORMALIZED_PRICE_KEYWORDS.has(s)) {
+    return null;
   }
 
   const tokens = tokenizeAlnum(s);
@@ -71,14 +73,9 @@ export function detectModel(text, offersIndex) {
     
     // Skip if this token is a price keyword
     const tokNorm = normMatch(tok);
-    let isPriceKeyword = false;
-    for (const keyword of PRICE_KEYWORDS_NOT_MODELS) {
-      if (normMatch(keyword) === tokNorm) {
-        isPriceKeyword = true;
-        break;
-      }
+    if (NORMALIZED_PRICE_KEYWORDS.has(tokNorm)) {
+      continue;
     }
-    if (isPriceKeyword) continue;
     
     const hit = offersIndex?.modelLookup?.get(tok);
     if (hit) return hit;
