@@ -1,0 +1,58 @@
+{
+  "conversationId": "wa:d92b69cfb82cecab45",
+  "startTime": "2026-01-14T18:59:43.529Z",
+  "messages": [
+    {
+      "id": "msg_1768417183529_jvb3lqc83",
+      "conversationId": "wa:d92b69cfb82cecab45",
+      "customerId": "unk*****own",
+      "customerName": null,
+      "timestamp": "2026-01-14T18:59:43.529Z",
+      "direction": "exchange",
+      "input": {
+        "raw": "bonjour",
+        "normalized": "bonjour",
+        "lang": "fr",
+        "type": "text",
+        "audioTranscript": null
+      },
+      "analysis": {
+        "detectedIntents": [],
+        "primaryIntent": "matched",
+        "entities": {
+          "brand": null,
+          "size": null,
+          "budget": null,
+          "category": null,
+          "productType": null
+        },
+        "context": {
+          "at": 1768417183488,
+          "preferredLang": "fr",
+          "didSendInitialGreeting": true,
+          "initialGreetingAt": 1768417183487,
+          "greeted": true,
+          "greetedAt": 1768417183487,
+          "didSendGreetingFollowupOffers": true,
+          "greetingFollowupOffersAt": 1768417183487
+        }
+      },
+      "output": {
+        "reply": "🚨🔥 *PROMO FLASH اليوم* 🔥🚨\n⚠️ (Stock limité – حتى يكمّل الستوك)\n🚚 *توصيل مجاني* + 🎁 *هدية مع كل TV*\n\n✅ *Streamsat Smart Android TV 32\" (32-ST)*\n💥 *1099 فقط!* ✅\n\n2️⃣ *Echolink Smart Tv 32 Android Qled*\n💥 *1149 DH فقط!* ✅\n\n✅ *Visio Led Tv 32″ Hd-32VB23E*\n💥 *899 فقط!* ✅\n\n5️⃣ *TCL GoogleTV QLED 32″ Full HD 32S5K*\n💥 *1449 DH فقط!* ✅\n\n🛒 *Commande / طلب:* digitronics.ma",
+        "templateUsed": null,
+        "offersShown": [],
+        "responseTime": 35,
+        "fallbackUsed": false
+      },
+      "quality": {
+        "confidenceScore": 0.8,
+        "intentMatched": true,
+        "responseRelevant": null,
+        "customerSatisfied": null,
+        "flags": []
+      }
+    }
+  ],
+  "endTime": "2026-01-14T18:59:43.529Z",
+  "totalMessages": 1
+}
