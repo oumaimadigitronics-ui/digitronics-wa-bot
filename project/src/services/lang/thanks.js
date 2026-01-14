@@ -1,3 +1,5 @@
+import { isThanksIntent } from '../../domain/intents.js';
+
 const THANKS_REGEX =
   /\b(thanks|thank\s*you|thx|tnx|ty|merci|mrc|cimer|chou?kran|shukran|chokrane?|chokran|chkran)\b/i;
 const THANKS_AR_REGEX = /(شكرا|شكراً|بارك الله فيك|جزاك الله خيرا|جزاك الله خيرًا|يعطيك الصحة)/i;
@@ -25,18 +27,10 @@ export function hasBye(text = '') {
 }
 
 export function isThanks(text = '') {
-  if (!text) return false;
-  if (!THANKS_REGEX.test(text) && !THANKS_AR_REGEX.test(text)) return false;
-  const normalized = normalizeText(text);
-  const cleaned = normalized
-    .replace(THANKS_REGEX, ' ')
-    .replace(THANKS_AR_REGEX, ' ')
-    .replace(BYE_REGEX, ' ')
-    .replace(BYE_AR_REGEX, ' ')
-    .replace(FILLER_REGEX, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-  return cleaned.length === 0;
+  // Use isThanksIntent for consistency (Conflict 3 fix)
+  // The original implementation had duplicate thanks detection logic that could diverge.
+  // Consolidating to use the domain intent function ensures consistency across the codebase.
+  return isThanksIntent(text);
 }
 
 export function hasQuestionOrProductIntent(text = '') {

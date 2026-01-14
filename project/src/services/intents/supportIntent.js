@@ -27,6 +27,19 @@ export function isAngryOrProblemIntent(text) {
   const s = normalizeIntentText(raw);
   if (!s) return false;
 
+  // Exclude questions about avoiding delays (Conflict 5)
+  const avoidDelayPhrases = [
+    "bla retard", "sans retard", "without delay",
+    "بلا تأخير", "بدون تأخير", "no delay"
+  ];
+  if (hasAnyPhrase(s, avoidDelayPhrases)) return false;
+
+  // Exclude if it's a question about delays (has ? or ؟), unless it's a clear complaint
+  const hasComplaintPhrase = hasAnyPhrase(s, ["tres retard", "very late", "متأخر بزاف", "retard de livraison"]);
+  if (s.includes("retard") && /[?؟]/.test(raw) && !hasComplaintPhrase) {
+    return false; // Asking about delays, not complaining
+  }
+
   if (hasAnyEmoji(raw, ["😡", "🤬", "😠", "😤", "😞", "😢", "😭", "⚠️", "❗", "🚨"])) return true;
 
   const phrases = [
@@ -46,6 +59,8 @@ export function isAngryOrProblemIntent(text) {
     "pas satisfait",
     "très mauvais",
     "tres mauvais",
+    "tres retard",
+    "très retard",
     "je suis en colere",
     "je suis en colère",
     "je suis fache",
@@ -73,7 +88,8 @@ export function isAngryOrProblemIntent(text) {
   const tokens = [
     "problem",
     "issue",
-    "bad",
+    // "bad" removed from tokens (Conflict 8) - too generic (e.g., "bad boy brand")
+    // Still triggers via phrases: "bad service", "terrible service", "very bad", etc.
     "angry",
     "late",
     "delay",
