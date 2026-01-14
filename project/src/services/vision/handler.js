@@ -7,8 +7,9 @@
 import path from 'path';
 import { sniffImageMime } from './sniff.js';
 import { toImageUrlString, pickVisionModel, describeImage } from './describe.js';
-import { analyzeProductImage } from './analyze.js';
+import { analyzeProductImage, enhanceVisionResult } from './analyze.js';
 import { VISION_CATEGORY_MAP } from './constants.js';
+import { findOfferByModel } from './modelPatterns.js';
 
 /**
  * Select offers based on vision analysis results
@@ -34,11 +35,51 @@ export function selectOffersFromVision(hints, deps) {
   const cls = mapped.cls || h.cls || null;
   const category = mapped.category || h.categoryReadable || null;
   const brand = String(h.brand || "").toUpperCase();
+  const model = h.model;
   const size = Number(h.size_inches);
   const capacity = Number(h.capacity_liters);
   const sizeNum = Number.isFinite(size) ? size : null;
   const capNum = Number.isFinite(capacity) ? capacity : null;
 
+  // Priority 1: If we have a model number, try to find exact match first
+  if (model) {
+    const exactMatch = findOfferByModel(model, offers);
+    if (exactMatch) {
+      // Found exact model match - prioritize it
+      const exactEntry = { brand: exactMatch.brand, offer: exactMatch.offer };
+      
+      // Get other relevant offers (same brand/category) but exclude the exact match
+      const otherOffers = [];
+      const exactBrand = exactMatch.brand;
+      const exactModelLower = String(exactMatch.offer.model || '').toLowerCase();
+      
+      // Try to get offers from the same brand first
+      if (exactBrand && listOffersForBrand) {
+        const res = listOffersForBrand(exactBrand, {
+          cls,
+          category,
+          size: sizeNum,
+          capacityLiters: capNum,
+          limit: maxOffers,
+          withOffers: true,
+        });
+        if (res && Array.isArray(res.offers)) {
+          // Filter out the exact match we already have
+          const filtered = res.offers.filter(o => {
+            const m = String(o.offer?.model || '').toLowerCase();
+            return m !== exactModelLower;
+          });
+          otherOffers.push(...filtered);
+        }
+      }
+      
+      // Combine exact match first, then other offers
+      const combined = [exactEntry, ...otherOffers].slice(0, maxOffers);
+      return { offers: combined };
+    }
+  }
+
+  // Priority 2: Brand-based search (existing logic)
   if (brand) {
     const isBrandOnlyQuery = !cls && !category && !sizeNum && !capNum;
     const tvCanon = offersIndex?.classCanon?.tv || "Tv";
@@ -68,6 +109,7 @@ export function selectOffersFromVision(hints, deps) {
     }
   }
 
+  // Priority 3: Category/class-based search (existing fallback logic)
   const items = [];
   const brands = offersIndex?.brands || [];
   for (let i = 0; i < brands.length; i += 1) {
@@ -215,19 +257,24 @@ export async function handleVisionMedia(mediaInput, lang, key, opts = {}, deps) 
 
   let offerReply = null;
   if (vision) {
-    const mapped = VISION_CATEGORY_MAP[vision.category] || {};
+    // Enhance vision result with brand detection from model patterns or catalog
+    const enhancedVision = enhanceVisionResult(vision, offers);
+    
+    const mapped = VISION_CATEGORY_MAP[enhancedVision.category] || {};
     const cls = mapped.cls || null;
     const category = mapped.category || null;
-    const brand = vision.brand ? String(vision.brand).toUpperCase() : null;
-    const sizeNum = vision.size_inches ? Number(vision.size_inches) : null;
-    const capNum = vision.capacity_liters ? Number(vision.capacity_liters) : null;
+    const brand = enhancedVision.brand ? String(enhancedVision.brand).toUpperCase() : null;
+    const model = enhancedVision.model || null;
+    const sizeNum = enhancedVision.size_inches ? Number(enhancedVision.size_inches) : null;
+    const capNum = enhancedVision.capacity_liters ? Number(enhancedVision.capacity_liters) : null;
 
     const offersResult = selectOffersFromVision(
       {
-        category: vision.category,
+        category: enhancedVision.category,
         cls,
         categoryReadable: category,
         brand,
+        model,
         size_inches: sizeNum,
         capacity_liters: capNum,
       },

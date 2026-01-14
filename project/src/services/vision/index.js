@@ -7,6 +7,7 @@
  * - Product image analysis
  * - Vision media handling
  * - Vision constants
+ * - Model pattern matching and brand detection
  */
 
 // Export from sniff.js
@@ -25,6 +26,7 @@ export {
   parseVisionJson,
   deriveVisionHintsFromText,
   normalizeVisionResult,
+  enhanceVisionResult,
   analyzeProductImage,
 } from './analyze.js';
 
@@ -36,3 +38,10 @@ export {
 
 // Export from constants.js
 export { VISION_CATEGORY_MAP } from './constants.js';
+
+// Export from modelPatterns.js
+export {
+  detectBrandFromModel,
+  findBrandByModelInCatalog,
+  findOfferByModel,
+} from './modelPatterns.js';

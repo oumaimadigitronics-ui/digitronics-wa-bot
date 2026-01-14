@@ -6,6 +6,7 @@
 
 import { sniffImageMime } from './sniff.js';
 import { toImageUrlString, pickVisionModel } from './describe.js';
+import { detectBrandFromModel, findBrandByModelInCatalog } from './modelPatterns.js';
 
 /**
  * Parse JSON response from vision API, handling various formats
@@ -129,6 +130,36 @@ export function normalizeVisionResult(obj) {
     capacity_liters: Number.isFinite(capacityLiters) ? capacityLiters : null,
     confidence: Number.isFinite(confidence) && confidence >= 0 && confidence <= 1 ? confidence : 0,
   };
+}
+
+/**
+ * Enhance vision result with brand detection from model patterns or catalog
+ * 
+ * @param {Object} visionResult - Normalized vision result
+ * @param {Object} offers - Offers object for catalog lookup
+ * @returns {Object} Enhanced vision result with brand detected if possible
+ */
+export function enhanceVisionResult(visionResult, offers) {
+  const enhanced = { ...visionResult };
+  
+  // If vision found a model but no brand (or brand is "UNKNOWN"), try to detect brand
+  if (enhanced.model && (!enhanced.brand || enhanced.brand.toUpperCase() === 'UNKNOWN')) {
+    // First try pattern matching
+    const patternBrand = detectBrandFromModel(enhanced.model);
+    if (patternBrand) {
+      enhanced.brand = patternBrand;
+      enhanced.brandSource = 'model_pattern';
+    } else if (offers) {
+      // Fall back to catalog lookup
+      const catalogBrand = findBrandByModelInCatalog(enhanced.model, offers);
+      if (catalogBrand) {
+        enhanced.brand = catalogBrand;
+        enhanced.brandSource = 'catalog_lookup';
+      }
+    }
+  }
+  
+  return enhanced;
 }
 
 /**
