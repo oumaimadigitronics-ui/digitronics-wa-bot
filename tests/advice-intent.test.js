@@ -1,4 +1,31 @@
-import { isProductAdviceIntent, isBuyIntent, routeTemplate, BUY_INTENT_TEMPLATE } from "../server.js";
+import { isProductAdviceIntent, isBuyIntent, BUY_INTENT_TEMPLATE } from "../server.js";
+import { resolveAdvice as resolveAdviceImpl } from "../project/src/services/intents/comparisonIntent.js";
+import { getOffersIndex } from "../project/src/services/woocommerce/index.js";
+
+// Import templates needed for resolveAdvice
+const TECH_EXPLAIN_TEMPLATE = (topic) => "Tech Explain: " + topic;
+const PRODUCT_REVIEW_TEMPLATE = (name) => "Product Review: " + name;
+const BRAND_COMPARE_TEMPLATE = (a, b) => {
+  return `│   ⚖️ *Comparatif Premium*   │\n\n🇫🇷 Marques: *${a}* vs *${b}*.\n🇲🇦 الماركات: *${a}* ضد *${b}*.`;
+};
+const PRODUCT_COMPARE_TEMPLATE = (a, b) => `Product Compare: ${a} vs ${b}`;
+
+const detectModel = () => null;
+const hasTvSizeInQuery = () => false;
+const detectProductModel = () => null;
+
+function resolveAdvice(text, ctx = {}) {
+  const offersIndex = getOffersIndex();
+  return resolveAdviceImpl(text, ctx, {
+    detectModel,
+    hasTvSizeInQuery,
+    detectProductModel,
+    TECH_EXPLAIN_TEMPLATE,
+    PRODUCT_REVIEW_TEMPLATE,
+    BRAND_COMPARE_TEMPLATE,
+    PRODUCT_COMPARE_TEMPLATE,
+  });
+}
 
 const tests = [
   {
@@ -12,7 +39,7 @@ const tests = [
 function runTest(test, index) {
   const adviceDetected = isProductAdviceIntent(test.text);
   const buyDetected = isBuyIntent(test.text);
-  const output = routeTemplate(test.text) || "";
+  const output = resolveAdvice(test.text, {}) || "";
   let ok = true;
   let details = "";
 

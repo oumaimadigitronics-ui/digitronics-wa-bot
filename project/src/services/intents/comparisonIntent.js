@@ -8,22 +8,44 @@
  */
 
 import { normMatch, includesToken, arabicIndicToAsciiDigits } from '../../lib/textUtils.js';
+import { validateComparisonParts, containsGreeting, containsPersonalContent } from './comparisonValidation.js';
 
 /**
  * Extracts two items from comparison queries like "X vs Y"
  * Supports various comparison keywords: vs, versus, contra, مقابل, ضد, ولا, ou, or
  * 
  * @param {string} text - User query text
+ * @param {Object} offersIndex - Offers index containing brands list
  * @returns {[string|null, string|null]} - Tuple of [left, right] items or [null, null]
  */
-export function extractCompareParts(text) {
+export function extractCompareParts(text, offersIndex = null) {
   const raw = String(text || "");
   const cleaned = raw.replace(/[\n\r]+/g, " ");
+  
+  // Early rejection for greetings
+  if (containsGreeting(cleaned)) {
+    return [null, null];
+  }
+  
   const split = cleaned
     .split(/(?:\bvs\b|versus|contra|مقابل|ضد|ولا| ou | or )/i)
     .map((s) => s.trim())
     .filter(Boolean);
-  if (split.length >= 2) return [split[0].slice(0, 40).trim(), split[1].slice(0, 40).trim()];
+  
+  if (split.length >= 2) {
+    const left = split[0].slice(0, 20).trim();
+    const right = split[1].slice(0, 20).trim();
+    
+    // Get known brands from offersIndex if available
+    const knownBrands = offersIndex?.brands || [];
+    
+    // Validate the parts
+    const validation = validateComparisonParts(left, right, knownBrands);
+    
+    if (validation.valid) {
+      return [validation.left, validation.right];
+    }
+  }
   return [null, null];
 }
 
@@ -32,15 +54,34 @@ export function extractCompareParts(text) {
  * Pattern: "الفرق بين X و Y" or "فرق بين X و Y"
  * 
  * @param {string} text - User query text in Arabic
+ * @param {Object} offersIndex - Offers index containing brands list
  * @returns {[string|null, string|null]} - Tuple of [left, right] items or [null, null]
  */
-export function extractDifferenceBetweenParts(text) {
+export function extractDifferenceBetweenParts(text, offersIndex = null) {
   const raw = String(text || "");
+  
+  // Early rejection for greetings
+  if (containsGreeting(raw)) {
+    return [null, null];
+  }
+  
   const match = raw.match(/(?:الفرق|فرق)\s+بين\s+(.+?)\s+و\s+(.+)/i);
   if (!match) return [null, null];
-  const left = match[1].replace(/[؟?!.،]+/g, " ").trim().slice(0, 40);
-  const right = match[2].replace(/[؟?!.،]+/g, " ").trim().slice(0, 40);
-  return [left || null, right || null];
+  
+  const left = match[1].replace(/[؟?!.،]+/g, " ").trim().slice(0, 20);
+  const right = match[2].replace(/[؟?!.،]+/g, " ").trim().slice(0, 20);
+  
+  // Get known brands from offersIndex if available
+  const knownBrands = offersIndex?.brands || [];
+  
+  // Validate the parts
+  const validation = validateComparisonParts(left, right, knownBrands);
+  
+  if (validation.valid) {
+    return [validation.left, validation.right];
+  }
+  
+  return [null, null];
 }
 
 /**
