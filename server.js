@@ -308,6 +308,18 @@ import {
   getOffTopicFallback
 } from './project/src/services/guardrails/topicGuardrail.js';
 
+import {
+  logMessage,
+  getDailyLogs,
+  getConversation,
+  getIssues,
+  exportLogs
+} from './src/services/chatLogger/index.js';
+
+import {
+  autoAnalyzer
+} from './src/services/analytics/autoAnalyzer.js';
+
 let toFileImpl = toFile;
 
 const app = express();
@@ -6034,6 +6046,57 @@ app.post("/refresh-offers", async (req, res) => {
   }
   await refreshOffersSafe();
   return res.json({ ok: true, lastOffersSync });
+});
+
+// Admin authentication middleware
+function adminAuth(req, res, next) {
+  const token = req.headers.authorization?.replace('Bearer ', '');
+  const adminToken = process.env.ADMIN_API_TOKEN;
+  if (!adminToken || token !== adminToken) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+  next();
+}
+
+// Get today's chats
+app.get('/admin/chats', adminAuth, (req, res) => {
+  const date = req.query.date || new Date().toISOString().split('T')[0];
+  const logs = getDailyLogs(date);
+  res.json(logs || { error: 'No logs found', date });
+});
+
+// Get specific conversation
+app.get('/admin/chats/:conversationId', adminAuth, (req, res) => {
+  const conv = getConversation(req.params.conversationId);
+  res.json(conv || { error: 'Conversation not found' });
+});
+
+// Get issues
+app.get('/admin/issues', adminAuth, (req, res) => {
+  const date = req.query.date || new Date().toISOString().split('T')[0];
+  const issues = getIssues(date);
+  res.json(issues || { error: 'No issues found', date });
+});
+
+// Run analysis
+app.get('/admin/analyze', adminAuth, async (req, res) => {
+  const date = req.query.date || new Date().toISOString().split('T')[0];
+  const report = await autoAnalyzer.analyzeDailyLogs(date);
+  res.json(report);
+});
+
+// Export logs
+app.get('/admin/export', adminAuth, (req, res) => {
+  const logs = exportLogs(req.query);
+  res.json(logs || { error: 'No logs found' });
+});
+
+// Trigger PR creation (for manual trigger)
+app.post('/admin/create-fix-pr', adminAuth, async (req, res) => {
+  const date = req.query.date || new Date().toISOString().split('T')[0];
+  const report = await autoAnalyzer.analyzeDailyLogs(date);
+  // PR creation logic here (via GitHub API)
+  res.json({ success: true, report });
 });
 
 app.post("/wanotifier", express.raw({ type: "*/*", limit: "2mb" }), parseWanotifierJson, async (req, res) => {
