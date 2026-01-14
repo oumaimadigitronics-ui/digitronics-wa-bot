@@ -62,3 +62,29 @@ export {
   transcribeAudioFile,
   buildPipelineTranscriber,
 } from "./transcribe.js";
+
+// Re-export error message utilities
+export {
+  getAudioErrorMessage,
+  classifyAudioError,
+} from "./errorMessages.js";
+
+// Re-export retry utilities
+export {
+  transcribeWithRetry,
+} from "./retry.js";
+
+// Re-export language detection utilities
+export {
+  getTranscriptionPrompt,
+  mapLangToWhisper,
+  detectLanguageFromText,
+  calculateLanguageConfidence,
+  shouldRetranscribe,
+} from "./languageDetection.js";
+
+// Re-export chunking utilities
+export {
+  transcribeLongAudio,
+  combineChunkTranscripts,
+} from "./chunking.js";
