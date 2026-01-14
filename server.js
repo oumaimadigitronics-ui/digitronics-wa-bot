@@ -4784,12 +4784,12 @@ function isGenericPriceQuestion(text) {
 
   if (/^\d+\s*dh$/i.test(normalized)) return true;
 
-  const phraseMatches = ["c est combien", "how much"];
+  const phraseMatches = ["c est combien", "how much", "كم الثمن"];
   for (let i = 0; i < phraseMatches.length; i += 1) {
     if (normalized.indexOf(phraseMatches[i]) >= 0) return true;
   }
 
-  const tokens = ["prix", "combien", "tarif", "price", "cost", "cout", "coute", "ch7al", "chhal", "chحال", "بشحال", "الثمن", "ثمن", "السعر", "taman"];
+  const tokens = ["prix", "combien", "tarif", "price", "cost", "cout", "coute", "ch7al", "chhal", "chحال", "شحال", "بشحال", "الثمن", "ثمن", "السعر", "taman", "thaman"];
   for (let i = 0; i < tokens.length; i += 1) {
     if (includesToken(raw, tokens[i])) return true;
   }
