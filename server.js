@@ -1009,7 +1009,6 @@ async function deriveMediaText(mediaInput, lang, reqId) {
     ensureNoQuestion,
     stripUrlQueriesInText,
     CFG,
-    processIncomingMediaForAudio: processIncomingMedia,
   });
 }
 
@@ -5944,9 +5943,47 @@ app.post("/wanotifier", express.raw({ type: "*/*", limit: "2mb" }), parseWanotif
       }
     }
 
+    // Immediate audio handling with transcription before deriving text
+    const isAudioMessage = Boolean(
+      msgType === "audio" ||
+        msgType === "voice" ||
+        (mediaInfo && (mediaInfo.kind === "audio" || guessMediaKind(mediaInfo) === "audio"))
+    );
+    let userTextFromAudio = "";
+    if (isAudioMessage && mediaInfo) {
+      try {
+        const audioResult = await processIncomingMedia({
+          mediaInfo,
+          mediaMeta,
+          msgType,
+          lang,
+          key,
+          reqId,
+        });
+        
+        if (audioResult && audioResult.userText) {
+          userTextFromAudio = audioResult.userText;
+          // Use the transcribed text as the user input
+          if (!userTextRaw || userTextRaw.trim().length === 0) {
+            userTextRaw = userTextFromAudio;
+          }
+        } else if (audioResult && audioResult.reply) {
+          // Audio processing failed with error message
+          const reply = finalizeReply(audioResult.reply, CFG.maxReplyChars);
+          memory.push(key, "assistant", reply);
+          resetStrikes(key);
+          console.log(JSON.stringify({ level: "info", msg: "audio_error_reply_sent", reqId }));
+          return res.json({ ok: true, reply });
+        }
+      } catch (e) {
+        console.error(JSON.stringify({ level: "error", msg: "audio_entry_failed", reqId, error: (e && e.message) || String(e) }));
+        // Fall through to normal processing
+      }
+    }
+
     let mediaResult = null;
     let mediaDerivedText = "";
-    if (normalizedMedia) {
+    if (normalizedMedia && !isAudioMessage) {
       mediaResult = await deriveMediaText(
         { ...normalizedMedia, raw: (normalizedMedia && normalizedMedia.raw) || mediaMeta || incoming.media },
         lang,
@@ -5957,13 +5994,8 @@ app.post("/wanotifier", express.raw({ type: "*/*", limit: "2mb" }), parseWanotif
       }
     }
 
-    const isAudioMessage = Boolean(
-      msgType === "audio" ||
-        msgType === "voice" ||
-        (normalizedMedia && (normalizedMedia.kind === "audio" || guessMediaKind(normalizedMedia) === "audio"))
-    );
     if (isAudioMessage) {
-      const transcription = mediaResult && mediaResult.ok ? mediaDerivedText : null;
+      const transcription = userTextFromAudio || (mediaResult && mediaResult.ok ? mediaDerivedText : null);
       const transcript = String(transcription || "").trim();
       const transcriptNorm = normMatch(transcript);
       const fillerTokens = new Set(["...", "audio", "voice", "message", "ok", "merci", "hello"]);
