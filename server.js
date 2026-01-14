@@ -45,6 +45,11 @@ import {
 } from './project/src/services/replies/i18n.js';
 
 import {
+  OFFERS_FALLBACK_MESSAGE,
+  offersFallbackMessage
+} from './project/src/config/promoOffers.js';
+
+import {
   stripQuestions as stripQuestionsImpl,
   ensureNoQuestion as ensureNoQuestionImpl,
   sanitizeUrlNoQuestion as sanitizeUrlNoQuestionImpl,
@@ -608,24 +613,6 @@ const COMPANY = {
 // Media service constants (imported from media service)
 const VOICE_NOT_UNDERSTOOD_TEMPLATE = VOICE_NOT_UNDERSTOOD_TEMPLATE_IMPL;
 
-const OFFERS_FALLBACK_MESSAGE = `🚨🔥 *PROMO FLASH اليوم* 🔥🚨
-⚠️ (Stock limité – حتى يكمّل الستوك)
-🚚 *توصيل مجاني* + 🎁 *هدية مع كل TV*
-
-✅ *Streamsat Smart Android TV 32" (32-ST)*
-💥 1099 DH
-
-2️⃣ *Echolink Smart Tv 32 Android Qled*
-💥 *1149 DH فقط!* ✅
-
-✅ *Visio Led Tv 32″ Hd-32VB23E*
-💥 899 DH
-
-5️⃣ *TCL GoogleTV QLED 32″ Full HD 32S5K*
-💥 *1499 DH فقط!* ✅
-
-🛒 *Commande / طلب:* digitronics.ma`;
-
 // Initialize query service factory functions
 // These are created once and reused throughout the application lifecycle
 let tryDirectOfferAnswerImpl = null;
@@ -678,10 +665,6 @@ function initializeQueryServices() {
   };
 
   tryDirectOfferAnswerImpl = createTryDirectOfferAnswer(queryDeps);
-}
-
-function offersFallbackMessage() {
-  return OFFERS_FALLBACK_MESSAGE;
 }
 
 // Removed BRAND_KNOWLEDGE - tech knowledge functionality removed
