@@ -7171,14 +7171,16 @@ async function processIncomingMedia({ mediaInfo, mediaMeta, msgType, lang, key, 
         return { ...route, reply };
       }
       
-      // Use specific error message if available, otherwise fallback
+      // Use specific error message for known error types
       if (errorType !== 'transcription_failed') {
         return { ...route, reply: ensureNoQuestion(errorMessage) };
       }
       
+      // For generic transcription failures, add agent fallback guidance
       const parts = [];
       if (shouldSendAudioReminder(key)) parts.push(audioReminderText(lang));
       parts.push(errorMessage);
+      parts.push(fallbackWithAgent(lang));
       const reply = ensureNoQuestion(parts.join("\n"));
       return { ...route, reply };
     } finally {

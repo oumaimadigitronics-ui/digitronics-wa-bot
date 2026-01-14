@@ -121,8 +121,8 @@ async function splitAudioIntoChunks(audioBuffer, mimeType, opts = {}) {
 function isValidFilePath(filePath) {
   if (!filePath || typeof filePath !== 'string') return false;
   
-  // Check for command injection attempts
-  const dangerousChars = /[;&|`$()<>]/;
+  // Check for command injection attempts (including backslash and quotes)
+  const dangerousChars = /[;&|`$()<>'"\\]/;
   if (dangerousChars.test(filePath)) return false;
   
   // Must be an absolute path
