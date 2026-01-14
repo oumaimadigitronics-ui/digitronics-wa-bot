@@ -139,7 +139,9 @@ export function isProductAdviceIntent(text) {
     "شنو احسن",
     "شنو أحسن",
   ];
-  const adviceTokens = [
+  
+  // Strong advice tokens that always trigger
+  const strongAdviceTokens = [
     "better",
     "best",
     "mieux",
@@ -148,17 +150,29 @@ export function isProductAdviceIntent(text) {
     "الفرق",
     "فرق",
     "مقارنة",
+  ];
+  
+  // Weak tokens that need brand context
+  const weakAdviceTokens = [
+    "ولا",  // "or" in Darija - too common, needs context
     "أحسن",
     "احسن",
-    "ولا",
     "مزيان",
   ];
+  
+  // Known brands for context validation (English and common Arabic spellings)
+  const brandPattern = /tcl|daiko|haier|samsung|lg|visio|hisense|echolink|tivoli|xiaomi|beko|candy|sony|دايكو|فيزيو|سامسونج|هاير|هيسنس/i;
 
-  const hasAdvice =
-    advicePhrases.some((phrase) => normalized.includes(normMatch(phrase))) ||
-    adviceTokens.some((token) => includesToken(normalized, token));
+  const hasAdvicePhrase = advicePhrases.some((phrase) => normalized.includes(normMatch(phrase)));
+  const hasStrongToken = strongAdviceTokens.some((token) => includesToken(normalized, token));
+  const hasWeakToken = weakAdviceTokens.some((token) => includesToken(normalized, token));
+  const hasBrandContext = brandPattern.test(normalized);
+  
+  const hasAdvice = hasAdvicePhrase || hasStrongToken || (hasWeakToken && hasBrandContext);
+  
   const hasPrice = priceTokens.some((token) => includesToken(normalized, token));
   if (hasPrice && !hasAdvice) return false;
+  
   return hasAdvice;
 }
 

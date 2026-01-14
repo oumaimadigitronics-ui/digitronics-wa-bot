@@ -1883,8 +1883,17 @@ const PRODUCT_COMPARE_TEMPLATE = (a, b) => {
 };
 
 const BRAND_COMPARE_TEMPLATE = (a, b) => {
-  const left = a || "Option A";
-  const right = b || "Option B";
+  // Validate inputs - use fallback if invalid
+  const isValidInput = (x) => {
+    if (!x || typeof x !== 'string') return false;
+    if (x.length > 20) return false;
+    if (/السلام|سلام|مرحبا|ولدي|بنتي|لاباس/.test(x)) return false;
+    return true;
+  };
+  
+  const left = isValidInput(a) ? a : "Option A";
+  const right = isValidInput(b) ? b : "Option B";
+  
   return [
     "│   ⚖️ *Comparatif Premium*   │",
     "",
@@ -2161,18 +2170,18 @@ function resolveAdvice(text, ctxData) {
     });
   }
 
-  const [diffLeft, diffRight] = extractDifferenceBetweenParts(raw);
+  const [diffLeft, diffRight] = extractDifferenceBetweenParts(raw, OFFERS_INDEX);
   if (diffLeft && diffRight) {
     return BRAND_COMPARE_TEMPLATE(diffLeft, diffRight);
   }
 
   if (s.includes("ولا")) {
-    const [left, right] = extractCompareParts(raw);
+    const [left, right] = extractCompareParts(raw, OFFERS_INDEX);
     if (left && right) return BRAND_COMPARE_TEMPLATE(left, right);
   }
 
   if (s.includes("vs") || s.includes("ou") || s.includes(" or ")) {
-    const [left, right] = extractCompareParts(raw);
+    const [left, right] = extractCompareParts(raw, OFFERS_INDEX);
     return PRODUCT_COMPARE_TEMPLATE(left, right);
   }
 
