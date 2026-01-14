@@ -250,6 +250,7 @@ import {
   checkAudioQuality,
   getAudioDuration,
   correctArabicBrands,
+  isLikelyHallucination,
   isAudioMime as isAudioMimeImpl,
   cleanMimeType as cleanMimeTypeImpl,
   sniffAudioMime as sniffAudioMimeImpl,
@@ -7256,6 +7257,19 @@ async function processIncomingMedia({ mediaInfo, mediaMeta, msgType, lang, key, 
       
       if (!userTextRaw) {
         throw new Error("transcription_empty");
+      }
+      
+      // Check for hallucinated transcriptions (e.g., from silent audio)
+      const hallucinationCheck = isLikelyHallucination(userTextRaw);
+      if (hallucinationCheck.hallucinated) {
+        console.log(JSON.stringify({
+          level: 'warn',
+          msg: 'hallucination_detected',
+          reqId,
+          reason: hallucinationCheck.reason,
+          textPreview: userTextRaw.slice(0, 100),
+        }));
+        throw new Error('hallucination_detected');
       }
       
       // Apply Arabic brand corrections to fix common misspellings

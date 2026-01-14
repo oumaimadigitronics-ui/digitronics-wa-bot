@@ -95,3 +95,8 @@ export {
 export {
   checkAudioQuality,
 } from "./qualityCheck.js";
+
+// Re-export hallucination detection utilities
+export {
+  isLikelyHallucination,
+} from "./hallucinationDetection.js";

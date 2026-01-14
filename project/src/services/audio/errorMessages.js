@@ -58,6 +58,12 @@ export function getAudioErrorMessage(errorType, lang = 'dz') {
       ar: "ما فهمتش الصوت، عاود سجل بوضوح أو كتب 🙏",
       fr: "Impossible de comprendre l'audio, réenregistrez clairement ou écrivez 🙏",
       en: "Couldn't understand the audio, please re-record clearly or type 🙏"
+    },
+    hallucination_detected: {
+      dz: "Ma fhemtch l-message dyalk, 3awed sejel b sawt wada7 🎤",
+      ar: "ما فهمتش الرسالة ديالك، عاود سجل بصوت واضح 🎤",
+      fr: "Je n'ai pas compris votre message, réenregistrez clairement 🎤",
+      en: "I didn't understand your message, please re-record clearly 🎤"
     }
   };
 
@@ -109,6 +115,11 @@ export function classifyAudioError(error) {
   // Check for format errors
   if (msg.includes('format') || msg.includes('codec') || msg.includes('unsupported')) {
     return 'unsupported_format';
+  }
+  
+  // Check for hallucination detection
+  if (msg.includes('hallucination_detected')) {
+    return 'hallucination_detected';
   }
   
   // Default: generic transcription failure
