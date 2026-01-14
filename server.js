@@ -247,6 +247,7 @@ import {
   mapLangToWhisper,
   transcribeLongAudio,
   checkAudioQuality,
+  getAudioDuration,
 } from './project/src/services/audio/index.js';
 
 let toFileImpl = toFile;
@@ -7059,8 +7060,29 @@ async function processIncomingMedia({ mediaInfo, mediaMeta, msgType, lang, key, 
       // Read audio buffer for quality check
       const audioBuffer = fs.readFileSync(inputPath);
       
-      // Perform quality pre-check
-      const qualityCheck = checkAudioQuality(audioBuffer, null, { reqId });
+      // Get audio duration using ffprobe for quality checks and metrics
+      let durationMs = null;
+      try {
+        durationMs = await getAudioDuration(inputPath);
+        console.log(JSON.stringify({
+          level: "info",
+          msg: "audio_duration_detected",
+          reqId,
+          durationMs,
+          durationSec: Math.round(durationMs / 1000)
+        }));
+      } catch (err) {
+        console.log(JSON.stringify({
+          level: "warn",
+          msg: "audio_duration_detection_failed",
+          reqId,
+          error: err?.message || String(err)
+        }));
+        // Continue without duration - quality check will skip duration-based validation
+      }
+      
+      // Perform quality pre-check with duration
+      const qualityCheck = checkAudioQuality(audioBuffer, durationMs, { reqId });
       if (!qualityCheck.ok) {
         const errorMsg = getAudioErrorMessage(qualityCheck.reason, lang);
         console.log(JSON.stringify({
@@ -7110,7 +7132,8 @@ async function processIncomingMedia({ mediaInfo, mediaMeta, msgType, lang, key, 
           level: "info",
           msg: "audio_metrics",
           reqId,
-          durationMs: null, // Duration not available without ffprobe
+          durationMs,
+          durationSec: durationMs ? Math.round(durationMs / 1000) : null,
           sizeBytes,
           detectedLang,
           transcriptLength: userTextRaw.length,

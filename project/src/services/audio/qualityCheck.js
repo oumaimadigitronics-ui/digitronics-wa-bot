@@ -48,10 +48,10 @@ export function checkAudioQuality(audioBuffer, durationMs, opts = {}) {
       level: 'warn',
       msg: 'audio_quality_check_failed',
       reqId,
-      reason: 'audio_too_short',
+      reason: 'audio_file_too_small',
       sizeBytes: audioBuffer.length
     }));
-    return { ok: false, reason: 'audio_too_short', sizeBytes: audioBuffer.length };
+    return { ok: false, reason: 'audio_file_too_small', sizeBytes: audioBuffer.length };
   }
   
   console.log(JSON.stringify({

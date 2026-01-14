@@ -118,7 +118,7 @@ async function splitAudioIntoChunks(audioBuffer, mimeType, opts = {}) {
  * @param {string} filePath - Path to audio file
  * @returns {Promise<number>} Duration in milliseconds
  */
-async function getAudioDuration(filePath) {
+export async function getAudioDuration(filePath) {
   return new Promise((resolve, reject) => {
     const proc = spawn('ffprobe', [
       '-v', 'error',
