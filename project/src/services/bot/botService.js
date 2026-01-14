@@ -202,8 +202,8 @@ export class BotService {
     if (!userText) {
       const audioPayload = getAudioPayload(body);
       if (audioPayload) {
-        // Audio functionality removed - set fallback message
-        sttFailed = true;
+        // Audio processing is handled by the media layer
+        // If transcription fails, media layer will set an appropriate error message
       }
     }
 

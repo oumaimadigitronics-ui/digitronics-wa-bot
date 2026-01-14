@@ -3,6 +3,11 @@
  * Splits audio into manageable chunks for transcription.
  */
 
+import { spawn } from 'child_process';
+import fs from 'fs';
+import path from 'path';
+import os from 'os';
+
 // Maximum duration per chunk (4 minutes)
 const CHUNK_DURATION_MS = 4 * 60 * 1000;
 
@@ -59,7 +64,7 @@ export function combineChunkTranscripts(transcripts) {
 
 /**
  * NOTE: Audio splitting functionality requires ffmpeg integration.
- * This is a placeholder that will be implemented when ffmpeg is available.
+ * This implements actual ffmpeg-based audio splitting.
  * 
  * Split audio buffer into chunks for transcription.
  * @param {Buffer} audioBuffer - Audio file buffer
@@ -69,12 +74,186 @@ export function combineChunkTranscripts(transcripts) {
  * @param {number} opts.overlap - Overlap between chunks in ms
  * @param {number} opts.maxChunks - Maximum number of chunks
  * @returns {Promise<Array<Object>>} Array of chunk objects with buffer, startMs, endMs
- * @throws {Error} Not yet implemented - requires ffmpeg
  */
-async function splitAudioIntoChunksStub(audioBuffer, mimeType, opts = {}) {
-  // Placeholder for future ffmpeg integration
-  // Will split audio file into time-based chunks with overlap
-  throw new Error('Audio splitting not yet implemented - requires ffmpeg integration');
+async function splitAudioIntoChunks(audioBuffer, mimeType, opts = {}) {
+  const { chunkDuration = CHUNK_DURATION_MS, overlap = OVERLAP_MS, maxChunks = MAX_CHUNKS } = opts;
+  
+  // Write buffer to temp file
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'audio-chunk-'));
+  const inputPath = path.join(tmpDir, 'input.wav');
+  fs.writeFileSync(inputPath, audioBuffer);
+  
+  try {
+    // Get audio duration using ffprobe
+    const duration = await getAudioDuration(inputPath);
+    const numChunks = Math.min(Math.ceil(duration / chunkDuration), maxChunks);
+    
+    const chunks = [];
+    for (let i = 0; i < numChunks; i++) {
+      const startMs = Math.max(0, i * chunkDuration - (i > 0 ? overlap : 0));
+      const endMs = Math.min(duration, (i + 1) * chunkDuration);
+      
+      const outputPath = path.join(tmpDir, `chunk_${i}.wav`);
+      await extractAudioChunk(inputPath, outputPath, startMs, endMs);
+      
+      chunks.push({
+        buffer: fs.readFileSync(outputPath),
+        startMs,
+        endMs,
+        index: i
+      });
+    }
+    
+    return chunks;
+  } finally {
+    // Cleanup
+    try {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    } catch {}
+  }
+}
+
+/**
+ * Validate file path to prevent command injection.
+ * @param {string} filePath - File path to validate
+ * @returns {boolean} True if path is safe
+ */
+function isValidFilePath(filePath) {
+  if (!filePath || typeof filePath !== 'string') return false;
+  
+  // Check for command injection attempts
+  // Note: Using character class with proper escaping for quotes and backslash
+  const dangerousChars = /[;&|`$()<>'"\\]/;
+  if (dangerousChars.test(filePath)) return false;
+  
+  // Must be an absolute path
+  if (!path.isAbsolute(filePath)) return false;
+  
+  return true;
+}
+
+/**
+ * Get audio duration using ffprobe.
+ * @param {string} filePath - Path to audio file
+ * @returns {Promise<number>} Duration in milliseconds
+ */
+export async function getAudioDuration(filePath) {
+  // Validate file path to prevent command injection
+  if (!isValidFilePath(filePath)) {
+    throw new Error('Invalid file path for audio duration detection');
+  }
+  
+  return new Promise((resolve, reject) => {
+    const proc = spawn('ffprobe', [
+      '-v', 'error',
+      '-show_entries', 'format=duration',
+      '-of', 'default=noprint_wrappers=1:nokey=1',
+      filePath
+    ]);
+    
+    let output = '';
+    let errorOutput = '';
+    
+    proc.stdout.on('data', (data) => { output += data; });
+    proc.stderr.on('data', (data) => { errorOutput += data; });
+    
+    // Add timeout protection (10 seconds)
+    const timeout = setTimeout(() => {
+      proc.kill();
+      reject(new Error('ffprobe duration detection timed out'));
+    }, 10000);
+    
+    proc.on('close', (code) => {
+      clearTimeout(timeout);
+      if (code === 0) {
+        const duration = parseFloat(output);
+        if (isNaN(duration)) {
+          reject(new Error(`Invalid duration output: ${output}`));
+        } else {
+          resolve(duration * 1000); // Convert to ms
+        }
+      } else {
+        reject(new Error(`ffprobe failed with code ${code}: ${errorOutput}`));
+      }
+    });
+    
+    proc.on('error', (err) => {
+      clearTimeout(timeout);
+      reject(new Error(`ffprobe process error: ${err.message}`));
+    });
+  });
+}
+
+/**
+ * Extract a chunk from audio file using ffmpeg.
+ * @param {string} inputPath - Input audio file path
+ * @param {string} outputPath - Output audio file path
+ * @param {number} startMs - Start time in milliseconds
+ * @param {number} endMs - End time in milliseconds
+ * @returns {Promise<void>}
+ */
+async function extractAudioChunk(inputPath, outputPath, startMs, endMs) {
+  // Validate file paths to prevent command injection
+  if (!isValidFilePath(inputPath)) {
+    throw new Error('Invalid input file path for audio chunk extraction');
+  }
+  if (!isValidFilePath(outputPath)) {
+    throw new Error('Invalid output file path for audio chunk extraction');
+  }
+  
+  // Validate time parameters
+  if (typeof startMs !== 'number' || startMs < 0) {
+    throw new Error('Invalid start time for audio chunk extraction');
+  }
+  if (typeof endMs !== 'number' || endMs < startMs) {
+    throw new Error('Invalid end time for audio chunk extraction');
+  }
+  
+  return new Promise((resolve, reject) => {
+    const startSec = startMs / 1000;
+    const durationSec = (endMs - startMs) / 1000;
+    
+    const proc = spawn('ffmpeg', [
+      '-y',
+      '-i', inputPath,
+      '-ss', startSec.toString(),
+      '-t', durationSec.toString(),
+      '-ac', '1',
+      '-ar', '16000',
+      outputPath
+    ]);
+    
+    let errorOutput = '';
+    proc.stderr.on('data', (data) => { errorOutput += data; });
+    
+    // Add timeout protection (60 seconds for chunk extraction)
+    const timeout = setTimeout(() => {
+      proc.kill();
+      reject(new Error('ffmpeg chunk extraction timed out'));
+    }, 60000);
+    
+    proc.on('close', (code) => {
+      clearTimeout(timeout);
+      if (code === 0) {
+        resolve();
+      } else {
+        // Log full stderr for debugging
+        if (errorOutput.length > 500) {
+          console.error(JSON.stringify({
+            level: 'debug',
+            msg: 'ffmpeg_full_stderr',
+            stderr: errorOutput
+          }));
+        }
+        reject(new Error(`ffmpeg chunk extraction failed with code ${code}: ${errorOutput.slice(-500)}`));
+      }
+    });
+    
+    proc.on('error', (err) => {
+      clearTimeout(timeout);
+      reject(new Error(`ffmpeg process error: ${err.message}`));
+    });
+  });
 }
 
 /**
@@ -109,7 +288,7 @@ export async function transcribeLongAudio(audioBuffer, mimeType, transcribeFunc,
   
   try {
     // Split audio into chunks
-    const chunks = await splitAudioIntoChunksStub(audioBuffer, mimeType, {
+    const chunks = await splitAudioIntoChunks(audioBuffer, mimeType, {
       chunkDuration: CHUNK_DURATION_MS,
       overlap: OVERLAP_MS,
       maxChunks: MAX_CHUNKS
@@ -165,15 +344,13 @@ export async function transcribeLongAudio(audioBuffer, mimeType, transcribeFunc,
     
   } catch (error) {
     // If chunking fails, fall back to direct transcription
-    if (error.message === 'Audio splitting not yet implemented - requires ffmpeg integration') {
-      console.log(JSON.stringify({
-        level: 'info',
-        msg: 'audio_chunking_not_available',
-        reqId
-      }));
-      const result = await transcribeFunc();
-      return { text: result.text, chunked: false, numChunks: 1 };
-    }
-    throw error;
+    console.log(JSON.stringify({
+      level: 'warn',
+      msg: 'audio_chunking_failed',
+      reqId,
+      error: error?.message || String(error)
+    }));
+    const result = await transcribeFunc();
+    return { text: result.text, chunked: false, numChunks: 1 };
   }
 }

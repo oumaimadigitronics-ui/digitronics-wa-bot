@@ -23,6 +23,12 @@ export function getAudioErrorMessage(errorType, lang = 'dz') {
       fr: "Message trop court, enregistrez au moins 5 secondes 🎤",
       en: "Voice message too short, please record at least 5 seconds 🎤"
     },
+    audio_file_too_small: {
+      dz: "L-fichier audio machi s7i7, 3awed sifto 🎤",
+      ar: "ملف الصوت ماشي صحيح، عاود صيفطو 🎤",
+      fr: "Fichier audio corrompu, renvoyez-le 🎤",
+      en: "Audio file corrupted, please resend 🎤"
+    },
     audio_too_long: {
       dz: "L-voice twil bzzaf (max 5 min), 9ssmo l messages sghar 🎤",
       ar: "الصوت طويل بزاف، قسمو لرسائل صغار 🎤",

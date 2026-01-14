@@ -238,6 +238,18 @@ import {
   hasCategoryKeyword as hasCategoryKeywordImpl,
 } from './project/src/services/query/index.js';
 
+import {
+  classifyAudioError,
+  getAudioErrorMessage,
+  transcribeWithRetry,
+  detectLanguageFromText,
+  getTranscriptionPrompt,
+  mapLangToWhisper,
+  transcribeLongAudio,
+  checkAudioQuality,
+  getAudioDuration,
+} from './project/src/services/audio/index.js';
+
 let toFileImpl = toFile;
 
 const app = express();
@@ -6947,7 +6959,6 @@ async function processIncomingMedia({ mediaInfo, mediaMeta, msgType, lang, key, 
   if (route.audioLikely && normalizedMedia) {
     let audioDl = null;
     let tmpDir = null;
-    let pipelineTmpDirs = { preprocess: null, chunk: null };
     try {
       const dir = fs.mkdtempSync(path.join(os.tmpdir(), "wanotifier-audio-"));
       tmpDir = dir;
@@ -7045,6 +7056,44 @@ async function processIncomingMedia({ mediaInfo, mediaMeta, msgType, lang, key, 
       }
       const finalStats = fs.statSync(inputPath);
       sizeBytes = finalStats.size || sizeBytes;
+      
+      // Read audio buffer for quality check
+      const audioBuffer = fs.readFileSync(inputPath);
+      
+      // Get audio duration using ffprobe for quality checks and metrics
+      let durationMs = null;
+      try {
+        durationMs = await getAudioDuration(inputPath);
+        console.log(JSON.stringify({
+          level: "info",
+          msg: "audio_duration_detected",
+          reqId,
+          durationMs,
+          durationSec: Math.round(durationMs / 1000)
+        }));
+      } catch (err) {
+        console.log(JSON.stringify({
+          level: "warn",
+          msg: "audio_duration_detection_failed",
+          reqId,
+          error: err?.message || String(err)
+        }));
+        // Continue without duration - quality check will skip duration-based validation
+      }
+      
+      // Perform quality pre-check with duration
+      const qualityCheck = checkAudioQuality(audioBuffer, durationMs, { reqId });
+      if (!qualityCheck.ok) {
+        const errorMsg = getAudioErrorMessage(qualityCheck.reason, lang);
+        console.log(JSON.stringify({
+          level: "warn",
+          msg: "audio_quality_check_failed",
+          reqId,
+          reason: qualityCheck.reason
+        }));
+        return { ...route, reply: errorMsg };
+      }
+      
       console.log(
         JSON.stringify({
           level: "info",
@@ -7055,52 +7104,85 @@ async function processIncomingMedia({ mediaInfo, mediaMeta, msgType, lang, key, 
           sizeBytes,
         })
       );
-      const transcribeOverride = buildPipelineTranscriber(reqId);
-
-      const pipeline = await processAudioPipeline({
-        filePath: inputPath,
-        mimeType: safeMime,
-        sizeBytes,
-        languageHint: normalizeLanguageHint(lang) || lang,
-        maxBytes: CFG.mediaMaxBytesAudio,
-        model: CFG.openaiTranscribeModel || "gpt-4o-mini-transcribe",
-        minScore: CFG.audioMinScore,
-        allowFfmpeg: true,
-        deps: { transcribe: transcribeOverride },
-      });
-      pipelineTmpDirs = { preprocess: pipeline.preprocessTmpDir, chunk: pipeline.chunkTmpDir };
-
-      const preview = pipeline.cleanTranscript.slice(0, 120);
+      
+      const transcribeStart = Date.now();
+      const whisperLang = mapLangToWhisper(lang);
+      
+      // Use transcribeWithRetry for automatic retry on transient errors
+      const transcriptionResult = await transcribeWithRetry(
+        async () => {
+          const text = await transcribeAudioFile(inputPath, safeMime, whisperLang);
+          return { text }; // Wrap string result in object
+        },
+        { reqId, lang }
+      );
+      
+      const userTextRaw = String(transcriptionResult?.text || "").trim();
+      const retryCount = transcriptionResult?.retryCount || 0;
+      
+      if (!userTextRaw) {
+        throw new Error("transcription_empty");
+      }
+      
+      // Detect language from transcribed text
+      const detectedLang = detectLanguageFromText(userTextRaw);
+      
+      // Log metrics
+      const processingTimeMs = Date.now() - transcribeStart;
+      console.log(
+        JSON.stringify({
+          level: "info",
+          msg: "audio_metrics",
+          reqId,
+          durationMs,
+          durationSec: durationMs ? Math.round(durationMs / 1000) : null,
+          sizeBytes,
+          detectedLang,
+          transcriptLength: userTextRaw.length,
+          retryCount,
+          chunked: false,
+          processingTimeMs,
+          downloadMs,
+        })
+      );
+      
+      const preview = userTextRaw.slice(0, 120);
       console.log(
         JSON.stringify({
           level: "info",
           msg: "audio_transcribed",
           reqId,
           textPreview: LOG_DEBUG ? preview : undefined,
-          sizeBytes: pipeline.sizeBytes,
+          sizeBytes,
           mimeType: safeMime,
-          durationSec: pipeline.durationSec,
-          chunksCount: pipeline.chunksCount,
-          modelUsed: pipeline.modelUsed,
-          transcriptChars: pipeline.transcriptChars,
-          transcriptQualityScore: pipeline.transcriptQualityScore,
-          latencyMs: { downloadMs, ...pipeline.timings },
+          detectedLang,
+          transcriptChars: userTextRaw.length,
         })
       );
 
-      if (!pipeline.cleanTranscript) throw new Error("transcription_empty");
-      if (isTranscriptLowQuality(pipeline)) throw new Error("transcription_low_quality");
-
-      const userTextRaw = String(pipeline.cleanTranscript || "");
-      return { ...route, userText: userTextRaw, sizeBytes: pipeline.sizeBytes, transcriptChars: userTextRaw.length, mimeType: safeMime };
+      return { ...route, userText: userTextRaw, sizeBytes, transcriptChars: userTextRaw.length, mimeType: safeMime };
     } catch (e) {
       console.error(JSON.stringify({ level: "error", msg: "audio_failed", reqId, error: (e && e.message) || String(e) }));
-      if (e && (e.message === "transcription_low_quality" || e.message === "transcription_empty")) {
+      
+      // Classify the error and get appropriate user message
+      const errorType = classifyAudioError(e);
+      const errorMessage = getAudioErrorMessage(errorType, lang);
+      
+      // Handle empty transcription specially
+      if (e && e.message === "transcription_empty") {
         const reply = ensureNoQuestion(voiceNotUnderstoodTemplate());
         return { ...route, reply };
       }
+      
+      // Use specific error message for known error types
+      if (errorType !== 'transcription_failed') {
+        return { ...route, reply: ensureNoQuestion(errorMessage) };
+      }
+      
+      // For generic transcription failures, add agent fallback guidance
       const parts = [];
       if (shouldSendAudioReminder(key)) parts.push(audioReminderText(lang));
+      parts.push(errorMessage);
       parts.push(fallbackWithAgent(lang));
       const reply = ensureNoQuestion(parts.join("\n"));
       return { ...route, reply };
@@ -7110,12 +7192,6 @@ async function processIncomingMedia({ mediaInfo, mediaMeta, msgType, lang, key, 
       } catch {}
       try {
         if (tmpDir) fs.rmSync(tmpDir, { recursive: true, force: true });
-      } catch {}
-      try {
-        if (pipelineTmpDirs.preprocess) fs.rmSync(pipelineTmpDirs.preprocess, { recursive: true, force: true });
-      } catch {}
-      try {
-        if (pipelineTmpDirs.chunk) fs.rmSync(pipelineTmpDirs.chunk, { recursive: true, force: true });
       } catch {}
     }
   }
