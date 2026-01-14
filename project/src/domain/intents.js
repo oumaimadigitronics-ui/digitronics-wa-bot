@@ -127,7 +127,7 @@ export function isProductAdviceIntent(text) {
   if (!s) return false;
   const normalized = s.replace(/['']/g, " ").replace(/\s+/g, " ").trim();
 
-  const priceTokens = ["price", "prix", "ثمن", "سعر"];
+  const priceTokens = ["price", "prix", "ثمن", "سعر", "تمن", "بشحال", "شحال"];
   const advicePhrases = [
     "difference",
     "différence",
@@ -187,6 +187,15 @@ export function isContactIntent(text) {
   if (isOrderStatusIntent(text)) return false;
 
   const raw = String(text || "");
+  
+  // Skip if this looks like a product query with TV size indicators and numbers
+  // نمرة/رقم followed by 2-digit numbers suggests TV size, not phone number
+  const hasTvSizeWithNumber = /(?:نمرة|النمرة)\s*\d{2,3}(?!\d)/i.test(raw);
+  const hasTvKeywordWithNumber = /(تلفاز|تلفزيون|بوصة|pouce|inch)\s*\d|\d\s*(تلفاز|تلفزيون|بوصة|pouce|inch)/i.test(raw);
+  const hasApplianceKeyword = /(?:frigo|ثلاجة|refriger|machine à laver|غسالة|طياب)/i.test(raw);
+  
+  if (hasTvSizeWithNumber || hasTvKeywordWithNumber || hasApplianceKeyword) return false;
+  
   const s = normalizeIntentText(raw);
   if (!raw && !s) return false;
 

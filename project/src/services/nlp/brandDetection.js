@@ -11,14 +11,14 @@ const BRAND_ALIASES = Object.freeze([
   { brand: "SAMSUNG", tokens: ["سامسونج", "سيمسونج", "سانسونج", "سامسونق", "سامسنج", "سمسونج"] },
   { brand: "TCL", tokens: ["تي سي ال", "تي سي إل", "تكل", "تيسيال", "تساك", "تي ساك"] },
   { brand: "DAIKO", tokens: ["دايكو", "دايكو", "ديكو"] },
-  { brand: "HAIER", tokens: ["هاير", "هايير", "حاير"] },
+  { brand: "HAIER", tokens: ["هاير", "هايير", "حاير", "هير"] },
   { brand: "LG", tokens: ["ال جي", "الجي", "ألجي", "ال جى"] },
   { brand: "HISENSE", tokens: ["هايسنس", "هاي سينس", "هايسينس", "هيسنس", "حايسنس"] },
   { brand: "XIAOMI", tokens: ["xiaomi", "mi", "شاومي", "شومي", "شياومي", "زياومي"] },
   
   // NEW brands from website
   { brand: "VISIO", tokens: ["فيزيو", "فيزيون", "فيجيو", "فيجن", "فيزن", "فزيو"] },
-  { brand: "ECHOLINK", tokens: ["إيكولينك", "ايكولينك", "ايكو لينك", "اكولينك"] },
+  { brand: "ECHOLINK", tokens: ["إيكولينك", "ايكولينك", "ايكو لينك", "اكولينك", "إكولينك"] },
   { brand: "ELEXIA", tokens: ["إليكسيا", "اليكسيا", "الكسيا"] },
   { brand: "REVOLUTION", tokens: ["ريفوليوشن", "ريفلوشن", "ريفولوشن"] },
   { brand: "TIVOLI", tokens: ["تيفولي", "تيفلي", "تفولي"] },
@@ -26,7 +26,7 @@ const BRAND_ALIASES = Object.freeze([
   { brand: "BEKO", tokens: ["بيكو", "بيكو", "بكو"] },
   { brand: "WHIRLPOOL", tokens: ["ويرلبول", "ويربول", "ورلبول"] },
   { brand: "BOSCH", tokens: ["بوش", "بوتش"] },
-  { brand: "MORSAT", tokens: ["مورسات", "مرسات"] },
+  { brand: "MORSAT", tokens: ["مورسات", "مرسات", "مورصات"] },
 ]);
 
 /**
