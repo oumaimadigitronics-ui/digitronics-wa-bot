@@ -43,6 +43,7 @@ export {
   VOICE_NOT_UNDERSTOOD_TEMPLATE,
   fallbackWithAgent,
   audioReminderText,
+  audioAnswerNote,
   voiceNotUnderstoodTemplate,
   shouldSendAudioReminder,
 } from './ui.js';

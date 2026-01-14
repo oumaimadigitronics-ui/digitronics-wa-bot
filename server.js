@@ -213,6 +213,7 @@ import {
   voiceNotUnderstoodTemplate as voiceNotUnderstoodTemplateImpl,
   fallbackWithAgent as fallbackWithAgentImpl,
   audioReminderText as audioReminderTextImpl,
+  audioAnswerNote as audioAnswerNoteImpl,
   shouldSendAudioReminder as shouldSendAudioReminderImpl,
 } from './project/src/services/media/index.js';
 
@@ -1017,6 +1018,8 @@ function fallbackWithAgent(lang) {
 }
 
 const audioReminderText = (lang) => audioReminderTextImpl(lang);
+
+const audioAnswerNote = (lang) => audioAnswerNoteImpl(lang);
 
 const voiceNotUnderstoodTemplate = () => voiceNotUnderstoodTemplateImpl();
 
@@ -2882,6 +2885,7 @@ function buildPipelineTranscriber(reqId) {
 }
 
 function isPrivateHost(hostname) {
+  const h = String(hostname || "").trim().toLowerCase();
   if (h === "localhost") return true;
   if (h === "::1" || h === "0:0:0:0:0:0:0:1") return true;
   if (/^127\./.test(h)) return true;
@@ -2945,7 +2949,7 @@ function setToFileForTest(fn) {
 }
 
 function setFeatureAudioSniffMimeForTest(enabled) {
-  return handleVisionMedia(mediaInput, lang, key);
+  CFG.featureAudioSniffMime = Boolean(enabled);
 }
 
 
