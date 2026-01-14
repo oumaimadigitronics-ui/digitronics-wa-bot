@@ -5,6 +5,7 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
+    "pretest": "npm install",
     "test": "NODE_ENV=test node --test tests/*.test.js",
     "test:project": "NODE_ENV=test node --test project/test/*.test.js",
     "test:all": "NODE_ENV=test node --test tests/*.test.js project/test/*.test.js"
