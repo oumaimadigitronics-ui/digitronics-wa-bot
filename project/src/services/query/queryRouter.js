@@ -171,6 +171,14 @@ export function isTvContext(text) {
     "غوغل",
     "كيو ال اي دي",
     "اوليد",
+    "wifi",
+    "wi-fi",
+    "connect",
+    "connecte",
+    "connectée",
+    "internet",
+    "smarat",
+    "smat",
   ];
   for (let i = 0; i < tokens.length; i += 1) {
     if (includesToken(s, tokens[i])) return true;
