@@ -114,11 +114,34 @@ async function splitAudioIntoChunks(audioBuffer, mimeType, opts = {}) {
 }
 
 /**
+ * Validate file path to prevent command injection.
+ * @param {string} filePath - File path to validate
+ * @returns {boolean} True if path is safe
+ */
+function isValidFilePath(filePath) {
+  if (!filePath || typeof filePath !== 'string') return false;
+  
+  // Check for command injection attempts
+  const dangerousChars = /[;&|`$()<>]/;
+  if (dangerousChars.test(filePath)) return false;
+  
+  // Must be an absolute path
+  if (!path.isAbsolute(filePath)) return false;
+  
+  return true;
+}
+
+/**
  * Get audio duration using ffprobe.
  * @param {string} filePath - Path to audio file
  * @returns {Promise<number>} Duration in milliseconds
  */
 export async function getAudioDuration(filePath) {
+  // Validate file path to prevent command injection
+  if (!isValidFilePath(filePath)) {
+    throw new Error('Invalid file path for audio duration detection');
+  }
+  
   return new Promise((resolve, reject) => {
     const proc = spawn('ffprobe', [
       '-v', 'error',
@@ -128,13 +151,34 @@ export async function getAudioDuration(filePath) {
     ]);
     
     let output = '';
+    let errorOutput = '';
+    
     proc.stdout.on('data', (data) => { output += data; });
+    proc.stderr.on('data', (data) => { errorOutput += data; });
+    
+    // Add timeout protection (10 seconds)
+    const timeout = setTimeout(() => {
+      proc.kill();
+      reject(new Error('ffprobe duration detection timed out'));
+    }, 10000);
+    
     proc.on('close', (code) => {
+      clearTimeout(timeout);
       if (code === 0) {
-        resolve(parseFloat(output) * 1000); // Convert to ms
+        const duration = parseFloat(output);
+        if (isNaN(duration)) {
+          reject(new Error(`Invalid duration output: ${output}`));
+        } else {
+          resolve(duration * 1000); // Convert to ms
+        }
       } else {
-        reject(new Error('ffprobe failed'));
+        reject(new Error(`ffprobe failed with code ${code}: ${errorOutput}`));
       }
+    });
+    
+    proc.on('error', (err) => {
+      clearTimeout(timeout);
+      reject(new Error(`ffprobe process error: ${err.message}`));
     });
   });
 }
@@ -148,6 +192,22 @@ export async function getAudioDuration(filePath) {
  * @returns {Promise<void>}
  */
 async function extractAudioChunk(inputPath, outputPath, startMs, endMs) {
+  // Validate file paths to prevent command injection
+  if (!isValidFilePath(inputPath)) {
+    throw new Error('Invalid input file path for audio chunk extraction');
+  }
+  if (!isValidFilePath(outputPath)) {
+    throw new Error('Invalid output file path for audio chunk extraction');
+  }
+  
+  // Validate time parameters
+  if (typeof startMs !== 'number' || startMs < 0) {
+    throw new Error('Invalid start time for audio chunk extraction');
+  }
+  if (typeof endMs !== 'number' || endMs < startMs) {
+    throw new Error('Invalid end time for audio chunk extraction');
+  }
+  
   return new Promise((resolve, reject) => {
     const startSec = startMs / 1000;
     const durationSec = (endMs - startMs) / 1000;
@@ -162,9 +222,27 @@ async function extractAudioChunk(inputPath, outputPath, startMs, endMs) {
       outputPath
     ]);
     
+    let errorOutput = '';
+    proc.stderr.on('data', (data) => { errorOutput += data; });
+    
+    // Add timeout protection (60 seconds for chunk extraction)
+    const timeout = setTimeout(() => {
+      proc.kill();
+      reject(new Error('ffmpeg chunk extraction timed out'));
+    }, 60000);
+    
     proc.on('close', (code) => {
-      if (code === 0) resolve();
-      else reject(new Error(`ffmpeg chunk extraction failed with code ${code}`));
+      clearTimeout(timeout);
+      if (code === 0) {
+        resolve();
+      } else {
+        reject(new Error(`ffmpeg chunk extraction failed with code ${code}: ${errorOutput.slice(-500)}`));
+      }
+    });
+    
+    proc.on('error', (err) => {
+      clearTimeout(timeout);
+      reject(new Error(`ffmpeg process error: ${err.message}`));
     });
   });
 }
