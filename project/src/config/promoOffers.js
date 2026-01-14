@@ -22,16 +22,16 @@ export const OFFERS_FALLBACK_MESSAGE = `🚨🔥 *PROMO FLASH اليوم* 🔥�
 🚚 *توصيل مجاني* + 🎁 *هدية مع كل TV*
 
 ✅ *Streamsat Smart Android TV 32" (32-ST)*
-💥 1099 DH
+💥 *1099 فقط!* ✅
 
 2️⃣ *Echolink Smart Tv 32 Android Qled*
 💥 *1149 DH فقط!* ✅
 
 ✅ *Visio Led Tv 32″ Hd-32VB23E*
-💥 899 DH
+💥 *899 فقط!* ✅
 
 5️⃣ *TCL GoogleTV QLED 32″ Full HD 32S5K*
-💥 *1499 DH فقط!* ✅
+💥 *1449 DH فقط!* ✅
 
 🛒 *Commande / طلب:* digitronics.ma`;
 
