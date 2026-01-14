@@ -1,5 +1,4 @@
 import "dotenv/config";
-import express from "express";
 import crypto from "crypto";
 import dns from "dns/promises";
 import { execFile, spawn } from "child_process";
@@ -11,6 +10,7 @@ import assert from "assert";
 import { fileURLToPath } from "url";
 import { getFetch, getOpenAI, getNowMs, setDepsForTests } from "./src/deps.js";
 import { toFile } from "openai/uploads";
+import { initializeServerContext } from "./src/server/bootstrap.js";
 
 // Import modular code from project/src/
 import {
@@ -278,202 +278,45 @@ import {
 
 let toFileImpl = toFile;
 
-const app = express();
-app.set("trust proxy", true);
-
-process.on("unhandledRejection", (reason) => {
-  console.error("Unhandled promise rejection:", reason);
-});
-
-process.on("uncaughtException", (err) => {
-  console.error("Uncaught exception:", err);
-});
-
-// --- META (Facebook Messenger) ENV ---
-const {
-  META_VERIFY_TOKEN = "",
-  META_PAGE_ACCESS_TOKEN = "",
-  META_APP_SECRET = "",
-  META_GRAPH_VERSION = "v21.0",
-} = process.env;
-
-const IS_TEST_ENV = String(process.env.NODE_ENV || "").toLowerCase() === "test";
-const LOG_DEBUG = String(process.env.LOG_DEBUG || "0") === "1";
-const FEATURE_STRICT_CATEGORY_SWITCH = String(process.env.FEATURE_STRICT_CATEGORY_SWITCH || "0") === "1";
-const FEATURE_OFFER_TAIL_COMPACT = String(process.env.FEATURE_OFFER_TAIL_COMPACT || "0") === "1";
-const FEATURE_STRICT_STOCK_FILTER = String(process.env.FEATURE_STRICT_STOCK_FILTER || "0") === "1";
-const FEATURE_SHOW_SKU_IN_OFFERS = String(process.env.FEATURE_SHOW_SKU_IN_OFFERS || "0") === "1";
-const FEATURE_LEGACY_OFFER_LINE = String(process.env.FEATURE_LEGACY_OFFER_LINE || "0") === "1";
-const FEATURE_LEGACY_OFFER_DISPLAY_NAME = String(process.env.FEATURE_LEGACY_OFFER_DISPLAY_NAME || "0") === "1";
-const FEATURE_OFFER_ITEM_EMOJI_FORMAT = String(process.env.FEATURE_OFFER_ITEM_EMOJI_FORMAT || "0") === "1";
-const FEATURE_OFFERS_BOX_HEADER = String(process.env.FEATURE_OFFERS_BOX_HEADER || (IS_TEST_ENV ? "1" : "0")) === "1";
-const FEATURE_WA_HARD_CAP_4096 = String(process.env.FEATURE_WA_HARD_CAP_4096 || "0") === "1";
-const FEATURE_ALLOW_MAPS_URLS = String(process.env.FEATURE_ALLOW_MAPS_URLS || "0") === "1";
-const FEATURE_CATALOG_OVERVIEW_INTENT = String(process.env.FEATURE_CATALOG_OVERVIEW_INTENT || "0") === "1";
-const FEATURE_ASSUME_TV_ON_BRAND_ONLY = String(process.env.FEATURE_ASSUME_TV_ON_BRAND_ONLY || "1") === "1";
 const WANOTIFIER_FOLLOWUP_FIELD = "followups";
-const IS_TEST = IS_TEST_ENV;
 const ENTRY_FILE = fileURLToPath(import.meta.url);
 const __filename = ENTRY_FILE;
-const RUN_SELF_TESTS = String(process.env.RUN_SELF_TESTS || process.env.SELF_TEST || "0") === "1";
-const REQUIRE_ENV = process.argv[1] === ENTRY_FILE && !RUN_SELF_TESTS;
-const MAX_AUDIO_BYTES = Number(process.env.MEDIA_MAX_BYTES_AUDIO || 12000000) || 12000000;
 let systemPromptLoaded = false;
 let systemPromptValue = "";
-const DEFAULT_SYSTEM_PROMPT = "You are DigiBot for Digitronics.ma.";
 let wcFetchJsonOverride = null;
-
-function debugLog(event, payload) {
-  if (!LOG_DEBUG) return;
-  const base = typeof payload === "object" && payload !== null ? payload : { detail: payload };
-  try {
-    console.log(JSON.stringify({ level: "debug", event, ...base }));
-  } catch {
-    // Fallback to simple logging if JSON serialization fails
-    console.log("[DEBUG]", event, typeof base === "object" ? "[Object]" : base);
-  }
-}
-
-const logger = {
-  info(payload) {
-    try {
-      console.log(JSON.stringify({ level: "info", ...payload }));
-    } catch {
-      // Fallback to simple logging if JSON serialization fails
-      console.log("[INFO]", typeof payload === "object" ? "[Object]" : payload);
-    }
-  },
-  warn(payload) {
-    try {
-      console.warn(JSON.stringify({ level: "warn", ...payload }));
-    } catch {
-      // Fallback to simple logging if JSON serialization fails
-      console.warn("[WARN]", typeof payload === "object" ? "[Object]" : payload);
-    }
-  },
-};
-
-const DEFAULT_ORDER_FORM_URL =
-  "https://docs.google.com/forms/d/e/1FAIpQLScmDNagYSpUPfsIT2s2t35KH7U1OWSNkUCIWmcJJm1R_aITQQ/viewform?usp=header";
-
 const {
-  PORT = "3000",
-
+  app,
+  logger,
+  debugLog,
+  META_VERIFY_TOKEN,
+  META_PAGE_ACCESS_TOKEN,
+  META_APP_SECRET,
+  META_GRAPH_VERSION,
+  CFG,
+  FOCUS,
+  DEFAULT_SYSTEM_PROMPT,
+  FEATURE_ALLOW_MAPS_URLS,
+  FEATURE_ASSUME_TV_ON_BRAND_ONLY,
+  FEATURE_CATALOG_OVERVIEW_INTENT,
+  FEATURE_LEGACY_OFFER_DISPLAY_NAME,
+  FEATURE_LEGACY_OFFER_LINE,
+  FEATURE_OFFER_ITEM_EMOJI_FORMAT,
+  FEATURE_OFFERS_BOX_HEADER,
+  FEATURE_OFFER_TAIL_COMPACT,
+  FEATURE_SHOW_SKU_IN_OFFERS,
+  FEATURE_STRICT_CATEGORY_SWITCH,
+  FEATURE_STRICT_STOCK_FILTER,
+  IS_TEST,
+  LOG_DEBUG,
+  OFFERS_REFRESH_TOKEN,
   OPENAI_API_KEY,
-  OPENAI_MODEL = "gpt-5.2",
-
-  OFFERS_REFRESH_MS = "300000",
-  OFFERS_REFRESH_TOKEN = "",
-
-  WC_BASE_URL = "",
-  WC_CONSUMER_KEY = "",
-  WC_CONSUMER_SECRET = "",
-  WC_PER_PAGE = "100",
-  WC_STATUS = "publish",
-
-  ORDER_FORM_URL = DEFAULT_ORDER_FORM_URL,
-
-  RATE_LIMIT_WINDOW_MS = "60000",
-  RATE_LIMIT_MAX = "25",
-
-  MEMORY_TTL_HOURS = "24",
-  MEMORY_MAX_MESSAGES = "12",
-  MEMORY_PERSIST = "0",
-  MEMORY_DIR = "./data",
-
-  FOCUS_BRAND = "",
-  FOCUS_MODE = "preferred",
-
-  MAX_WA_REPLY_CHARS = "6000",
-
-  WANOTIFIER_TOKEN = "",
-  WANOTIFIER_HMAC_SECRET = "",
-  WANOTIFIER_HMAC_HEADER = "x-signature",
-  WANOTIFIER_TS_HEADER = "x-timestamp",
-  WANOTIFIER_MAX_SKEW_SECONDS = "300",
-  WANOTIFIER_MEDIA_URL = "",
-
-  MEDIA_MODE = "auto",
-  MEDIA_FETCH_TIMEOUT_MS = "8000",
-  MEDIA_MAX_BYTES_IMAGE = "4000000",
-  MEDIA_MAX_BYTES_AUDIO = "12000000",
-  MEDIA_ALLOW_INSECURE_HTTP = "0",
-
-  OPENAI_VISION_MODEL = "",
-  OPENAI_TRANSCRIBE_MODEL = "gpt-4o-mini-transcribe",
-  AUDIO_MIN_SCORE = "0.45",
-  FEATURE_AUDIO_SNIFF_MIME = "0",
-  FEATURE_AUDIO_CLEAN_MIME = "1",
-  FEATURE_GREETING_FOLLOWUP_OFFERS = "0",
-  FEATURE_GREETING_LANG_FROM_TEXT = "0",
-  FEATURE_GREETING_I18N = "0",
-  FEATURE_FORCE_AR_FR = "0",
-
-  SYSTEM_PROMPT = "",
-  SYSTEM_PROMPT_FILE = "",
-} = process.env;
-
-const configuredMaxReplyChars = Number(MAX_WA_REPLY_CHARS) || 6000;
-const maxReplyCharsConfigured = FEATURE_WA_HARD_CAP_4096
-  ? Math.min(configuredMaxReplyChars, 4096)
-  : configuredMaxReplyChars;
-
-if (REQUIRE_ENV && !OPENAI_API_KEY) {
-  console.error("Missing env var: OPENAI_API_KEY (OpenAI responses will fail until set).");
-}
-
-if (REQUIRE_ENV && (!WC_BASE_URL || !WC_CONSUMER_KEY || !WC_CONSUMER_SECRET)) {
-  console.error(
-    "Missing WooCommerce env vars: WC_BASE_URL, WC_CONSUMER_KEY, WC_CONSUMER_SECRET (offers sync will fail until set)."
-  );
-}
-
-const CFG = {
-  port: Number(process.env.PORT || PORT) || 3000,
-  refreshMs: Number(OFFERS_REFRESH_MS) || 300000,
-  rateWindowMs: Number(RATE_LIMIT_WINDOW_MS) || 60000,
-  rateMax: Number(RATE_LIMIT_MAX) || 25,
-  maxReplyChars: Math.max(200, maxReplyCharsConfigured),
-
-  memoryTtlMs: (Number(MEMORY_TTL_HOURS) || 24) * 60 * 60 * 1000,
-  memoryMaxMessages: Math.max(6, Number(MEMORY_MAX_MESSAGES) || 12),
-  memoryPersist: String(MEMORY_PERSIST || "0") === "1",
-  memoryDir: String(MEMORY_DIR || "./data"),
-
-  wanotifierToken: String(WANOTIFIER_TOKEN || "").trim(),
-  wanotifierHmacSecret: String(WANOTIFIER_HMAC_SECRET || "").trim(),
-  wanotifierHmacHeader: String(WANOTIFIER_HMAC_HEADER || "x-signature").toLowerCase(),
-  wanotifierTsHeader: String(WANOTIFIER_TS_HEADER || "x-timestamp").toLowerCase(),
-  wanotifierMaxSkewSec: Math.max(30, Number(WANOTIFIER_MAX_SKEW_SECONDS) || 300),
-  wanotifierMediaUrl: String(WANOTIFIER_MEDIA_URL || "").trim(),
-
-  mediaMode: String(MEDIA_MODE || "auto").toLowerCase(),
-  mediaFetchTimeoutMs: Math.max(1000, Number(MEDIA_FETCH_TIMEOUT_MS) || 8000),
-  mediaMaxBytesImage: Number(MEDIA_MAX_BYTES_IMAGE) || 4000000,
-  mediaMaxBytesAudio: Number(MEDIA_MAX_BYTES_AUDIO) || MAX_AUDIO_BYTES,
-  mediaAllowHttp: String(MEDIA_ALLOW_INSECURE_HTTP || "0") === "1",
-
-  openaiVisionModel: String(OPENAI_VISION_MODEL || "").trim(),
-  openaiTranscribeModel: String(OPENAI_TRANSCRIBE_MODEL || "gpt-4o-mini-transcribe").trim(),
-  audioMinScore: Math.max(0, Math.min(1, Number(AUDIO_MIN_SCORE) || 0.45)),
-  featureAudioSniffMime: String(FEATURE_AUDIO_SNIFF_MIME || "0") === "1",
-  featureAudioCleanMime: String(FEATURE_AUDIO_CLEAN_MIME || "1") === "1",
-  featureGreetingFollowupOffers: String(FEATURE_GREETING_FOLLOWUP_OFFERS || "0") === "1",
-  featureGreetingLangFromText: String(FEATURE_GREETING_LANG_FROM_TEXT || "0") === "1",
-  featureGreetingI18n: String(FEATURE_GREETING_I18N || "0") === "1",
-  featureForceArFr: String(FEATURE_FORCE_AR_FR || "0") === "1",
-
-  wcBase: String(WC_BASE_URL || "").replace(/\/$/g, ""),
-  wcKey: String(WC_CONSUMER_KEY || ""),
-  wcSecret: String(WC_CONSUMER_SECRET || ""),
-  wcPerPage: Math.max(10, Math.min(100, Number(WC_PER_PAGE) || 100)),
-  wcStatus: String(WC_STATUS || "publish"),
-};
-
-const FOCUS = {
-  brand: String(FOCUS_BRAND || "").trim().toUpperCase(),
-  mode: String(FOCUS_MODE || "preferred").trim().toLowerCase(),
-};
+  OPENAI_MODEL,
+  ORDER_FORM_URL,
+  REQUIRE_ENV,
+  RUN_SELF_TESTS,
+  SYSTEM_PROMPT,
+  SYSTEM_PROMPT_FILE,
+} = initializeServerContext({ env: process.env, argv: process.argv, entryFile: ENTRY_FILE });
 
 // Initialize offers service modules with configuration
 // (This needs to be after CFG, logger, debugLog are defined but before wrapper functions)
