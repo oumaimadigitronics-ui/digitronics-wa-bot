@@ -34,6 +34,7 @@ export async function deriveMediaText(mediaInput, lang, reqId, deps) {
     ensureNoQuestion,
     stripUrlQueriesInText,
     CFG,
+    processIncomingMediaForAudio,
   } = deps;
 
   const normalized = normalizeMedia(mediaInput);
@@ -45,6 +46,57 @@ export async function deriveMediaText(mediaInput, lang, reqId, deps) {
   if (baseKind === "audio") {
     // Audio processing is now enabled - will be handled by the audio transcription pipeline
     console.log(JSON.stringify({ level: "info", msg: "audio_processing_enabled", reqId }));
+    
+    // Route to audio transcription pipeline if available
+    if (processIncomingMediaForAudio) {
+      try {
+        const audioResult = await processIncomingMediaForAudio({
+          mediaInfo: normalized,
+          mediaMeta: normalized,
+          msgType: "audio",
+          lang,
+          key: reqId, // Use reqId as key for audio-only processing
+          reqId,
+        });
+        
+        // If transcription succeeded, return the text
+        if (audioResult && audioResult.userText) {
+          return { 
+            ok: true, 
+            path: "audio", 
+            kind: "audio", 
+            text: audioResult.userText,
+            sizeBytes: audioResult.sizeBytes,
+            transcriptChars: audioResult.transcriptChars,
+            mimeType: audioResult.mimeType,
+            normalized 
+          };
+        }
+        
+        // If transcription failed but has a reply (error message), return it
+        if (audioResult && audioResult.reply) {
+          return { 
+            ok: false, 
+            path: "audio", 
+            kind: "audio",
+            error: new Error("transcription_failed"),
+            reply: audioResult.reply,
+            normalized 
+          };
+        }
+      } catch (err) {
+        console.error(JSON.stringify({ level: "error", msg: "audio_transcription_failed", reqId, error: (err && err.message) || String(err) }));
+        return { 
+          ok: false, 
+          path: "audio", 
+          kind: "audio",
+          error: err,
+          normalized 
+        };
+      }
+    }
+    
+    // Fallback if no audio processor available
     return { ok: true, path: "audio", kind: "audio", normalized };
   }
 

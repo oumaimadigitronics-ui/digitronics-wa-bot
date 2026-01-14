@@ -248,6 +248,31 @@ import {
   transcribeLongAudio,
   checkAudioQuality,
   getAudioDuration,
+  isAudioMime as isAudioMimeImpl,
+  cleanMimeType as cleanMimeTypeImpl,
+  sniffAudioMime as sniffAudioMimeImpl,
+  extFromAudioMime as extFromAudioMimeImpl,
+  inferMimeFromPath as inferMimeFromPathImpl,
+  isAudioMeta as isAudioMetaImpl,
+  mimeFromProbe as mimeFromProbeImpl,
+  sanitizeLogSnippet as sanitizeLogSnippetImpl,
+  readAudioHeader as readAudioHeaderImpl,
+  isInvalidAudioPayload as isInvalidAudioPayloadImpl,
+  validateDownloadedAudio as validateDownloadedAudioImpl,
+  execFilePromise as execFilePromiseImpl,
+  commandExists as commandExistsImpl,
+  shouldConvertAudioToWav as shouldConvertAudioToWavImpl,
+  shouldConvertAudioToMp3 as shouldConvertAudioToMp3Impl,
+  convertAudioToWav as convertAudioToWavImpl,
+  convertAudioToMp3 as convertAudioToMp3Impl,
+  probeAudioInfo as probeAudioInfoImpl,
+  resolveAudioMime as resolveAudioMimeImpl,
+  ensureAudioFileExtMatchesMime as ensureAudioFileExtMatchesMimeImpl,
+  downloadToTemp as downloadToTempImpl,
+  downloadAudioBuffer as downloadAudioBufferImpl,
+  transcribeAudioOpenAI as transcribeAudioOpenAIImpl,
+  transcribeAudioFile as transcribeAudioFileImpl,
+  buildPipelineTranscriber as buildPipelineTranscriberImpl,
 } from './project/src/services/audio/index.js';
 
 let toFileImpl = toFile;
@@ -984,6 +1009,7 @@ async function deriveMediaText(mediaInput, lang, reqId) {
     ensureNoQuestion,
     stripUrlQueriesInText,
     CFG,
+    processIncomingMediaForAudio: processIncomingMedia,
   });
 }
 
