@@ -1,7 +1,7 @@
 # Intent Detection Conflicts - Fix Summary
 
 ## Overview
-Fixed 10 conflicts in the intent detection system where different intents were triggering incorrectly due to overlapping keywords, causing wrong responses to customers.
+Fixed 9 conflicts in the intent detection system where different intents were triggering incorrectly due to overlapping keywords, causing wrong responses to customers.
 
 ## Files Modified
 

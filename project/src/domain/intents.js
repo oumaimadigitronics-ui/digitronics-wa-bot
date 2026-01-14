@@ -16,6 +16,9 @@ import {
   arabicIndicToAsciiDigits
 } from '../lib/textUtils.js';
 
+// Compiled regex patterns for performance
+const MENU_SELECTION_PATTERN = /^((ok|oui|yes|واخا|نعم)\s*\d+|\d+\s*(ok|oui|yes|واخا|نعم))$/i;
+
 /**
  * Helper function to extract order number from text
  * @param {string} text - Input text
@@ -1051,9 +1054,7 @@ export function isAffirmationIntent(text) {
 
   // Exclude menu selections (Conflict 7)
   // Check if it's a menu selection (ok/oui + number or number + ok/oui)
-  const menuSelectionTokens = '(ok|oui|yes|واخا|نعم)';
-  const menuSelectionPattern = new RegExp(`^(${menuSelectionTokens}\\s*\\d+|\\d+\\s*${menuSelectionTokens})$`, 'i');
-  if (menuSelectionPattern.test(raw.trim())) return false;
+  if (MENU_SELECTION_PATTERN.test(raw.trim())) return false;
 
   // Skip if it's a more specific intent
   if (isBuyIntent(raw)) return false;
