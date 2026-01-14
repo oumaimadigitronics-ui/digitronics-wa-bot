@@ -4,7 +4,7 @@
  */
 
 // Language-specific transcription prompts for better accuracy
-const DARIJA_PROMPT = `Moroccan Darija Arabic transcription. Common words: salam, labas, kifash, bghit, chhal, 3afak, wakha, mezyan, daba, hadi, dyal, kayn, mashi, walo, bezzaf, chwiya, telfaza, ghasala,ثلاجة, تلفازة. Mix of Arabic, French: prix, combien, disponible, livraison. Numbers: wa7ed, jouj, tlata, rb3a, khmsa. Brand names: TCL, Samsung, LG, Haier, Hisense, Daiko, Xiaomi, Candy, Beko, Sony, Philips, Whirlpool, Bosch. Arabic brands: تي سي ال، سامسونج، ال جي، هايسنس، هاير. TV sizes: 32, 43, 50, 55, 65, 75 pouces, pouce, بوصة.`;
+const DARIJA_PROMPT = `Moroccan Darija Arabic transcription. Common words: salam, labas, kifash, bghit, chhal, 3afak, wakha, mezyan, daba, hadi, dyal, kayn, mashi, walo, bezzaf, chwiya, telfaza, ghasala, ثلاجة, تلفازة. Mix of Arabic, French: prix, combien, disponible, livraison. Numbers: wa7ed, jouj, tlata, rb3a, khmsa. Brand names: TCL, Samsung, LG, Haier, Hisense, Daiko, Xiaomi, Candy, Beko, Sony, Philips, Whirlpool, Bosch. Arabic brands: تي سي ال، سامسونج، ال جي، هايسنس، هاير. TV sizes: 32, 43, 50, 55, 65, 75 pouces, pouce, بوصة.`;
 
 const FRENCH_PROMPT = `French transcription for Moroccan customer service. Common terms: télévision, machine à laver, réfrigérateur, climatiseur, prix, disponible, livraison, garantie, promotion. Brand names: TCL, Samsung, LG, Haier, Hisense, Daiko, Xiaomi, Candy, Beko, Sony, Philips, Whirlpool, Bosch. TV sizes: 32, 43, 50, 55, 65, 75 pouces.`;
 
