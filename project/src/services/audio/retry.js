@@ -56,8 +56,8 @@ export async function transcribeWithRetry(transcribeFunc, opts = {}) {
       // Call the transcription function
       const result = await transcribeFunc();
       
-      // Check if result is valid
-      if (result && result.text) {
+      // Check if result is valid (has text content that's not empty or whitespace)
+      if (result && result.text && result.text.trim()) {
         if (attempt > 0) {
           console.log(JSON.stringify({
             level: 'info',
@@ -70,7 +70,10 @@ export async function transcribeWithRetry(transcribeFunc, opts = {}) {
       }
       
       // Empty result - treat as error with descriptive message
-      throw new Error('Audio transcription returned no text content');
+      const emptyType = !result ? 'null result' : 
+                        !result.text ? 'missing text property' : 
+                        'empty or whitespace-only text';
+      throw new Error(`Audio transcription returned ${emptyType}`);
       
     } catch (error) {
       lastError = error;

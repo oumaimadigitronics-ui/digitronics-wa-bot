@@ -58,9 +58,8 @@ export function combineChunkTranscripts(transcripts) {
 }
 
 /**
- * Note: Audio splitting functionality is not implemented in this stub.
- * This would require ffmpeg or similar audio processing tool to split audio files.
- * For now, we provide the structure for future implementation.
+ * NOTE: Audio splitting functionality requires ffmpeg integration.
+ * This is a placeholder that will be implemented when ffmpeg is available.
  * 
  * Split audio buffer into chunks for transcription.
  * @param {Buffer} audioBuffer - Audio file buffer
@@ -70,10 +69,11 @@ export function combineChunkTranscripts(transcripts) {
  * @param {number} opts.overlap - Overlap between chunks in ms
  * @param {number} opts.maxChunks - Maximum number of chunks
  * @returns {Promise<Array<Object>>} Array of chunk objects with buffer, startMs, endMs
+ * @throws {Error} Not yet implemented - requires ffmpeg
  */
-async function splitAudioIntoChunks(audioBuffer, mimeType, opts = {}) {
-  // This is a placeholder. Real implementation would use ffmpeg or similar
-  // to split audio files into chunks.
+async function splitAudioIntoChunksStub(audioBuffer, mimeType, opts = {}) {
+  // Placeholder for future ffmpeg integration
+  // Will split audio file into time-based chunks with overlap
   throw new Error('Audio splitting not yet implemented - requires ffmpeg integration');
 }
 
@@ -109,7 +109,7 @@ export async function transcribeLongAudio(audioBuffer, mimeType, transcribeFunc,
   
   try {
     // Split audio into chunks
-    const chunks = await splitAudioIntoChunks(audioBuffer, mimeType, {
+    const chunks = await splitAudioIntoChunksStub(audioBuffer, mimeType, {
       chunkDuration: CHUNK_DURATION_MS,
       overlap: OVERLAP_MS,
       maxChunks: MAX_CHUNKS

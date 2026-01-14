@@ -26,6 +26,13 @@ const DARIJA_INDICATORS = [
   '3ndi', 'kifash', 'wash', 'fin', 'mnin', 'fash', 'bach'
 ];
 
+// Pre-compiled regex patterns for performance
+const FRENCH_PATTERN = new RegExp(`\\b(${FRENCH_INDICATORS.join('|')})\\b`, 'gi');
+const DARIJA_PATTERN = new RegExp(`\\b(${DARIJA_INDICATORS.join('|')})\\b`, 'gi');
+
+// Number of most common French words to use for confidence calculation
+const COMMON_FRENCH_WORDS_COUNT = 8;
+
 /**
  * Get transcription prompt for a specific language.
  * @param {string} detectedLang - Language code (dz, fr, ar, en)
@@ -70,15 +77,6 @@ export function mapLangToWhisper(lang) {
 }
 
 /**
- * Create regex pattern from word list for efficient matching.
- * @param {string[]} words - List of words
- * @returns {RegExp} Compiled regex pattern
- */
-function createWordPattern(words) {
-  return new RegExp(`\\b(${words.join('|')})\\b`, 'gi');
-}
-
-/**
  * Detect language from transcribed text.
  * @param {string} text - Transcribed text
  * @returns {string} Detected language code (dz, ar, fr, en)
@@ -91,11 +89,8 @@ export function detectLanguageFromText(text) {
   const latinChars = (text.match(/[a-zA-Z]/g) || []).length;
   
   // Check for language-specific indicators using pre-compiled patterns
-  const frenchPattern = createWordPattern(FRENCH_INDICATORS);
-  const darijaPattern = createWordPattern(DARIJA_INDICATORS);
-  
-  const frenchIndicators = (text.match(frenchPattern) || []).length;
-  const darijaIndicators = (text.match(darijaPattern) || []).length;
+  const frenchIndicators = (text.match(FRENCH_PATTERN) || []).length;
+  const darijaIndicators = (text.match(DARIJA_PATTERN) || []).length;
   
   // High Arabic character ratio suggests Arabic/Darija
   if (arabicChars > latinChars * 2) {
@@ -132,8 +127,9 @@ export function calculateLanguageConfidence(text, lang) {
   }
   
   if (lang === 'fr') {
-    const frenchPattern = createWordPattern(FRENCH_INDICATORS.slice(0, 8)); // Use common words only
-    const frenchWords = (text.match(frenchPattern) || []).length;
+    // Use only the most common French words for confidence calculation
+    const commonFrenchPattern = new RegExp(`\\b(${FRENCH_INDICATORS.slice(0, COMMON_FRENCH_WORDS_COUNT).join('|')})\\b`, 'gi');
+    const frenchWords = (text.match(commonFrenchPattern) || []).length;
     return Math.min(frenchWords / 10, 1);
   }
   
