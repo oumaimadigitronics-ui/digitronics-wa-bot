@@ -279,6 +279,11 @@ import {
   buildPipelineTranscriber as buildPipelineTranscriberImpl,
 } from './project/src/services/audio/index.js';
 
+import {
+  isOffTopicResponse,
+  getOffTopicFallback
+} from './project/src/services/guardrails/topicGuardrail.js';
+
 let toFileImpl = toFile;
 
 const app = express();
@@ -5629,6 +5634,18 @@ async function digibotLLMReply(userText, historyMsgs, lang, key) {
     const choice = r && r.choices && r.choices[0] && r.choices[0].message ? r.choices[0].message.content : "";
     let reply = String(choice || "").trim();
     reply = ensureNoQuestion(reply);
+    
+    // NEW: Validate LLM response is on-topic
+    const topicCheck = isOffTopicResponse(reply);
+    if (topicCheck.offTopic) {
+      console.warn(JSON.stringify({ 
+        level: 'warn', 
+        msg: 'off_topic_llm_response_blocked',
+        reason: topicCheck.reason,
+        replyPreview: reply.slice(0, 100)
+      }));
+      return ensureNoQuestion(getOffTopicFallback(lang));
+    }
 
     if (!reply) reply = ensureNoQuestion(fallbackWithAgent(lang));
     return reply;
@@ -5666,6 +5683,13 @@ function verifyVoiceAnswer({ reply, transcript }) {
   if (hasPriceSignal(reply) && !hasPriceSignal(transcript)) {
     return { ok: false, reason: "price_unverified" };
   }
+  
+  // NEW: Check if response is about electronics/Digitronics
+  const topicCheck = isOffTopicResponse(reply);
+  if (topicCheck.offTopic) {
+    return { ok: false, reason: "off_topic_response", detail: topicCheck.reason };
+  }
+  
   return { ok: true };
 }
 
