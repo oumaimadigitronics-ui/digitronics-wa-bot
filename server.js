@@ -6963,6 +6963,7 @@ export {
   isSupportIntent,
   isBuyIntent,
   isProductAdviceIntent,
+  isThankYouIntent,
   detectTechTopic,
   buildTechTopicAnswer,
   hasQuantitySignal,
