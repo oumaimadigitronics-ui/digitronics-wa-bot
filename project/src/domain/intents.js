@@ -127,7 +127,7 @@ export function isProductAdviceIntent(text) {
   if (!s) return false;
   const normalized = s.replace(/['']/g, " ").replace(/\s+/g, " ").trim();
 
-  const priceTokens = ["price", "prix", "ثمن", "سعر"];
+  const priceTokens = ["price", "prix", "ثمن", "سعر", "تمن", "بشحال", "شحال"];
   const advicePhrases = [
     "difference",
     "différence",
@@ -187,6 +187,11 @@ export function isContactIntent(text) {
   if (isOrderStatusIntent(text)) return false;
 
   const raw = String(text || "");
+  
+  // Skip if this looks like a product query with size indicators
+  const hasProductSignal = /نمرة\s*[\d٠-٩]|بوصة|تلفاز|تلفزيون|tv|télé|frigo|ثلاجة|refriger|machine/i.test(raw);
+  if (hasProductSignal) return false;
+  
   const s = normalizeIntentText(raw);
   if (!raw && !s) return false;
 
