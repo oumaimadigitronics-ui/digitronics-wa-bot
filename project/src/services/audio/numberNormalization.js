@@ -55,23 +55,23 @@ export function normalizeArabicNumbers(text) {
   if (!text) return text;
   let result = String(text);
   
-  // Sort by length (longest first) to avoid partial replacements
+  // First, handle compound patterns (kg, liters) before converting individual number words
+  // This ensures patterns like "خمسة كيلو" are matched before "خمسة" is replaced
+  for (const [pattern, value] of Object.entries(KG_PATTERNS)) {
+    result = result.replace(new RegExp(pattern, 'g'), value);
+  }
+  
+  for (const [pattern, value] of Object.entries(LITER_PATTERNS)) {
+    result = result.replace(new RegExp(pattern, 'g'), value);
+  }
+  
+  // Then convert individual number words, sorted by length (longest first) to avoid partial replacements
   const entries = Object.entries(ARABIC_NUMBER_WORDS)
     .sort((a, b) => b[0].length - a[0].length);
   
   for (const [word, digit] of entries) {
     const regex = new RegExp(word, 'g');
     result = result.replace(regex, digit);
-  }
-  
-  // Also handle kg patterns
-  for (const [pattern, value] of Object.entries(KG_PATTERNS)) {
-    result = result.replace(new RegExp(pattern, 'g'), value);
-  }
-  
-  // Handle liter patterns
-  for (const [pattern, value] of Object.entries(LITER_PATTERNS)) {
-    result = result.replace(new RegExp(pattern, 'g'), value);
   }
   
   return result;

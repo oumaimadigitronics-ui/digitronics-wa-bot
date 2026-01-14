@@ -214,65 +214,65 @@ export function correctArabicBrands(text) {
   if (!text) return text;
   
   // Brand corrections for common Arabic misspellings
+  // Using lookahead/lookbehind for word boundaries or spaces
   const brandCorrections = [
     // TCL variations - most common issue
-    { pattern: /تساك|تي ساك|تسك|تي سك|تي اس اك|تيساك|تسياك/g, replacement: 'TCL' },
-    { pattern: /تي سي ال/g, replacement: 'TCL' },
+    { pattern: /(^|\s)(تساك|تي ساك|تسك|تي سك|تي اس اك|تيساك|تسياك)(\s|$)/g, replacement: '$1TCL$3' },
+    { pattern: /(^|\s)(تي سي ال)(\s|$)/g, replacement: '$1TCL$3' },
     
-    // Visio variations - NEW
-    { pattern: /فيزيون|فيجيون|فيجن|فيزن|فزيون|فزيو/g, replacement: 'Visio' },
+    // Visio variations - NEW (careful not to match تلفزيون)
+    { pattern: /(^|\s)(فيزيون|فيجيون|فيزيو|فيجيو|فزيو|فزيون|فيزن|فيجن)(\s|$)/g, replacement: '$1Visio$3' },
     
     // Samsung variations
-    { pattern: /سامسونغ|سامسونق|سمسونج|سيمسونج|سانسونج|سمسنج/g, replacement: 'Samsung' },
-    { pattern: /سامسونج/g, replacement: 'Samsung' },
+    { pattern: /(^|\s)(سامسونغ|سامسونق|سمسونج|سيمسونج|سانسونج|سمسنج|سامسونج)(\s|$)/g, replacement: '$1Samsung$3' },
     
     // LG variations
-    { pattern: /ال جي|إل جي|الجي|ألجي|الجى/g, replacement: 'LG' },
+    { pattern: /(^|\s)(ال جي|إل جي|الجي|ألجي|الجى)(\s|$)/g, replacement: '$1LG$3' },
     
     // Hisense variations
-    { pattern: /هايسنس|هيسنس|حايسنس|هاي سينس|هايسينس|هاسينس/g, replacement: 'Hisense' },
+    { pattern: /(^|\s)(هايسنس|هيسنس|حايسنس|هاي سينس|هايسينس|هاسينس)(\s|$)/g, replacement: '$1Hisense$3' },
     
     // Haier variations
-    { pattern: /هاير|حاير|هير|هايير/g, replacement: 'Haier' },
+    { pattern: /(^|\s)(هاير|حاير|هير|هايير)(\s|$)/g, replacement: '$1Haier$3' },
     
     // Daiko variations
-    { pattern: /دايكو|دايكوا|ديكو|داكو/g, replacement: 'Daiko' },
+    { pattern: /(^|\s)(دايكو|دايكوا|ديكو|داكو)(\s|$)/g, replacement: '$1Daiko$3' },
     
     // Echolink variations - NEW
-    { pattern: /ايكو لينك|إيكولينك|اكو لينك|اكولنك|اكولينك/g, replacement: 'Echolink' },
+    { pattern: /(^|\s)(ايكو لينك|إيكولينك|اكو لينك|اكولنك|اكولينك)(\s|$)/g, replacement: '$1Echolink$3' },
     
     // Elexia variations - NEW
-    { pattern: /إليكسيا|اليكسيا|الكسيا/g, replacement: 'Elexia' },
+    { pattern: /(^|\s)(إليكسيا|اليكسيا|الكسيا)(\s|$)/g, replacement: '$1Elexia$3' },
     
     // Revolution variations - NEW
-    { pattern: /ريفوليوشن|ريفلوشن|ريفولوشن/g, replacement: 'Revolution' },
+    { pattern: /(^|\s)(ريفوليوشن|ريفلوشن|ريفولوشن)(\s|$)/g, replacement: '$1Revolution$3' },
     
     // Tivoli variations - NEW
-    { pattern: /تيفولي|تيفلي|تفولي/g, replacement: 'Tivoli' },
+    { pattern: /(^|\s)(تيفولي|تيفلي|تفولي)(\s|$)/g, replacement: '$1Tivoli$3' },
     
     // Xiaomi variations
-    { pattern: /شياومي|زياومي|اشياومي|شومي|شاوومي/g, replacement: 'Xiaomi' },
+    { pattern: /(^|\s)(شياومي|زياومي|اشياومي|شومي|شاوومي)(\s|$)/g, replacement: '$1Xiaomi$3' },
     
     // Candy variations
-    { pattern: /كاندي|كندي|كاندى/g, replacement: 'Candy' },
+    { pattern: /(^|\s)(كاندي|كندي|كاندى)(\s|$)/g, replacement: '$1Candy$3' },
     
     // Beko variations
-    { pattern: /بيكو|بيكوا|بكو/g, replacement: 'Beko' },
+    { pattern: /(^|\s)(بيكو|بيكوا|بكو)(\s|$)/g, replacement: '$1Beko$3' },
     
     // Whirlpool variations - NEW
-    { pattern: /ويرلبول|ويربول|ورلبول/g, replacement: 'Whirlpool' },
+    { pattern: /(^|\s)(ويرلبول|ويربول|ورلبول)(\s|$)/g, replacement: '$1Whirlpool$3' },
     
     // Bosch variations - NEW
-    { pattern: /بوش|بوتش/g, replacement: 'Bosch' },
+    { pattern: /(^|\s)(بوش|بوتش)(\s|$)/g, replacement: '$1Bosch$3' },
     
     // Morsat variations - NEW
-    { pattern: /مورسات|مرسات/g, replacement: 'Morsat' },
+    { pattern: /(^|\s)(مورسات|مرسات)(\s|$)/g, replacement: '$1Morsat$3' },
     
     // Sony variations
-    { pattern: /سوني|صوني/g, replacement: 'Sony' },
+    { pattern: /(^|\s)(سوني|صوني)(\s|$)/g, replacement: '$1Sony$3' },
     
     // Philips variations
-    { pattern: /فيليبس|فليبس|فيلبس/g, replacement: 'Philips' },
+    { pattern: /(^|\s)(فيليبس|فليبس|فيلبس)(\s|$)/g, replacement: '$1Philips$3' },
   ];
   
   let corrected = text;
