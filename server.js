@@ -3952,7 +3952,7 @@ function hasStrongProductIntent(text, normalized) {
   if (!s) return false;
   if (/[?؟]/.test(raw)) return true;
   if (/^(wach|wash|chno|chnou|chnoo|quel|combien)\b/.test(s)) return true;
-  if (s.includes("prix") || s.includes("ثمن") || s.includes("thaman") || s.includes("taman")) return true;
+  if (s.includes("prix") || s.includes("ثمن") || s.includes("شحال") || s.includes("thaman") || s.includes("taman")) return true;
   if (s.includes("offer") || s.includes("promo") || s.includes("promotion")) return true;
   if (/\btv\b/.test(s) && /\b\d{2}\b/.test(s)) return true;
   if (isBuyIntent(raw) || hasProductInquirySignal(raw) || detectPriceIntent(raw)) return true;
@@ -4784,12 +4784,12 @@ function isGenericPriceQuestion(text) {
 
   if (/^\d+\s*dh$/i.test(normalized)) return true;
 
-  const phraseMatches = ["c est combien", "how much"];
+  const phraseMatches = ["c est combien", "how much", "كم الثمن"];
   for (let i = 0; i < phraseMatches.length; i += 1) {
     if (normalized.indexOf(phraseMatches[i]) >= 0) return true;
   }
 
-  const tokens = ["prix", "combien", "tarif", "price", "cost", "cout", "coute", "ch7al", "chhal", "chحال", "بشحال", "الثمن", "ثمن", "السعر", "taman"];
+  const tokens = ["prix", "combien", "tarif", "price", "cost", "cout", "coute", "ch7al", "chhal", "chحال", "شحال", "بشحال", "الثمن", "ثمن", "السعر", "taman", "thaman"];
   for (let i = 0; i < tokens.length; i += 1) {
     if (includesToken(raw, tokens[i])) return true;
   }
@@ -4844,7 +4844,7 @@ function isNegotiationIntent(text) {
   if (priceOnlyPatterns.some((re) => re.test(normalized))) return false;
 
   const hasPriceSignal =
-    detectPriceIntent(raw) || normalized.includes("thaman") || normalized.includes("taman") || normalized.includes("prix");
+    detectPriceIntent(raw) || normalized.includes("thaman") || normalized.includes("taman") || normalized.includes("شحال") || normalized.includes("prix");
   const sizeTokens = ["taille", "size", "pouce", "pouces", "inch", "inches", "cm", "dimension", "حجم", "قياس", "بوصة"];
   const hasSizeIntent = sizeTokens.some((token) => normalized.includes(normMatch(token)));
   if (hasSizeIntent && !hasPriceSignal) return false;

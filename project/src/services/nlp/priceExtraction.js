@@ -6,7 +6,7 @@
 import { arabicIndicToAsciiDigits, normMatch } from '../../lib/textUtils.js';
 
 // Price-related keywords
-const PRICE_KEYWORDS = ["prix", "price", "combien", "tarif", "coute", "coûte", "bch7al", "بشحال", "ثمن"];
+const PRICE_KEYWORDS = ["prix", "price", "combien", "tarif", "coute", "coûte", "ch7al", "chhal", "bch7al", "شحال", "بشحال", "ثمن", "الثمن", "السعر", "taman", "thaman"];
 const CHEAP_KEYWORDS = ["pas cher", "cheap", "moins cher", "affordable"];
 
 /**
