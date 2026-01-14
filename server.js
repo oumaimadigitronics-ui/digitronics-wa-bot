@@ -250,6 +250,7 @@ import {
   checkAudioQuality,
   getAudioDuration,
   correctArabicBrands,
+  normalizeArabicNumbers,
   isLikelyHallucination,
   isAudioMime as isAudioMimeImpl,
   cleanMimeType as cleanMimeTypeImpl,
@@ -7272,8 +7273,11 @@ async function processIncomingMedia({ mediaInfo, mediaMeta, msgType, lang, key, 
         throw new Error('hallucination_detected');
       }
       
-      // Apply Arabic brand corrections to fix common misspellings
-      const userText = correctArabicBrands(userTextRaw);
+      // Apply post-transcription corrections:
+      // 1. Fix Arabic brand name misspellings
+      let userText = correctArabicBrands(userTextRaw);
+      // 2. Convert Arabic number words to digits
+      userText = normalizeArabicNumbers(userText);
       
       // Detect language from transcribed text
       const detectedLang = detectLanguageFromText(userText);

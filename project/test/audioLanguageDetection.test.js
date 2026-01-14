@@ -143,6 +143,47 @@ test('correctArabicBrands - corrects Beko variations', () => {
   assert.strictEqual(correctArabicBrands('بيكو ثلاجة'), 'Beko ثلاجة');
 });
 
+test('correctArabicBrands - corrects Visio variations', () => {
+  assert.strictEqual(correctArabicBrands('فيزيون تلفزيون'), 'Visio تلفزيون');
+  assert.strictEqual(correctArabicBrands('فيجيون 32 بوصة'), 'Visio 32 بوصة');
+  assert.strictEqual(correctArabicBrands('فيزن 55'), 'Visio 55');
+});
+
+test('correctArabicBrands - corrects Echolink variations', () => {
+  assert.strictEqual(correctArabicBrands('إيكولينك تلفزيون'), 'Echolink تلفزيون');
+  assert.strictEqual(correctArabicBrands('ايكو لينك 43 بوصة'), 'Echolink 43 بوصة');
+});
+
+test('correctArabicBrands - corrects Elexia variations', () => {
+  assert.strictEqual(correctArabicBrands('إليكسيا ثلاجة'), 'Elexia ثلاجة');
+  assert.strictEqual(correctArabicBrands('اليكسيا غسالة'), 'Elexia غسالة');
+});
+
+test('correctArabicBrands - corrects Revolution variations', () => {
+  assert.strictEqual(correctArabicBrands('ريفوليوشن مكيف'), 'Revolution مكيف');
+  assert.strictEqual(correctArabicBrands('ريفلوشن تلفزيون'), 'Revolution تلفزيون');
+});
+
+test('correctArabicBrands - corrects Tivoli variations', () => {
+  assert.strictEqual(correctArabicBrands('تيفولي تلفزيون'), 'Tivoli تلفزيون');
+  assert.strictEqual(correctArabicBrands('تيفلي 50 بوصة'), 'Tivoli 50 بوصة');
+});
+
+test('correctArabicBrands - corrects Whirlpool variations', () => {
+  assert.strictEqual(correctArabicBrands('ويرلبول غسالة'), 'Whirlpool غسالة');
+  assert.strictEqual(correctArabicBrands('ورلبول ثلاجة'), 'Whirlpool ثلاجة');
+});
+
+test('correctArabicBrands - corrects Bosch variations', () => {
+  assert.strictEqual(correctArabicBrands('بوش غسالة'), 'Bosch غسالة');
+  assert.strictEqual(correctArabicBrands('بوتش ثلاجة'), 'Bosch ثلاجة');
+});
+
+test('correctArabicBrands - corrects Morsat variations', () => {
+  assert.strictEqual(correctArabicBrands('مورسات تلفزيون'), 'Morsat تلفزيون');
+  assert.strictEqual(correctArabicBrands('مرسات 55 بوصة'), 'Morsat 55 بوصة');
+});
+
 test('correctArabicBrands - handles mixed text with multiple brands', () => {
   const input = 'بغيت تساك أو سامسونج أو ال جي';
   const expected = 'بغيت TCL أو Samsung أو LG';
@@ -163,19 +204,25 @@ test('getTranscriptionPrompt - includes brand names in all prompts', () => {
   const dzPrompt = getTranscriptionPrompt('dz');
   assert.ok(dzPrompt.includes('TCL'));
   assert.ok(dzPrompt.includes('Samsung'));
+  assert.ok(dzPrompt.includes('Visio'));
+  assert.ok(dzPrompt.includes('Echolink'));
+  assert.ok(dzPrompt.includes('Elexia'));
   assert.ok(dzPrompt.includes('تي سي ال'));
   
   const frPrompt = getTranscriptionPrompt('fr');
   assert.ok(frPrompt.includes('TCL'));
   assert.ok(frPrompt.includes('Samsung'));
+  assert.ok(frPrompt.includes('Visio'));
   
   const arPrompt = getTranscriptionPrompt('ar');
   assert.ok(arPrompt.includes('TCL'));
   assert.ok(arPrompt.includes('تي سي ال'));
+  assert.ok(arPrompt.includes('فيزيو'));
   
   const enPrompt = getTranscriptionPrompt('en');
   assert.ok(enPrompt.includes('TCL'));
   assert.ok(enPrompt.includes('Samsung'));
+  assert.ok(enPrompt.includes('Visio'));
 });
 
 test('getTranscriptionPrompt - includes TV sizes in prompts', () => {
@@ -184,4 +231,21 @@ test('getTranscriptionPrompt - includes TV sizes in prompts', () => {
   assert.ok(dzPrompt.includes('55'));
   assert.ok(dzPrompt.includes('65'));
   assert.ok(dzPrompt.includes('pouces'));
+});
+
+test('getTranscriptionPrompt - includes product categories', () => {
+  const dzPrompt = getTranscriptionPrompt('dz');
+  assert.ok(dzPrompt.includes('TV'));
+  assert.ok(dzPrompt.includes('Washing Machine'));
+  assert.ok(dzPrompt.includes('Refrigerator'));
+  assert.ok(dzPrompt.includes('غسالة'));
+  assert.ok(dzPrompt.includes('ثلاجة'));
+});
+
+test('getTranscriptionPrompt - includes appliance capacities', () => {
+  const dzPrompt = getTranscriptionPrompt('dz');
+  assert.ok(dzPrompt.includes('kg'));
+  assert.ok(dzPrompt.includes('litres'));
+  assert.ok(dzPrompt.includes('كيلو'));
+  assert.ok(dzPrompt.includes('لتر'));
 });

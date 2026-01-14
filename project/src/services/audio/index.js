@@ -84,6 +84,14 @@ export {
   correctArabicBrands,
 } from "./languageDetection.js";
 
+// Re-export number normalization utilities
+export {
+  normalizeArabicNumbers,
+  ARABIC_NUMBER_WORDS,
+  KG_PATTERNS,
+  LITER_PATTERNS,
+} from "./numberNormalization.js";
+
 // Re-export chunking utilities
 export {
   transcribeLongAudio,

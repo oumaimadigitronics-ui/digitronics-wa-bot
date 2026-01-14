@@ -3,14 +3,71 @@
  * Auto-detects language from audio content and uses appropriate prompts.
  */
 
+// All brands from the website
+const ALL_BRANDS = "TCL, Daiko, Haier, Samsung, LG, Elexia, Revolution, Visio, Echolink, Hisense, Tivoli, Xiaomi, Candy, Beko, Whirlpool, Bosch, Morsat";
+
+// Arabic brand spellings
+const ARABIC_BRANDS = "تي سي ال (TCL)، دايكو (Daiko)، هاير (Haier)، سامسونج (Samsung)، ال جي (LG)، إليكسيا (Elexia)، ريفوليوشن (Revolution)، فيزيو (Visio)، إيكولينك (Echolink)، هايسنس (Hisense)، تيفولي (Tivoli)، شاومي (Xiaomi)، كاندي (Candy)، بيكو (Beko)";
+
+// TV sizes
+const TV_SIZES = "24, 27, 32, 40, 42, 43, 49, 50, 55, 58, 60, 65, 70, 75, 77, 82, 85, 98, 100 pouces/بوصة/inch";
+
+// Washing machine capacities
+const WASHING_KG = "5, 6, 7, 8, 9, 10, 12 kg/كيلو";
+
+// Refrigerator capacities
+const FRIDGE_LITERS = "100, 150, 200, 250, 300, 350, 400, 450, 500, 600 litres/لتر";
+
 // Language-specific transcription prompts for better accuracy
-const DARIJA_PROMPT = `Moroccan Darija Arabic transcription. Common words: salam, labas, kifash, bghit, chhal, 3afak, wakha, mezyan, daba, hadi, dyal, kayn, mashi, walo, bezzaf, chwiya, telfaza, ghasala, ثلاجة, تلفازة. Mix of Arabic, French: prix, combien, disponible, livraison. Numbers: wa7ed, jouj, tlata, rb3a, khmsa. Brand names: TCL, Samsung, LG, Haier, Hisense, Daiko, Xiaomi, Candy, Beko, Sony, Philips, Whirlpool, Bosch. Arabic brands: تي سي ال، سامسونج، ال جي، هايسنس، هاير. TV sizes: 32, 43, 50, 55, 65, 75 pouces, pouce, بوصة.`;
+const DARIJA_PROMPT = `Moroccan Darija Arabic transcription for Digitronics electronics store.
 
-const FRENCH_PROMPT = `French transcription for Moroccan customer service. Common terms: télévision, machine à laver, réfrigérateur, climatiseur, prix, disponible, livraison, garantie, promotion. Brand names: TCL, Samsung, LG, Haier, Hisense, Daiko, Xiaomi, Candy, Beko, Sony, Philips, Whirlpool, Bosch. TV sizes: 32, 43, 50, 55, 65, 75 pouces.`;
+BRANDS (IMPORTANT - transcribe exactly): ${ALL_BRANDS}
+ARABIC BRAND NAMES: ${ARABIC_BRANDS}
 
-const ARABIC_PROMPT = `Modern Standard Arabic and Gulf Arabic transcription. Common terms: تلفزيون، غسالة، ثلاجة، مكيف، سعر، متوفر، توصيل، ضمان. Brand names: TCL, Samsung, LG, Haier, Hisense, Daiko, Xiaomi, Candy, Beko, Sony, Philips, Whirlpool, Bosch. Arabic brands: تي سي ال، سامسونج، ال جي، هايسنس، هاير، دايكو، شياومي، كاندي، بيكو، سوني، فيليبس. TV sizes: 32, 43, 50, 55, 65, 75 بوصة.`;
+TV SIZES: ${TV_SIZES}
+WASHING MACHINE: ${WASHING_KG}
+REFRIGERATOR: ${FRIDGE_LITERS}
 
-const ENGLISH_PROMPT = `English transcription for customer service. Common terms: television, TV, washing machine, refrigerator, air conditioner, price, available, delivery, warranty. Brand names: TCL, Samsung, LG, Haier, Hisense, Daiko, Xiaomi, Candy, Beko, Sony, Philips, Whirlpool, Bosch. TV sizes: 32, 43, 50, 55, 65, 75 inches.`;
+PRODUCT NAMES:
+- TV/تلفازة/telfaza/télévision
+- Washing Machine/غسالة/ghasala/machine à laver/lave linge
+- Refrigerator/ثلاجة/frigo/réfrigérateur
+- Air Conditioner/مكيف/climatiseur/clim
+- Water Heater/سخان/chauffe-eau
+- Freezer/مجمد/congélateur
+- Microwave/ميكرو/micro-ondes
+- Dishwasher/غسالة صحون/lave-vaisselle
+
+DARIJA WORDS: salam, labas, kifash, bghit, chhal, 3afak, wakha, mezyan, daba, hadi, dyal, kayn, mashi, walo, bezzaf, chwiya, 3ndek, 3ndi, wash, fin, mnin, fash, bach, chno, شنو, واش, بغيت, فين
+
+FRENCH MIX: prix, combien, disponible, livraison, garantie, promotion, réduction
+
+NUMBERS: wa7ed, jouj, tlata, rb3a, khmsa, stta, sb3a, tmnya, ts3od, 3chra`;
+
+const FRENCH_PROMPT = `French transcription for Digitronics Moroccan electronics store.
+
+BRANDS: ${ALL_BRANDS}
+TV SIZES: ${TV_SIZES}
+WASHING MACHINE CAPACITY: ${WASHING_KG}
+REFRIGERATOR CAPACITY: ${FRIDGE_LITERS}
+
+PRODUCTS: télévision, machine à laver, réfrigérateur, climatiseur, chauffe-eau, congélateur, micro-ondes, lave-vaisselle
+
+COMMON TERMS: prix, disponible, livraison, garantie, promotion, en stock, Smart TV, LED, QLED, OLED, Google TV, Android TV`;
+
+const ARABIC_PROMPT = `Modern Standard Arabic transcription for Digitronics electronics store.
+
+BRANDS: ${ALL_BRANDS}
+ARABIC BRAND NAMES: ${ARABIC_BRANDS}
+TV SIZES: ${TV_SIZES}
+WASHING MACHINE: ${WASHING_KG}
+REFRIGERATOR: ${FRIDGE_LITERS}
+
+PRODUCTS: تلفزيون، غسالة، ثلاجة، مكيف، سخان ماء، مجمد، ميكروويف، غسالة صحون
+
+COMMON TERMS: سعر، متوفر، توصيل، ضمان، عرض، بوصة، لتر، كيلو`;
+
+const ENGLISH_PROMPT = `English transcription for Digitronics customer service. Common terms: television, TV, washing machine, refrigerator, air conditioner, price, available, delivery, warranty. Brand names: ${ALL_BRANDS}. TV sizes: ${TV_SIZES}.`;
 
 // Language indicator word lists for detection
 const FRENCH_INDICATORS = [
@@ -157,41 +214,66 @@ export function correctArabicBrands(text) {
   if (!text) return text;
   
   // Brand corrections for common Arabic misspellings
+  // Using lookahead/lookbehind for word boundaries or spaces
   const brandCorrections = [
     // TCL variations - most common issue
-    { pattern: /تساك|تي ساك|تسك|تي سك|تي اس اك/g, replacement: 'TCL' },
-    { pattern: /تي سي ال/g, replacement: 'TCL' },
+    { pattern: /(^|\s)(تساك|تي ساك|تسك|تي سك|تي اس اك|تيساك|تسياك)(\s|$)/g, replacement: '$1TCL$3' },
+    { pattern: /(^|\s)(تي سي ال)(\s|$)/g, replacement: '$1TCL$3' },
+    
+    // Visio variations - Safe: won't match تلفزيون (television) because فزيون appears mid-word there
+    // The pattern requires space/start before and space/end after, so it only matches standalone words
+    { pattern: /(^|\s)(فيزيون|فيجيون|فيزيو|فيجيو|فزيو|فزيون|فيزن|فيجن)(\s|$)/g, replacement: '$1Visio$3' },
     
     // Samsung variations
-    { pattern: /سامسونغ|سامسونق|سمسونج/g, replacement: 'Samsung' },
-    { pattern: /سامسونج/g, replacement: 'Samsung' },
+    { pattern: /(^|\s)(سامسونغ|سامسونق|سمسونج|سيمسونج|سانسونج|سمسنج|سامسونج)(\s|$)/g, replacement: '$1Samsung$3' },
     
     // LG variations
-    { pattern: /ال جي|إل جي|الجي/g, replacement: 'LG' },
+    { pattern: /(^|\s)(ال جي|إل جي|الجي|ألجي|الجى)(\s|$)/g, replacement: '$1LG$3' },
     
     // Hisense variations
-    { pattern: /هايسنس|هيسنس|حايسنس/g, replacement: 'Hisense' },
+    { pattern: /(^|\s)(هايسنس|هيسنس|حايسنس|هاي سينس|هايسينس|هاسينس)(\s|$)/g, replacement: '$1Hisense$3' },
     
     // Haier variations
-    { pattern: /هاير|حاير|هير/g, replacement: 'Haier' },
+    { pattern: /(^|\s)(هاير|حاير|هير|هايير)(\s|$)/g, replacement: '$1Haier$3' },
     
     // Daiko variations
-    { pattern: /دايكو|دايكوا|ديكو/g, replacement: 'Daiko' },
+    { pattern: /(^|\s)(دايكو|دايكوا|ديكو|داكو)(\s|$)/g, replacement: '$1Daiko$3' },
+    
+    // Echolink variations - NEW
+    { pattern: /(^|\s)(ايكو لينك|إيكولينك|اكو لينك|اكولنك|اكولينك)(\s|$)/g, replacement: '$1Echolink$3' },
+    
+    // Elexia variations - NEW
+    { pattern: /(^|\s)(إليكسيا|اليكسيا|الكسيا)(\s|$)/g, replacement: '$1Elexia$3' },
+    
+    // Revolution variations - NEW
+    { pattern: /(^|\s)(ريفوليوشن|ريفلوشن|ريفولوشن)(\s|$)/g, replacement: '$1Revolution$3' },
+    
+    // Tivoli variations - NEW
+    { pattern: /(^|\s)(تيفولي|تيفلي|تفولي)(\s|$)/g, replacement: '$1Tivoli$3' },
     
     // Xiaomi variations
-    { pattern: /شياومي|زياومي|اشياومي/g, replacement: 'Xiaomi' },
+    { pattern: /(^|\s)(شياومي|زياومي|اشياومي|شومي|شاوومي)(\s|$)/g, replacement: '$1Xiaomi$3' },
     
     // Candy variations
-    { pattern: /كاندي|كندي/g, replacement: 'Candy' },
+    { pattern: /(^|\s)(كاندي|كندي|كاندى)(\s|$)/g, replacement: '$1Candy$3' },
     
     // Beko variations
-    { pattern: /بيكو|بيكوا/g, replacement: 'Beko' },
+    { pattern: /(^|\s)(بيكو|بيكوا|بكو)(\s|$)/g, replacement: '$1Beko$3' },
+    
+    // Whirlpool variations - NEW
+    { pattern: /(^|\s)(ويرلبول|ويربول|ورلبول)(\s|$)/g, replacement: '$1Whirlpool$3' },
+    
+    // Bosch variations - NEW
+    { pattern: /(^|\s)(بوش|بوتش)(\s|$)/g, replacement: '$1Bosch$3' },
+    
+    // Morsat variations - NEW
+    { pattern: /(^|\s)(مورسات|مرسات)(\s|$)/g, replacement: '$1Morsat$3' },
     
     // Sony variations
-    { pattern: /سوني|صوني/g, replacement: 'Sony' },
+    { pattern: /(^|\s)(سوني|صوني)(\s|$)/g, replacement: '$1Sony$3' },
     
     // Philips variations
-    { pattern: /فيليبس|فليبس|فيلبس/g, replacement: 'Philips' },
+    { pattern: /(^|\s)(فيليبس|فليبس|فيلبس)(\s|$)/g, replacement: '$1Philips$3' },
   ];
   
   let corrected = text;
