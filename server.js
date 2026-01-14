@@ -33,6 +33,7 @@ import {
   isInstallationIntent,
   isSizeGuideIntent,
   isComparisonIntent,
+  isThankYouIntent,
   routeTemplate
 } from './project/src/domain/index.js';
 
@@ -52,7 +53,9 @@ import {
   RETURN_POLICY_TEMPLATE,
   INSTALLATION_TEMPLATE,
   SIZE_GUIDE_TEMPLATE,
-  COMPARISON_TEMPLATE
+  COMPARISON_TEMPLATE,
+  THANK_YOU_TEMPLATE,
+  thankYouTemplate
 } from './project/src/services/replies/templates.js';
 
 import {
@@ -4844,6 +4847,21 @@ function isNegotiationIntent(text) {
   const s = normMatch(arabicIndicToAsciiDigits(raw));
   if (!s) return false;
 
+  // "mazal" / "مزل" = "still/yet" - asking about availability, NOT negotiation
+  // Exclude availability questions early before checking negotiation tokens
+  const availabilityTokens = [
+    "mazal", "mzl", "مزل", "مازال", "مزال",
+    "baqi", "باقي", "باقى",  // "still"
+    "kayn", "kayna", "كاين", "كاينة",  // "is there"
+    "disponible", "available", "متوفر", "متاح"
+  ];
+  
+  for (const token of availabilityTokens) {
+    if (includesToken(s, token)) {
+      return false;  // This is availability question, not negotiation
+    }
+  }
+
   const normalized = s.replace(/[^a-z0-9\u0600-\u06ff\s]/gi, " ").replace(/\s+/g, " ").trim();
   const priceOnlyPatterns = [
     /^(price|prix|taman|thaman|ch7al|sh7al|شحال|ثمن|الثمن|سوم|سومة)$/i,
@@ -6330,6 +6348,14 @@ app.post("/wanotifier", express.raw({ type: "*/*", limit: "2mb" }), parseWanotif
 
     if (isBuyIntent(userTextRaw) && !isExplicitOrderStatusQuery(userTextRaw)) {
       const reply = finalizeReply(BUY_INTENT_TEMPLATE.replace("{ORDER_LINK}", ORDER_FORM_URL), 520);
+      memory.push(key, "assistant", reply);
+      resetStrikes(key);
+      return res.json({ ok: true, reply });
+    }
+
+    // Check for thank you / blessing / farewell (end of chat) - high priority
+    if (isThankYouIntent(userTextRaw)) {
+      const reply = thankYouTemplate(lang);
       memory.push(key, "assistant", reply);
       resetStrikes(key);
       return res.json({ ok: true, reply });

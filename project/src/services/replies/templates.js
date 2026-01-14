@@ -242,3 +242,23 @@ export const COMPARISON_TEMPLATE = {
   fr: "🔄 Comparaison:\nChaque marque a ses avantages. Envoyez votre budget pour la meilleure recommandation.",
   ar: "🔄 مقارنة:\nكل ماركة عندها مميزاتها. أرسل ميزانيتك باش نعطيك أحسن خيار."
 };
+
+/**
+ * Template for thank you / blessing messages (end of chat)
+ * Responds gracefully to gratitude expressions
+ */
+export const THANK_YOU_TEMPLATE = {
+  dzl: "Choukran bzaf! 🙏 Allah ybarek fik. Ila 7tajiti chi haja, ana hna. Bslama! 👋",
+  fr: "Merci beaucoup ! 🙏 À votre service. N'hésitez pas à revenir. Au revoir ! 👋",
+  ar: "شكراً جزيلاً! 🙏 الله يبارك فيك. إذا احتجت أي شيء، أنا هنا. مع السلامة! 👋",
+  en: "Thank you so much! 🙏 Happy to help. Feel free to come back anytime. Goodbye! 👋"
+};
+
+/**
+ * Helper function to get thank you template for a specific language
+ * @param {string} lang - Language code (dzl, fr, ar, en)
+ * @returns {string} - Thank you message in the specified language
+ */
+export function thankYouTemplate(lang = "dzl") {
+  return THANK_YOU_TEMPLATE[lang] || THANK_YOU_TEMPLATE.dzl;
+}

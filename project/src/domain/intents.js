@@ -359,9 +359,18 @@ export function isDeliveryIntent(text) {
     "twasel",
     "tوصيل",
     "توصيل",
+    "التوصيل",
+    // Darija spelling variations
+    "توسيل",    // tawsil - common Darija spelling
+    "twsil",
+    "توصل",
+    "tousel",
+    "tawsel",
+    "livreson",  // French misspelling
+    "liwraison",
+    // Other delivery terms
     "شحن",
     "الشحن",
-    "التوصيل",
     "تسليم",
     "التسليم",
     "ديليفري",
@@ -1191,4 +1200,66 @@ export function isComparisonIntent(text) {
   ];
 
   return hasAnyToken(s, tokens);
+}
+
+/**
+ * Detects if the user is expressing gratitude/thanks/blessing (end of chat)
+ * @param {string} text - The user's message text
+ * @returns {boolean} True if thank you intent is detected
+ */
+export function isThankYouIntent(text) {
+  const raw = String(text || "");
+  const s = normalizeIntentText(raw);
+  if (!s) return false;
+
+  // Blessing/prayer expressions (Arabic/Darija)
+  const blessingPhrases = [
+    "الله يجازيك",
+    "الله يعطيك",
+    "الله يبارك",
+    "الله يخليك",
+    "الله يرحم",
+    "بارك الله",
+    "جزاك الله",
+    "يعطيك الصحة",
+    "الله يعاونك",
+    "ربي يخليك",
+    "allah yjaziik",
+    "allah y3tik",
+    "allah ybark",
+    "barak allah",
+    "jazak allah",
+    "y3tik saha",
+  ];
+
+  // Simple thanks expressions
+  const thanksTokens = [
+    "choukran", "شكرا", "شكراً", "merci", "thanks", "thank you",
+    "mrc", "thnx", "ty", "thx",
+    "شكر", "متشكر", "متشكرة",
+  ];
+
+  // Farewell expressions often combined with thanks
+  const farewellTokens = [
+    "bslama", "بسلامة", "مع السلامة", "au revoir", "bye", "goodbye",
+    "السلامة", "سلام", "تحياتي",
+  ];
+
+  // Check for blessing phrases
+  for (const phrase of blessingPhrases) {
+    if (s.includes(normMatch(phrase))) return true;
+  }
+
+  // Check for thanks tokens
+  for (const token of thanksTokens) {
+    if (includesToken(s, token)) return true;
+  }
+
+  // Check for pure farewell (also treat as end-of-chat thanks)
+  const hasFarewell = farewellTokens.some(token => includesToken(s, token));
+  const hasProductIntent = /tv|تلفاز|frigo|ثلاجة|prix|ثمن|\d{2,}/.test(s);
+  
+  if (hasFarewell && !hasProductIntent) return true;
+
+  return false;
 }
