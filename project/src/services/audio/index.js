@@ -84,12 +84,6 @@ export {
   correctArabicBrands,
 } from "./languageDetection.js";
 
-// Re-export brand correction utilities
-export {
-  correctArabicBrands as correctArabicBrandsAlt,
-  ARABIC_BRAND_CORRECTIONS,
-} from "./brandCorrection.js";
-
 // Re-export number normalization utilities
 export {
   normalizeArabicNumbers,

@@ -2,6 +2,8 @@
  * Arabic number word to digit conversion for product specifications
  */
 
+import { escapeRegExp } from '../../lib/textUtils.js';
+
 // Arabic number words to digits mapping (for TV sizes, kg, liters)
 const ARABIC_NUMBER_WORDS = {
   // Cardinal numbers
@@ -58,11 +60,13 @@ export function normalizeArabicNumbers(text) {
   // First, handle compound patterns (kg, liters) before converting individual number words
   // This ensures patterns like "خمسة كيلو" are matched before "خمسة" is replaced
   for (const [pattern, value] of Object.entries(KG_PATTERNS)) {
-    result = result.replace(new RegExp(pattern, 'g'), value);
+    const escapedPattern = escapeRegExp(pattern);
+    result = result.replace(new RegExp(escapedPattern, 'g'), value);
   }
   
   for (const [pattern, value] of Object.entries(LITER_PATTERNS)) {
-    result = result.replace(new RegExp(pattern, 'g'), value);
+    const escapedPattern = escapeRegExp(pattern);
+    result = result.replace(new RegExp(escapedPattern, 'g'), value);
   }
   
   // Then convert individual number words, sorted by length (longest first) to avoid partial replacements
@@ -70,7 +74,8 @@ export function normalizeArabicNumbers(text) {
     .sort((a, b) => b[0].length - a[0].length);
   
   for (const [word, digit] of entries) {
-    const regex = new RegExp(word, 'g');
+    const escapedWord = escapeRegExp(word);
+    const regex = new RegExp(escapedWord, 'g');
     result = result.replace(regex, digit);
   }
   
