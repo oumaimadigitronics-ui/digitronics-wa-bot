@@ -37,6 +37,22 @@ export function isOrderStatusIntent(text) {
   const raw = String(text || "");
   const s = normMatch(raw);
 
+  // Exclude phone number requests (Conflict 2)
+  const phoneNumberPhrases = [
+    "رقم الهاتف", "رقم تيليفون", "رقم التليفون",
+    "phone number", "numero de telephone", "numéro de téléphone", "numero telephone",
+    "رقم الواتساب", "whatsapp number"
+  ];
+  if (hasAnyPhrase(s, phoneNumberPhrases)) return false;
+
+  // Exclude location questions (Conflict 6)
+  const locationPhrases = [
+    "fin kaynin", "fin nta", "fin ntoma", "fin l-magasin",
+    "فين كاينين", "فين نتوما", "فين المحل",
+    "where are you", "ou etes-vous", "où êtes-vous", "your location", "your address"
+  ];
+  if (hasAnyPhrase(s, locationPhrases)) return false;
+
   const orderNo = extractOrderNumber(raw);
   const hasDigits = Boolean(orderNo);
 
@@ -108,6 +124,10 @@ export function isOrderStatusIntent(text) {
   if (hasProgressWord && hasDigits) return true;
 
   if (hasProgressWord) {
+    // "fin" alone without order-related words should not trigger (Conflict 6)
+    const hasOrderContext = s.includes("commande") || s.includes("طلب") || s.includes("order") || hasDigits;
+    if (s.includes("fin") && !hasOrderContext) return false;
+    
     if (s.indexOf("commande") >= 0) return true;
     if (s.indexOf("رقم") >= 0) return true;
     if (s.indexOf("الطلب") >= 0) return true;
@@ -501,6 +521,18 @@ export function isAngryIntent(text) {
   const s = normalizeIntentText(raw);
   if (!s) return false;
 
+  // Exclude questions about avoiding delays (Conflict 5)
+  const avoidDelayPhrases = [
+    "bla retard", "sans retard", "without delay",
+    "بلا تأخير", "بدون تأخير", "no delay"
+  ];
+  if (hasAnyPhrase(s, avoidDelayPhrases)) return false;
+
+  // Also exclude if it's a question about delays (has ? or ؟)
+  if (s.includes("retard") && /[?؟]/.test(raw) && !hasAnyPhrase(s, ["tres retard", "very late", "متأخر بزاف"])) {
+    return false; // Asking about delays, not complaining
+  }
+
   if (hasAnyEmoji(raw, ["😡", "🤬", "😠", "😤", "😾", "💢", "🖕", "😒", "😞", "😢", "😭"])) return true;
 
   const phrases = [
@@ -710,6 +742,29 @@ export function isSupportIntent(text) {
   const raw = String(text || "");
   const s = normalizeIntentText(raw);
   if (!s) return false;
+
+  // Exclude delivery service phrases (Conflict 1)
+  const deliveryServicePhrases = [
+    "service توصيل", "service livraison", "service delivery",
+    "delivery service", "livraison service"
+  ];
+  if (hasAnyPhrase(s, deliveryServicePhrases)) return false;
+
+  // Exclude "no problem" phrases (Conflict 4)
+  const noProblemPhrases = [
+    "mashi mouchkil", "machi mouchkil", "mashi mochkil",
+    "ماشي مشكل", "ماشي مشكلة", "مافيها مشكل",
+    "no problem", "pas de probleme", "pas de problème",
+    "c'est pas grave", "c pas grave"
+  ];
+  if (hasAnyPhrase(s, noProblemPhrases)) return false;
+
+  // Exclude questions about avoiding delays (Conflict 5)
+  const avoidDelayPhrases = [
+    "bla retard", "sans retard", "without delay",
+    "بلا تأخير", "بدون تأخير", "no delay"
+  ];
+  if (hasAnyPhrase(s, avoidDelayPhrases)) return false;
 
   const wallMountHints = [
     "support mural",
@@ -989,6 +1044,11 @@ export function isAffirmationIntent(text) {
   const raw = String(text || "").trim();
   const s = normalizeIntentText(raw);
   if (!s) return false;
+
+  // Exclude menu selections (Conflict 7)
+  // Check if it's a menu selection (ok/oui + number)
+  if (/^(ok|oui|yes|واخا|نعم)\s*\d+$/i.test(raw.trim())) return false;
+  if (/^\d+\s*(ok|oui|yes|واخا|نعم)$/i.test(raw.trim())) return false;
 
   // Skip if it's a more specific intent
   if (isBuyIntent(raw)) return false;

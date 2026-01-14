@@ -27,6 +27,18 @@ export function isAngryOrProblemIntent(text) {
   const s = normalizeIntentText(raw);
   if (!s) return false;
 
+  // Exclude questions about avoiding delays (Conflict 5)
+  const avoidDelayPhrases = [
+    "bla retard", "sans retard", "without delay",
+    "بلا تأخير", "بدون تأخير", "no delay"
+  ];
+  if (hasAnyPhrase(s, avoidDelayPhrases)) return false;
+
+  // Also exclude if it's a question about delays (has ? or ؟)
+  if (s.includes("retard") && /[?؟]/.test(raw) && !hasAnyPhrase(s, ["tres retard", "very late", "متأخر بزاف"])) {
+    return false; // Asking about delays, not complaining
+  }
+
   if (hasAnyEmoji(raw, ["😡", "🤬", "😠", "😤", "😞", "😢", "😭", "⚠️", "❗", "🚨"])) return true;
 
   const phrases = [
@@ -73,7 +85,7 @@ export function isAngryOrProblemIntent(text) {
   const tokens = [
     "problem",
     "issue",
-    "bad",
+    // "bad" removed (Conflict 8) - too generic, kept in phrases only
     "angry",
     "late",
     "delay",

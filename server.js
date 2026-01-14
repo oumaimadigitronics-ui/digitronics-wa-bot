@@ -4865,6 +4865,13 @@ function isNegotiationIntent(text) {
     return false;
   }
 
+  // Exclude availability questions (Conflict 9)
+  const availabilityTokens = [
+    "mazal", "mzl", "مزل", "مازال", "مزال",
+    "baqi", "باقي", "باقى", "kayn", "kayna", "كاين", "كاينة"
+  ];
+  if (hasAnyToken(s, availabilityTokens)) return false;
+
   const normalized = s.replace(/[^a-z0-9\u0600-\u06ff\s]/gi, " ").replace(/\s+/g, " ").trim();
   const priceOnlyPatterns = [
     /^(price|prix|taman|thaman|ch7al|sh7al|شحال|ثمن|الثمن|سوم|سومة)$/i,
