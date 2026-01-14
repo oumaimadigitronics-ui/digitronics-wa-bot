@@ -81,6 +81,7 @@ export {
   detectLanguageFromText,
   calculateLanguageConfidence,
   shouldRetranscribe,
+  correctArabicBrands,
 } from "./languageDetection.js";
 
 // Re-export chunking utilities
