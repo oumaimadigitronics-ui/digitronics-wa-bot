@@ -88,7 +88,8 @@ export function isAngryOrProblemIntent(text) {
   const tokens = [
     "problem",
     "issue",
-    // "bad" removed (Conflict 8) - too generic, kept in phrases only
+    // "bad" removed from tokens (Conflict 8) - too generic (e.g., "bad boy brand")
+    // Still triggers via phrases: "bad service", "terrible service", "very bad", etc.
     "angry",
     "late",
     "delay",

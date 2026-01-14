@@ -27,7 +27,9 @@ export function hasBye(text = '') {
 }
 
 export function isThanks(text = '') {
-  // Use isThanksIntent for consistency (Conflict 3)
+  // Use isThanksIntent for consistency (Conflict 3 fix)
+  // The original implementation had duplicate thanks detection logic that could diverge.
+  // Consolidating to use the domain intent function ensures consistency across the codebase.
   return isThanksIntent(text);
 }
 

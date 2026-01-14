@@ -1050,9 +1050,10 @@ export function isAffirmationIntent(text) {
   if (!s) return false;
 
   // Exclude menu selections (Conflict 7)
-  // Check if it's a menu selection (ok/oui + number)
-  if (/^(ok|oui|yes|واخا|نعم)\s*\d+$/i.test(raw.trim())) return false;
-  if (/^\d+\s*(ok|oui|yes|واخا|نعم)$/i.test(raw.trim())) return false;
+  // Check if it's a menu selection (ok/oui + number or number + ok/oui)
+  const menuSelectionTokens = '(ok|oui|yes|واخا|نعم)';
+  const menuSelectionPattern = new RegExp(`^(${menuSelectionTokens}\\s*\\d+|\\d+\\s*${menuSelectionTokens})$`, 'i');
+  if (menuSelectionPattern.test(raw.trim())) return false;
 
   // Skip if it's a more specific intent
   if (isBuyIntent(raw)) return false;
