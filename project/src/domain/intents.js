@@ -959,12 +959,10 @@ export function isFarewellIntent(text) {
     "مع السلامة",
     "bslama",
     "besslama",
-    "bslama",
     "goodbye",
     "à bientôt",
     "a bientot",
     "see you",
-    "مع السلامة",
     "باي",
     "bay"
   ];

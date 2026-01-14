@@ -178,9 +178,9 @@ export const THANKS_TEMPLATE = {
  * Provides order form link for future reference
  */
 export const FAREWELL_TEMPLATE = {
-  dzl: "Bslama! 👋 Nchallah nchofok 9rib. Formulaire commande: {ORDER_FORM_URL}",
-  fr: "Au revoir ! 👋 À bientôt. Formulaire commande: {ORDER_FORM_URL}",
-  ar: "مع السلامة! 👋 نتمنى نشوفوك قريب. للطلب: {ORDER_FORM_URL}"
+  dzl: "Bslama! 👋 Nchallah nchofok 9rib.",
+  fr: "Au revoir ! 👋 À bientôt.",
+  ar: "مع السلامة! 👋 نتمنى نشوفوك قريب."
 };
 
 /**
@@ -208,9 +208,9 @@ export const CATALOG_OVERVIEW_TEMPLATE = {
  * Explains return/exchange policy and warranty terms
  */
 export const RETURN_POLICY_TEMPLATE = {
-  dzl: "🔄 Politique retour:\n✅ Tbdil f 7 jours ila l-produit fih 3ib\n✅ Garantie 1 an (2 ans DAIKO TV)\n📞 Support: {CONTACTS}",
-  fr: "🔄 Politique retour:\n✅ Échange sous 7 jours si produit défectueux\n✅ Garantie 1 an (2 ans TV DAIKO)\n📞 Support: {CONTACTS}",
-  ar: "🔄 سياسة الإرجاع:\n✅ استبدال خلال 7 أيام إذا كان المنتج معيب\n✅ ضمان سنة (سنتين TV DAIKO)\n📞 الدعم: {CONTACTS}"
+  dzl: "🔄 Politique retour:\n✅ Tbdil f 7 jours ila l-produit fih 3ib\n✅ Garantie 1 an (2 ans DAIKO TV)\n📞 Contactez-nous pour plus d'infos",
+  fr: "🔄 Politique retour:\n✅ Échange sous 7 jours si produit défectueux\n✅ Garantie 1 an (2 ans TV DAIKO)\n📞 Contactez-nous pour plus d'infos",
+  ar: "🔄 سياسة الإرجاع:\n✅ استبدال خلال 7 أيام إذا كان المنتج معيب\n✅ ضمان سنة (سنتين TV DAIKO)\n📞 اتصل بنا للمزيد من المعلومات"
 };
 
 /**
@@ -218,9 +218,9 @@ export const RETURN_POLICY_TEMPLATE = {
  * Describes installation services and wall mount availability
  */
 export const INSTALLATION_TEMPLATE = {
-  dzl: "🔧 Installation:\n✅ Bracket (support mural) gratuit m3a TV\n✅ Livraison + installation de base\n📞 L-msa3da: {CONTACTS}",
-  fr: "🔧 Installation:\n✅ Support mural gratuit avec TV\n✅ Livraison inclut installation de base\n📞 Assistance: {CONTACTS}",
-  ar: "🔧 التركيب:\n✅ براكيط مجاني مع التلفاز\n✅ التوصيل يتضمن التركيب الأساسي\n📞 للمساعدة: {CONTACTS}"
+  dzl: "🔧 Installation:\n✅ Bracket (support mural) gratuit m3a TV\n✅ Livraison + installation de base\n📞 Contactez-nous pour assistance",
+  fr: "🔧 Installation:\n✅ Support mural gratuit avec TV\n✅ Livraison inclut installation de base\n📞 Contactez-nous pour assistance",
+  ar: "🔧 التركيب:\n✅ براكيط مجاني مع التلفاز\n✅ التوصيل يتضمن التركيب الأساسي\n📞 اتصل بنا للمساعدة"
 };
 
 /**
