@@ -113,7 +113,7 @@ export function t(lang, key, vars, options = {}) {
         CONTACTS.calls.join(" / ") +
         "\n🗺️ Maps: " +
         MAPS_URL_SAFE,
-      OPENING_HOURS: "🕒 Lkhadma: Lundi–Samedi 10:00–19:00.",
+      OPENING_HOURS: "🕒 Lkhadma:\nLundi–Samedi 10:00–22:00\nDimanche 14:00–22:00",
       DELIVERY_INFO: "🚚 Livraison f Maroc كامل: 24–72h حسب l-mdina.\n✅ COD (cash f livraison) kayn.",
       WARRANTY_INFO: (x) => {
         if (x && x.daikoTv) return "🛡️ Garantie: 2 ans (TV DAIKO).";
