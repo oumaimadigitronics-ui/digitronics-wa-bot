@@ -4113,6 +4113,41 @@ const COMMON_NAMES_LOWER = [
   'laila', 'leila', 'ليلى'
 ].map(cn => cn.toLowerCase());
 
+const MOROCCAN_CITIES_LOWER = [
+  'casablanca', 'casa', 'الدار البيضاء',
+  'rabat', 'الرباط',
+  'marrakech', 'marrakesh', 'مراكش',
+  'tanger', 'tangier', 'طنجة',
+  'fes', 'fez', 'فاس',
+  'agadir', 'أكادير',
+  'meknes', 'meknès', 'مكناس',
+  'oujda', 'وجدة',
+  'kenitra', 'القنيطرة',
+  'tetouan', 'tétouan', 'تطوان',
+  'safi', 'صفرو',
+  'mohammedia', 'المحمدية',
+  'khouribga', 'خريبكة',
+  'beni mellal', 'بني ملال',
+  'el jadida', 'الجديدة',
+  'nador', 'الناظور',
+  'settat', 'سطات'
+].map(city => city.toLowerCase());
+
+const NEIGHBORHOOD_KEYWORDS_LOWER = [
+  'hay', 'حي',
+  'derb', 'درب',
+  'quartier',
+  'residence', 'résidence',
+  'oulfa', 'ولفة',
+  'hay mohammadi', 'حي محمدي',
+  'derb sultan', 'درب سلطان',
+  'swalam', 'سوالم',
+  'sbata', 'سباتة',
+  'ain chock', 'عين الشق',
+  'maarif', 'معاريف',
+  'anfa', 'أنفا'
+].map(kw => kw.toLowerCase());
+
 function detectContactInfo(text, ctx = {}) {
   const raw = String(text || "").trim();
   const ascii = arabicIndicToAsciiDigits(raw);
@@ -4191,48 +4226,13 @@ function detectContactInfo(text, ctx = {}) {
 
   // Bare address detection (Moroccan cities and neighborhoods)
   if (!address) {
-    const moroccanCities = [
-      'casablanca', 'casa', 'الدار البيضاء',
-      'rabat', 'الرباط',
-      'marrakech', 'marrakesh', 'مراكش',
-      'tanger', 'tangier', 'طنجة',
-      'fes', 'fez', 'فاس',
-      'agadir', 'أكادير',
-      'meknes', 'meknès', 'مكناس',
-      'oujda', 'وجدة',
-      'kenitra', 'القنيطرة',
-      'tetouan', 'tétouan', 'تطوان',
-      'safi', 'صفرو',
-      'mohammedia', 'المحمدية',
-      'khouribga', 'خريبكة',
-      'beni mellal', 'بني ملال',
-      'el jadida', 'الجديدة',
-      'nador', 'الناظور',
-      'settat', 'سطات'
-    ];
-
-    const neighborhoodKeywords = [
-      'hay', 'حي',
-      'derb', 'درب',
-      'quartier',
-      'residence', 'résidence',
-      'oulfa', 'ولفة',
-      'hay mohammadi', 'حي محمدي',
-      'derb sultan', 'درب سلطان',
-      'swalam', 'سوالم',
-      'sbata', 'سباتة',
-      'ain chock', 'عين الشق',
-      'maarif', 'معاريف',
-      'anfa', 'أنفا'
-    ];
-
     const lowerText = ascii.toLowerCase();
     
-    // Check for city names
-    const hasCity = moroccanCities.some(city => lowerText.includes(city.toLowerCase()));
+    // Check for city names (using pre-computed lowercase array)
+    const hasCity = MOROCCAN_CITIES_LOWER.some(city => lowerText.includes(city));
     
-    // Check for neighborhood keywords
-    const hasNeighborhood = neighborhoodKeywords.some(kw => lowerText.includes(kw.toLowerCase()));
+    // Check for neighborhood keywords (using pre-computed lowercase array)
+    const hasNeighborhood = NEIGHBORHOOD_KEYWORDS_LOWER.some(kw => lowerText.includes(kw));
     
     // If we find a city or neighborhood and it's not too short
     if ((hasCity || hasNeighborhood) && ascii.length >= 4 && ascii.length <= 120) {
