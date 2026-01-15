@@ -17,7 +17,7 @@ import { buildBotContext } from './context.js';
 import { pickOverride } from './overrides/index.js';
 import { barePriceClarification } from '../nlp/sizeExtraction.js';
 import { getAudioErrorMessage, classifyAudioError } from '../audio/errorMessages.js';
-import { logMessage } from '../../../src/services/chatLogger/index. js';
+import { logMessage } from '../../../../src/services/chatLogger/index.js';
 
 function getAudioPayload(body = {}) {
   const media = body.media || {};
