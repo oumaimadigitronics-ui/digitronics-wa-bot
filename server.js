@@ -1434,9 +1434,25 @@ function buildConversationKey(fields, req, body) {
     safeGet(b, ["messages", 0, "from"]),
     safeGet(b, ["data", "waId"]),
     safeGet(b, ["data", "wa_id"]),
+    safeGet(b, ["data", "contact", "wa_id"]),
+    safeGet(b, ["contact", "wa_id"]),
   ]);
-  const from = pickFirst([f.from, safeGet(b, ["from"]), safeGet(b, ["messages", 0, "from"]), safeGet(b, ["data", "from"])]);
-  const sender = pickFirst([f.sender, safeGet(b, ["sender"]), safeGet(b, ["data", "sender"])]);
+  const from = pickFirst([
+    f.from,
+    safeGet(b, ["from"]),
+    safeGet(b, ["messages", 0, "from"]),
+    safeGet(b, ["data", "from"]),
+    safeGet(b, ["data", "message", "from"]),
+    safeGet(b, ["message", "from"]),
+    safeGet(b, ["payload", "from"]),
+  ]);
+  const sender = pickFirst([
+    f.sender,
+    safeGet(b, ["sender"]),
+    safeGet(b, ["data", "sender"]),
+    safeGet(b, ["payload", "sender"]),
+    safeGet(b, ["entry", 0, "messaging", 0, "sender", "id"]),
+  ]);
   const phone = String(f.phone || "").trim();
   const chatId = pickFirst([
     f.chatId,
@@ -1571,6 +1587,21 @@ function buildConversationKey(fields, req, body) {
   debugLog("conversation_key", logLine);
   if (!IS_TEST) {
     console.warn(JSON.stringify({ level: "warn", msg: "conversation_key_fallback", key, hint: fallbackHint }));
+    
+    // Debug logging: capture payload structure for troubleshooting
+    const payloadDebug = {
+      hasData: !!body?.data,
+      hasContact: !!body?.contact,
+      hasMessage: !!body?.message,
+      hasMessages: !!body?.messages,
+      hasEntry: !!body?.entry,
+      hasPayload: !!body?.payload,
+      topLevelKeys: body ? Object.keys(body).slice(0, 20) : [],
+    };
+    if (body?.data) {
+      payloadDebug.dataKeys = Object.keys(body.data).slice(0, 20);
+    }
+    debugLog("conversation_key_fallback_debug", payloadDebug);
   }
   return key;
 }
@@ -1608,6 +1639,12 @@ function normalizeIncoming(body, req) {
     safeGet(b, ["data", "waId"]),
     safeGet(b, ["data", "chatId"]),
     safeGet(b, ["data", "chat_id"]),
+    safeGet(b, ["data", "contact", "phone_number"]),
+    safeGet(b, ["data", "contact", "wa_id"]),
+    safeGet(b, ["contact", "phone_number"]),
+    safeGet(b, ["contact", "wa_id"]),
+    safeGet(b, ["data", "message", "from"]),
+    safeGet(b, ["message", "from"]),
   ];
 
   let phone = null;
@@ -1616,7 +1653,7 @@ function normalizeIncoming(body, req) {
     phone = normalizePhone(c);
     if (phone) break;
   }
-  if (!phone) phone = findPhoneInObject(b, 4);
+  if (!phone) phone = findPhoneInObject(b, 6);
 
   const convId = extractConversationId(b);
   const chatId =
