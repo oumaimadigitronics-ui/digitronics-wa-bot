@@ -4078,6 +4078,41 @@ function normalizeMoroccoPhone(raw) {
   return "+212" + d;
 }
 
+// Pre-computed lowercase arrays for contact info detection
+const PRODUCT_KEYWORDS_LOWER = [
+  'tv', 'tele', 'télé', 'television', 'télévision', 'talfaza', 'تلفاز', 'تلفزة', 'شاشة',
+  'frigo', 'fridge', 'réfrigérateur', 'ثلاجة', 'ثلاجات',
+  'machine', 'laver', 'lave', 'linge', 'washing', 'غسالة', 'غسالات',
+  'climatiseur', 'clim', 'climatisation', 'مكيف', 'مكيفات',
+  'samsung', 'tcl', 'daiko', 'haier', 'lg', 'hisense', 'xiaomi', 'visio', 'echolink',
+  'elexia', 'revolution', 'tivoli', 'candy', 'beko', 'whirlpool', 'bosch', 'morsat',
+  'سامسونج', 'دايكو', 'هاير',
+  'smart', 'android', 'inch', 'pouces', 'cm', 'prix', 'dh', 'dirham', 'price'
+].map(kw => kw.toLowerCase());
+
+const COMMON_NAMES_LOWER = [
+  'mohamed', 'mohammed', 'muhammad', 'محمد',
+  'ahmed', 'ahmad', 'أحمد', 'احمد',
+  'fatima', 'fatma', 'فاطمة', 'فاطمه',
+  'zakarya', 'zakaria', 'zakariya', 'زكريا', 'زكرياء',
+  'said', 'saeed', 'سعيد',
+  'mariam', 'maryam', 'مريم',
+  'khadija', 'khadidja', 'خديجة',
+  'abdullah', 'abdallah', 'عبدالله', 'عبد الله',
+  'omar', 'عمر',
+  'ali', 'على', 'علي',
+  'youssef', 'yousef', 'يوسف',
+  'hassan', 'hasan', 'حسن',
+  'aisha', 'aicha', 'عائشة',
+  'salma', 'سلمى',
+  'amine', 'امين', 'أمين',
+  'imane', 'iman', 'إيمان',
+  'rachid', 'rashid', 'رشيد',
+  'karim', 'كريم',
+  'nadia', 'نادية',
+  'laila', 'leila', 'ليلى'
+].map(cn => cn.toLowerCase());
+
 function detectContactInfo(text, ctx = {}) {
   const raw = String(text || "").trim();
   const ascii = arabicIndicToAsciiDigits(raw);
@@ -4088,42 +4123,6 @@ function detectContactInfo(text, ctx = {}) {
     const bb = String(b || "").trim().toLowerCase();
     return aa && bb ? aa === bb : !aa && !bb;
   };
-
-  // Product keywords to exclude from name detection
-  const productKeywords = [
-    'tv', 'tele', 'télé', 'television', 'télévision', 'talfaza', 'تلفاز', 'تلفزة', 'شاشة',
-    'frigo', 'fridge', 'réfrigérateur', 'ثلاجة', 'ثلاجات',
-    'machine', 'laver', 'lave', 'linge', 'washing', 'غسالة', 'غسالات',
-    'climatiseur', 'clim', 'climatisation', 'مكيف', 'مكيفات',
-    'samsung', 'tcl', 'daiko', 'haier', 'lg', 'hisense', 'xiaomi', 'visio', 'echolink',
-    'elexia', 'revolution', 'tivoli', 'candy', 'beko', 'whirlpool', 'bosch', 'morsat',
-    'سامسونج', 'دايكو', 'هاير',
-    'smart', 'android', 'inch', 'pouces', 'cm', 'prix', 'dh', 'dirham', 'price'
-  ];
-
-  // Common Moroccan/Arabic names to help with detection
-  const commonNames = [
-    'mohamed', 'mohammed', 'muhammad', 'محمد',
-    'ahmed', 'ahmad', 'أحمد', 'احمد',
-    'fatima', 'fatma', 'فاطمة', 'فاطمه',
-    'zakarya', 'zakaria', 'zakariya', 'زكريا', 'زكرياء',
-    'said', 'saeed', 'سعيد',
-    'mariam', 'maryam', 'مريم',
-    'khadija', 'khadidja', 'خديجة',
-    'abdullah', 'abdallah', 'عبدالله', 'عبد الله',
-    'omar', 'عمر',
-    'ali', 'على', 'علي',
-    'youssef', 'yousef', 'يوسف',
-    'hassan', 'hasan', 'حسن',
-    'aisha', 'aicha', 'عائشة',
-    'salma', 'سلمى',
-    'amine', 'امين', 'أمين',
-    'imane', 'iman', 'إيمان',
-    'rachid', 'rashid', 'رشيد',
-    'karim', 'كريم',
-    'nadia', 'نادية',
-    'laila', 'leila', 'ليلى'
-  ];
 
   let phone = null;
   const phoneRe = /(?:\+?\s*212\s*|\b0)\s*(6|7)(?:[\s-]*\d){8}/g;
@@ -4165,11 +4164,11 @@ function detectContactInfo(text, ctx = {}) {
       const validLength = words.every(w => w.length >= 2 && w.length <= 15);
       const noDigits = !/\d/.test(potentialName);
       
-      // Check if it's not a product keyword
-      const notProductKeyword = !productKeywords.some(kw => lowerName.includes(kw.toLowerCase()));
+      // Check if it's not a product keyword (using pre-computed lowercase array)
+      const notProductKeyword = !PRODUCT_KEYWORDS_LOWER.some(kw => lowerName.includes(kw));
       
-      // Check if it's a common name OR looks like a name (alphabetic only)
-      const isCommonName = commonNames.some(cn => lowerName.includes(cn.toLowerCase()));
+      // Check if it's a common name OR looks like a name (using pre-computed lowercase array)
+      const isCommonName = COMMON_NAMES_LOWER.some(cn => lowerName.includes(cn));
       const looksLikeName = /^[\p{L}\s]+$/u.test(potentialName);
       
       if (validLength && noDigits && notProductKeyword && looksLikeName) {
