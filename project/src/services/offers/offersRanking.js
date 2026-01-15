@@ -164,7 +164,10 @@ export function rankOffers(items, opts) {
       const capacityScore = hasCapacity && Number.isFinite(it.capacity)
         ? Math.abs(it.capacity - capacityLiters)
         : Number.POSITIVE_INFINITY;
-      return Object.assign({}, it, { sizeScore, capacityScore, idx });
+      // Pre-compute normalized values to avoid repeated normMatch() calls in sort comparator
+      const normalizedModel = normMatch((it.offer && it.offer.model) || "");
+      const normalizedName = normMatch((it.offer && it.offer.name) || "");
+      return Object.assign({}, it, { sizeScore, capacityScore, idx, normalizedModel, normalizedName });
     })
     .sort((a, b) => {
       const capCmp = capacityScoreCmp(a, b);
@@ -174,13 +177,10 @@ export function rankOffers(items, opts) {
       if (a.price !== b.price) return a.price - b.price;
       const brandCmp = String(a.brand || "").localeCompare(String(b.brand || ""));
       if (brandCmp !== 0) return brandCmp;
-      const modelCmp = normMatch((a.offer && a.offer.model) || "").localeCompare(
-        normMatch((b.offer && b.offer.model) || "")
-      );
+      // Use pre-computed normalized values instead of calling normMatch() repeatedly
+      const modelCmp = a.normalizedModel.localeCompare(b.normalizedModel);
       if (modelCmp !== 0) return modelCmp;
-      const nameCmp = normMatch((a.offer && a.offer.name) || "").localeCompare(
-        normMatch((b.offer && b.offer.name) || "")
-      );
+      const nameCmp = a.normalizedName.localeCompare(b.normalizedName);
       if (nameCmp !== 0) return nameCmp;
       return a.originalIdx - b.originalIdx;
     });

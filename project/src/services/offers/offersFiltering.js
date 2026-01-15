@@ -6,6 +6,7 @@
 
 import { normMatch, includesToken } from '../../lib/textUtils.js';
 import { getOffersIndex } from '../woocommerce/index.js';
+import { inferTvCanonFromOffers as inferTvCanonShared } from './tvInference.js';
 
 /**
  * TV class synonyms for matching TV products
@@ -89,52 +90,12 @@ export function matchTvTitleHint(text) {
 
 /**
  * Infer TV canonical class from offers
+ * Re-exported from shared tvInference module to maintain backward compatibility
  * @param {Object} offersObj - Offers object
  * @returns {Object} TV class info
  */
 export function inferTvCanonFromOffers(offersObj = {}) {
-  const classCounts = new Map();
-  const categoryCounts = new Map();
-  const titleCounts = new Map();
-
-  for (const arr of Object.values(offersObj)) {
-    for (let i = 0; i < arr.length; i += 1) {
-      const offer = arr[i] || {};
-      const cls = String(offer.class || "").trim();
-      const cat = String(offer.category || "").trim();
-      const title = [offer.name, offer.model, offer.sku].filter(Boolean).join(" ").trim();
-
-      if (cls && matchTvSynonym(cls)) {
-        classCounts.set(cls, (classCounts.get(cls) || 0) + 1);
-      }
-      if (cat && matchTvSynonym(cat)) {
-        categoryCounts.set(cat, (categoryCounts.get(cat) || 0) + 1);
-      }
-      if (title && matchTvTitleHint(title)) {
-        titleCounts.set(title, (titleCounts.get(title) || 0) + 1);
-      }
-    }
-  }
-
-  const pickTop = (map) => {
-    const entries = Array.from(map.entries()).sort((a, b) => b[1] - a[1] || String(a[0]).localeCompare(String(b[0])));
-    return entries.length ? entries[0][0] : null;
-  };
-  const topCandidates = (map) =>
-    Array.from(map.entries())
-      .sort((a, b) => b[1] - a[1] || String(a[0]).localeCompare(String(b[0])))
-      .map(([name, count]) => ({ name, count }));
-
-  const tvClass = pickTop(classCounts);
-  const tvCategory = tvClass ? null : pickTop(categoryCounts);
-
-  return {
-    tvClass,
-    tvCategory,
-    classCandidates: topCandidates(classCounts),
-    categoryCandidates: topCandidates(categoryCounts),
-    titleCandidates: topCandidates(titleCounts),
-  };
+  return inferTvCanonShared(offersObj);
 }
 
 /**

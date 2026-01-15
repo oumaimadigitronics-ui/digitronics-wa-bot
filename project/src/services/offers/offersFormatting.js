@@ -321,8 +321,13 @@ export function formatOfferLine(brand, o, opts = {}) {
 
     let displayName = buildOfferDisplayName(brand, o, opts.lang || "dzl");
     const typeName = String((o && o.type) || "").trim();
-    if (typeName && !normMatch(displayName).includes(normMatch(typeName))) {
-      displayName = `${displayName} ${typeName}`.trim();
+    // Pre-compute normalized values to avoid double normMatch()
+    if (typeName) {
+      const displayNameNorm = normMatch(displayName);
+      const typeNameNorm = normMatch(typeName);
+      if (!displayNameNorm.includes(typeNameNorm)) {
+        displayName = `${displayName} ${typeName}`.trim();
+      }
     }
     displayName = displayName.replace(/\s+simple\s+/gi, " ").replace(/\s+simple$/i, "").trim();
     const pricePart = offerPriceText(o || {});
