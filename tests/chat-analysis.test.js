@@ -8,7 +8,7 @@ describe('Chat Logger Service', () => {
   const testDate = '2026-01-14';
   const testLogsDir = './logs-test';
   
-  it('should log a message exchange', () => {
+  it('should log a message exchange', async () => {
     // Set test logs directory
     process.env.LOGS_DIR = testLogsDir;
     
@@ -50,7 +50,7 @@ describe('Chat Logger Service', () => {
       }
     };
     
-    const result = logMessage(testMessage);
+    const result = await logMessage(testMessage);
     
     assert.ok(result);
     assert.ok(result.id);
@@ -107,9 +107,6 @@ describe('Chat Logger Service', () => {
     
     await logMessage(testMessage);
     
-    // Wait for async write to complete
-    await new Promise(resolve => setTimeout(resolve, 100));
-    
     const issues = getIssues(testDate);
     assert.ok(issues);
     assert.ok(issues.issues.length > 0);
@@ -158,9 +155,6 @@ describe('Auto-Analyzer Service', () => {
     ];
     
     await Promise.all(testMessages.map(msg => logMessage(msg)));
-    
-    // Wait for async writes to complete
-    await new Promise(resolve => setTimeout(resolve, 100));
     
     const report = await autoAnalyzer.analyzeDailyLogs(testDate);
     
