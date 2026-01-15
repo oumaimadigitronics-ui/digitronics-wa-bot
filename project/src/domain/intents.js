@@ -310,7 +310,6 @@ export function isContactIntent(text) {
     "هاتف",
     "تلفون",
     "رقم",
-    "نمرة",
     "واتساب",
     "واتس",
     "اتصال",
@@ -331,6 +330,10 @@ export function isContactIntent(text) {
     "البريد الإلكتروني",
     "البريد الالكتروني",
   ];
+
+  if (includesToken(s, "نمرة") && !hasAnyToken(s, ["phone", "tel", "telephone", "téléphone", "هاتف", "تلفون", "واتساب", "واتس", "رقم"])) {
+    return false;
+  }
 
   return hasAnyToken(s, locationTokens) || hasAnyToken(s, phoneTokens) || hasAnyToken(s, emailTokens);
 }
@@ -462,6 +465,172 @@ export function isPaymentIntent(text) {
   ];
 
   return hasAnyToken(s, tokens);
+}
+
+/**
+ * Detects if the user is asking about installment/credit payment
+ * Recognizes installment-related keywords in multiple languages.
+ * 
+ * @param {string} text - The user's message text
+ * @returns {boolean} True if installment intent is detected
+ */
+export function isInstallmentIntent(text) {
+  const raw = String(text || "");
+  const s = normalizeIntentText(raw);
+  if (!s) return false;
+
+  const phrases = [
+    "paiement en plusieurs fois",
+    "payer en plusieurs fois",
+    "payment in installments",
+    "pay in installments",
+    "pay monthly",
+    "monthly payments",
+    "paiement mensuel",
+    "mensualites",
+    "mensualités",
+    "credit",
+    "crédit",
+    "credit payment",
+    "plan de paiement",
+    "plan de financement",
+    "تقسيط",
+    "بالاقساط",
+    "بالأقساط",
+    "قسط",
+    "أقساط",
+  ];
+
+  return hasAnyPhrase(s, phrases) || hasAnyToken(s, phrases);
+}
+
+/**
+ * Detects if the user is asking about trade-in/exchange of old devices
+ * Recognizes trade-in related keywords in multiple languages.
+ * 
+ * @param {string} text - The user's message text
+ * @returns {boolean} True if trade-in intent is detected
+ */
+export function isTradeInIntent(text) {
+  const raw = String(text || "");
+  const s = normalizeIntentText(raw);
+  if (!s) return false;
+
+  const phrases = [
+    "trade in",
+    "trade-in",
+    "reprise",
+    "échange",
+    "echange",
+    "reprise ancien appareil",
+    "reprise ancien",
+    "reprendre ancien",
+    "echange ancien",
+    "échange ancien",
+    "ancienne reprise",
+    "بدلية",
+    "بدل",
+    "تبديل قديم",
+    "تبديل الجهاز القديم",
+    "استبدال قديم",
+  ];
+
+  return hasAnyPhrase(s, phrases) || hasAnyToken(s, phrases);
+}
+
+/**
+ * Detects if the user is asking about wholesale/bulk pricing
+ * Recognizes bulk/wholesale related keywords in multiple languages.
+ * 
+ * @param {string} text - The user's message text
+ * @returns {boolean} True if wholesale intent is detected
+ */
+export function isWholesaleIntent(text) {
+  const raw = String(text || "");
+  const s = normalizeIntentText(raw);
+  if (!s) return false;
+
+  const phrases = [
+    "wholesale",
+    "wholesale price",
+    "prix de gros",
+    "prix gros",
+    "en gros",
+    "vente en gros",
+    "bulk price",
+    "bulk order",
+    "achat en gros",
+    "بالجملة",
+    "الجملة",
+    "ثمن الجملة",
+    "شراء بالجملة",
+  ];
+
+  return hasAnyPhrase(s, phrases) || hasAnyToken(s, phrases);
+}
+
+/**
+ * Detects if the user is explicitly requesting a photo/image
+ * Recognizes image request keywords in multiple languages.
+ * 
+ * @param {string} text - The user's message text
+ * @returns {boolean} True if image request intent is detected
+ */
+export function isImageRequestIntent(text) {
+  const raw = String(text || "");
+  const s = normalizeIntentText(raw);
+  if (!s) return false;
+
+  const phrases = [
+    "send photo",
+    "send image",
+    "send picture",
+    "picture please",
+    "photo please",
+    "moumkine sora",
+    "moumkine tswira",
+    "ممكن صورة",
+    "بغيت صورة",
+    "بغيت تصاور",
+    "صيفط صورة",
+  ];
+
+  const tokens = [
+    "photo",
+    "picture",
+    "image",
+    "pic",
+    "صورة",
+    "صور",
+    "تصاور",
+    "تصويرة",
+  ];
+
+  return hasAnyPhrase(s, phrases) || hasAnyToken(s, tokens);
+}
+
+/**
+ * Detects if the user is inquiring about a specific model number
+ * Uses brand keywords plus model-like codes (letters + digits).
+ * 
+ * @param {string} text - The user's message text
+ * @returns {boolean} True if model inquiry intent is detected
+ */
+export function isModelInquiryIntent(text) {
+  const raw = arabicIndicToAsciiDigits(String(text || ""));
+  const s = normMatch(raw);
+  if (!s) return false;
+
+  const normalized = s.replace(/[^a-z0-9\u0600-\u06ff]+/g, " ").trim();
+  if (!normalized) return false;
+
+  const brandPattern = /\b(tcl|samsung|lg|hisense|haier|daiko|visio|xiaomi|beko|candy|sony|philips|panasonic|toshiba|thomson|هيسنس|هاير|سامسونج|دايكو|ال جي|تي سي ال)\b/i;
+  const modelPattern = /\b(?:[a-z]{1,4}\d{2,6}[a-z0-9]*|\d{2,3}[a-z]{1,4}\d{1,4})\b/i;
+
+  if (!brandPattern.test(normalized)) return false;
+  if (!modelPattern.test(normalized)) return false;
+
+  return true;
 }
 
 /**

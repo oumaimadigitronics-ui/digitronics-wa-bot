@@ -36,7 +36,7 @@ function isMoreOptionsIntent(text) {
 
 /**
  * Detects if user wants product details/specs/info
- * Checks for phrases like "more info", "specs", "details", "link", "photo"
+ * Checks for phrases like "more info", "specs", "details", "link"
  * in multiple languages (French, Arabic, Darija)
  * 
  * @param {string} text - User input text
@@ -64,11 +64,6 @@ export function wantsProductDetails(text, lang) {
     "link",
     "send link",
     "send me the link",
-    "send photo",
-    "send image",
-    "photo",
-    "image",
-    "picture",
     "détails",
     "plus d'infos",
     "plus d info",
@@ -81,11 +76,6 @@ export function wantsProductDetails(text, lang) {
     "رابط",
     "لينك",
     "صفحة المنتج",
-    "صور",
-    "صورة",
-    "تصاور",
-    "send photos",
-    "send images",
   ];
   const frPhrases = [
     "plus d'infos",
@@ -100,8 +90,8 @@ export function wantsProductDetails(text, lang) {
     "fiche produit",
     "fiche technique",
   ];
-  const arPhrases = ["معلومات", "تفاصيل", "مواصفات", "رابط", "لينك", "صفحة المنتج", "صور", "صورة", "تصاور"];
-  const dzlPhrases = ["infos", "info", "details", "detail", "lien", "link", "lien produit", "photo", "image"];
+  const arPhrases = ["معلومات", "تفاصيل", "مواصفات", "رابط", "لينك", "صفحة المنتج"];
+  const dzlPhrases = ["infos", "info", "details", "detail", "lien", "link", "lien produit"];
   const phrases = basePhrases.concat(frPhrases, arPhrases, dzlPhrases);
   const langHint = String(lang || "").toLowerCase();
   if (langHint === "fr") return hasAnyPhrase(raw, basePhrases.concat(frPhrases));
