@@ -5,49 +5,8 @@
 import { normMatch, includesToken } from "../../lib/textUtils.js";
 import { buildWooUrl, wcFetchJson } from "./fetchProducts.js";
 import { offerFromWooProduct, getBrandFromWoo } from "./parser.js";
-
-/**
- * TV class synonyms
- */
-const TV_CLASS_SYNONYMS = Object.freeze([
-  "tv",
-  "tele",
-  "télé",
-  "television",
-  "télévision",
-  "televiseur",
-  "téléviseur",
-  "smart tv",
-  "android tv",
-  "google tv",
-  "تلفاز",
-  "تلفزة",
-  "تلفزيون",
-  "تيليفزيون",
-]);
-
-/**
- * TV title hints
- */
-const TV_TITLE_HINTS = Object.freeze([
-  "tv",
-  "smart tv",
-  "android tv",
-  "google tv",
-  "oled",
-  "qled",
-  "mini led",
-  "mini-led",
-  "4k",
-  "uhd",
-  "led",
-  "tele",
-  "télé",
-  "television",
-  "télévision",
-  "تلفاز",
-  "تلفزيون",
-]);
+import { inferTvCanonFromOffers } from "../offers/tvInference.js";
+import { matchTvSynonym, matchTvTitleHint } from "../offers/offersFiltering.js";
 
 /**
  * Global state for offers
@@ -97,26 +56,6 @@ function matchesAnyToken(text, tokens) {
     if (includesToken(text, token)) return true;
   }
   return false;
-}
-
-/**
- * Check if text matches TV synonym
- * @param {string} text - Text to check
- * @returns {boolean} True if matches
- */
-function matchTvSynonym(text) {
-  return matchesAnyToken(text, TV_CLASS_SYNONYMS);
-}
-
-/**
- * Check if text matches TV title hint
- * @param {string} text - Text to check
- * @returns {boolean} True if matches
- */
-function matchTvTitleHint(text) {
-  if (!text) return false;
-  if (matchesAnyToken(text, TV_TITLE_HINTS)) return true;
-  return /\b\d{2,3}\s*(\"|pouce|pouces|inch|in)\b/i.test(String(text));
 }
 
 /**
@@ -187,56 +126,6 @@ function pickCanonicalClass(classes, tokens) {
   }
 
   return arr[0] || null;
-}
-
-/**
- * Infer TV canonical class from offers
- * @param {Object} offersObj - Offers object
- * @returns {Object} Inference result
- */
-function inferTvCanonFromOffers(offersObj = {}) {
-  const classCounts = new Map();
-  const categoryCounts = new Map();
-  const titleCounts = new Map();
-
-  for (const arr of Object.values(offersObj)) {
-    for (let i = 0; i < arr.length; i += 1) {
-      const offer = arr[i] || {};
-      const cls = String(offer.class || "").trim();
-      const cat = String(offer.category || "").trim();
-      const title = [offer.name, offer.model, offer.sku].filter(Boolean).join(" ").trim();
-
-      if (cls && matchTvSynonym(cls)) {
-        classCounts.set(cls, (classCounts.get(cls) || 0) + 1);
-      }
-      if (cat && matchTvSynonym(cat)) {
-        categoryCounts.set(cat, (categoryCounts.get(cat) || 0) + 1);
-      }
-      if (title && matchTvTitleHint(title)) {
-        titleCounts.set(title, (titleCounts.get(title) || 0) + 1);
-      }
-    }
-  }
-
-  const pickTop = (map) => {
-    const entries = Array.from(map.entries()).sort((a, b) => b[1] - a[1] || String(a[0]).localeCompare(String(b[0])));
-    return entries.length ? entries[0][0] : null;
-  };
-  const topCandidates = (map) =>
-    Array.from(map.entries())
-      .sort((a, b) => b[1] - a[1] || String(a[0]).localeCompare(String(b[0])))
-      .map(([name, count]) => ({ name, count }));
-
-  const tvClass = pickTop(classCounts);
-  const tvCategory = tvClass ? null : pickTop(categoryCounts);
-
-  return {
-    tvClass,
-    tvCategory,
-    classCandidates: topCandidates(classCounts),
-    categoryCandidates: topCandidates(categoryCounts),
-    titleCandidates: topCandidates(titleCounts),
-  };
 }
 
 /**
