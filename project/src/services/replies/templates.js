@@ -255,6 +255,33 @@ export const THANK_YOU_TEMPLATE = {
 };
 
 /**
+ * Template for order confirmation after customer provides contact info
+ * Acknowledges receipt and promises callback from team
+ */
+export const ORDER_CONFIRMATION_TEMPLATE = {
+  dzl: `✅ شكراً بزاف! توصلنا بالمعلومات ديالك.
+📞 غادي يتصل بيك واحد من الفريق ديالنا قريباً لتأكيد الطلب.
+⏰ ساعات العمل: الإثنين - السبت 10:00 - 22:00`,
+  
+  fr: `✅ Merci beaucoup! Nous avons bien reçu vos informations.
+📞 Un membre de notre équipe vous appellera bientôt pour confirmer la commande.
+⏰ Horaires: Lundi - Samedi 10h00 - 22h00`,
+  
+  ar: `✅ شكراً جزيلاً! تم استلام معلوماتك.
+📞 سيتصل بك أحد أعضاء فريقنا قريباً لتأكيد الطلب.
+⏰ ساعات العمل: الإثنين - السبت 10:00 - 22:00`
+};
+
+/**
+ * Helper function to get order confirmation template for a specific language
+ * @param {string} lang - Language code (dzl, fr, ar)
+ * @returns {string} - Order confirmation message in the specified language
+ */
+export function orderConfirmationTemplate(lang = "dzl") {
+  return ORDER_CONFIRMATION_TEMPLATE[lang] || ORDER_CONFIRMATION_TEMPLATE.dzl;
+}
+
+/**
  * Helper function to get thank you template for a specific language
  * @param {string} lang - Language code (dzl, fr, ar, en)
  * @returns {string} - Thank you message in the specified language
