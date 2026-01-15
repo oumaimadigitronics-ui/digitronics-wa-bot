@@ -6944,49 +6944,54 @@ app.post("/wanotifier", express.raw({ type: "*/*", limit: "2mb" }), parseWanotif
       resetStrikes(key);
     }
 
-    reply = finalizeReply(reply, 520);
-    memory.push(key, "assistant", reply);
+reply = finalizeReply(reply, 520);
+memory.push(key, "assistant", reply);
 
-    const ms = Date.now() - t0;
-    
-    // Log message exchange for analysis
-    try {
-      const usedFallback = looksLikeFallback(reply);
-      logMessage({
-        conversationId: key,
-        customerId: phone,
-        customerName: incoming.senderName || null,
-        input: {
-          text: userTextRaw,
-          normalized: normMatch(userTextRaw),
-          lang: lang,
-          type: isAudioMessage ? 'audio' : 'text',
-          audioTranscript: isAudioMessage ? userTextFromAudio : null
-        },
-        output: {
-          reply: reply,
-          template: null,
-          offers: [],
-          responseTime: ms,
-          fallbackUsed: usedFallback
-        },
-        analysis: {
-          intents: [],
-          primaryIntent: usedFallback ? 'unknown' : 'matched',
-          brand: detectBrand(userTextRaw) || null,
-          size: extractTvSize(userTextRaw) || null,
-          budget: null,
-          category: detectCategory(userTextRaw) || null,
-          context: ctxData
-        },
-        quality: {
-          confidence: usedFallback ? 0.5 : 0.8,
-          flags: []
-        }
-      });
-    } catch (logErr) {
-      console.error(JSON.stringify({ level: "error", msg: "chat_logging_failed", reqId, error: (logErr && logErr.message) || String(logErr) }));
+const ms = Date.now() - t0;
+
+// Log message exchange for analysis
+try {
+  const usedFallback = looksLikeFallback(reply);
+  logMessage({
+    conversationId:  key,
+    customerId: phone,
+    customerName: incoming.senderName || null,
+    input: {
+      text: userTextRaw,
+      normalized: normMatch(userTextRaw),
+      lang: lang,
+      type: isAudioMessage ? 'audio' : 'text',
+      audioTranscript: isAudioMessage ? userTextFromAudio : null
+    },
+    output: {
+      reply: reply,
+      template: null,
+      offers: [],
+      responseTime: ms,
+      fallbackUsed: usedFallback
+    },
+    analysis: {
+      intents: [],
+      primaryIntent: usedFallback ? 'unknown' : 'matched',
+      brand: detectBrand(userTextRaw) || null,
+      size: extractTvSize(userTextRaw) || null,
+      budget: null,
+      category: detectCategory(userTextRaw) || null,
+      context: ctxData || {}
+    },
+    quality:  {
+      confidence: usedFallback ? 0.5 : 0.8,
+      flags: []
     }
+  });
+} catch (logErr) {
+  console.error(JSON.stringify({ 
+    level: "error", 
+    msg: "chat_logging_failed", 
+    reqId, 
+    error: (logErr && logErr.message) || String(logErr) 
+  }));
+}
     
     console.log(
       JSON.stringify({
