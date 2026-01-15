@@ -1589,6 +1589,7 @@ function buildConversationKey(fields, req, body) {
     console.warn(JSON.stringify({ level: "warn", msg: "conversation_key_fallback", key, hint: fallbackHint }));
     
     // Debug logging: capture payload structure for troubleshooting
+    const MAX_DEBUG_KEYS = 20;
     const payloadDebug = {
       hasData: !!body?.data,
       hasContact: !!body?.contact,
@@ -1596,10 +1597,10 @@ function buildConversationKey(fields, req, body) {
       hasMessages: !!body?.messages,
       hasEntry: !!body?.entry,
       hasPayload: !!body?.payload,
-      topLevelKeys: body ? Object.keys(body).slice(0, 20) : [],
+      topLevelKeys: body ? Object.keys(body).slice(0, MAX_DEBUG_KEYS) : [],
     };
     if (body?.data) {
-      payloadDebug.dataKeys = Object.keys(body.data).slice(0, 20);
+      payloadDebug.dataKeys = Object.keys(body.data).slice(0, MAX_DEBUG_KEYS);
     }
     debugLog("conversation_key_fallback_debug", payloadDebug);
   }
