@@ -4251,11 +4251,12 @@ function detectContactInfo(text, ctx = {}) {
   const hasPhone = Boolean(phone);
   const hasAddress = Boolean(address);
 
-  const isNewInfo =
+  const isNewInfo = Boolean(
     (hasName && !sameVal(name, prev.name)) ||
     (hasPhone && !sameVal(phone, prev.phone)) ||
     (hasAddress && !sameVal(address, prev.address)) ||
-    (ctx.awaitingCustomerInfo && (hasName || hasPhone || hasAddress));
+    (ctx.awaitingCustomerInfo && (hasName || hasPhone || hasAddress))
+  );
 
   return {
     hasName,
