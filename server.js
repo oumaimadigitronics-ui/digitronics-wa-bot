@@ -1868,7 +1868,7 @@ const GREETING_TEMPLATES = {
   ].join("\n"),
 };
 
-const OPENING_HOURS_TEMPLATE = "🕒 Hours: Mon–Sat 10:00–19:00.";
+const OPENING_HOURS_TEMPLATE = "🕒 Hours: Mon–Sat 10:00–22:00. Sun 14:00–22:00.";
 
 function routeMenuSelection(selection, lang, key) {
   void key;
