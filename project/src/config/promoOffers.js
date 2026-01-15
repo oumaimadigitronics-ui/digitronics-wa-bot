@@ -21,9 +21,6 @@ export const OFFERS_FALLBACK_MESSAGE = `🚨🔥 *PROMO FLASH اليوم* 🔥�
 ⚠️ (Stock limité – حتى يكمّل الستوك)
 🚚 *توصيل مجاني* + 🎁 *هدية مع كل TV*
 
-✅ *Streamsat Smart Android TV 32" (32-ST)*
-💥 *1099 فقط!* ✅
-
 2️⃣ *Echolink Smart Tv 32 Android Qled*
 💥 *1149 DH فقط!* ✅
 
