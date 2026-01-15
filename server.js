@@ -312,14 +312,6 @@ import {
 } from './project/src/services/guardrails/topicGuardrail.js';
 
 import {
-  logMessage,
-  getDailyLogs,
-  getConversation,
-  getIssues,
-  exportLogs
-} from './src/services/chatLogger/index.js';
-
-import {
   autoAnalyzer
 } from './src/services/analytics/autoAnalyzer.js';
 
