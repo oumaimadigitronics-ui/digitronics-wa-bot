@@ -58,7 +58,9 @@ import {
   SIZE_GUIDE_TEMPLATE,
   COMPARISON_TEMPLATE,
   THANK_YOU_TEMPLATE,
-  thankYouTemplate
+  ORDER_CONFIRMATION_TEMPLATE,
+  thankYouTemplate,
+  orderConfirmationTemplate
 } from './project/src/services/replies/templates.js';
 
 import {
@@ -4076,6 +4078,76 @@ function normalizeMoroccoPhone(raw) {
   return "+212" + d;
 }
 
+// Pre-computed lowercase arrays for contact info detection
+const PRODUCT_KEYWORDS_LOWER = [
+  'tv', 'tele', 'télé', 'television', 'télévision', 'talfaza', 'تلفاز', 'تلفزة', 'شاشة',
+  'frigo', 'fridge', 'réfrigérateur', 'ثلاجة', 'ثلاجات',
+  'machine', 'laver', 'lave', 'linge', 'washing', 'غسالة', 'غسالات',
+  'climatiseur', 'clim', 'climatisation', 'مكيف', 'مكيفات',
+  'samsung', 'tcl', 'daiko', 'haier', 'lg', 'hisense', 'xiaomi', 'visio', 'echolink',
+  'elexia', 'revolution', 'tivoli', 'candy', 'beko', 'whirlpool', 'bosch', 'morsat',
+  'سامسونج', 'دايكو', 'هاير',
+  'smart', 'android', 'inch', 'pouces', 'cm', 'prix', 'dh', 'dirham', 'price'
+].map(kw => kw.toLowerCase());
+
+const COMMON_NAMES_LOWER = [
+  'mohamed', 'mohammed', 'muhammad', 'محمد',
+  'ahmed', 'ahmad', 'أحمد', 'احمد',
+  'fatima', 'fatma', 'فاطمة', 'فاطمه',
+  'zakarya', 'zakaria', 'zakariya', 'زكريا', 'زكرياء',
+  'said', 'saeed', 'سعيد',
+  'mariam', 'maryam', 'مريم',
+  'khadija', 'khadidja', 'خديجة',
+  'abdullah', 'abdallah', 'عبدالله', 'عبد الله',
+  'omar', 'عمر',
+  'ali', 'على', 'علي',
+  'youssef', 'yousef', 'يوسف',
+  'hassan', 'hasan', 'حسن',
+  'aisha', 'aicha', 'عائشة',
+  'salma', 'سلمى',
+  'amine', 'امين', 'أمين',
+  'imane', 'iman', 'إيمان',
+  'rachid', 'rashid', 'رشيد',
+  'karim', 'كريم',
+  'nadia', 'نادية',
+  'laila', 'leila', 'ليلى'
+].map(cn => cn.toLowerCase());
+
+const MOROCCAN_CITIES_LOWER = [
+  'casablanca', 'casa', 'الدار البيضاء',
+  'rabat', 'الرباط',
+  'marrakech', 'marrakesh', 'مراكش',
+  'tanger', 'tangier', 'طنجة',
+  'fes', 'fez', 'فاس',
+  'agadir', 'أكادير',
+  'meknes', 'meknès', 'مكناس',
+  'oujda', 'وجدة',
+  'kenitra', 'القنيطرة',
+  'tetouan', 'tétouan', 'تطوان',
+  'safi', 'صفرو',
+  'mohammedia', 'المحمدية',
+  'khouribga', 'خريبكة',
+  'beni mellal', 'بني ملال',
+  'el jadida', 'الجديدة',
+  'nador', 'الناظور',
+  'settat', 'سطات'
+].map(city => city.toLowerCase());
+
+const NEIGHBORHOOD_KEYWORDS_LOWER = [
+  'hay', 'حي',
+  'derb', 'درب',
+  'quartier',
+  'residence', 'résidence',
+  'oulfa', 'ولفة',
+  'hay mohammadi', 'حي محمدي',
+  'derb sultan', 'درب سلطان',
+  'swalam', 'سوالم',
+  'sbata', 'سباتة',
+  'ain chock', 'عين الشق',
+  'maarif', 'معاريف',
+  'anfa', 'أنفا'
+].map(kw => kw.toLowerCase());
+
 function detectContactInfo(text, ctx = {}) {
   const raw = String(text || "").trim();
   const ascii = arabicIndicToAsciiDigits(raw);
@@ -4114,7 +4186,37 @@ function detectContactInfo(text, ctx = {}) {
       }
     }
   }
+
+  // Bare name detection (without prefix)
+  if (!name) {
+    const words = ascii.trim().split(/\s+/);
+    // Single word or two words
+    if (words.length >= 1 && words.length <= 2) {
+      const potentialName = words.join(' ');
+      const lowerName = potentialName.toLowerCase();
+      
+      // Check if each word is 2-15 characters and contains no digits
+      const validLength = words.every(w => w.length >= 2 && w.length <= 15);
+      const noDigits = !/\d/.test(potentialName);
+      
+      // Check if it's not a product keyword (using pre-computed lowercase array)
+      const notProductKeyword = !PRODUCT_KEYWORDS_LOWER.some(kw => lowerName.includes(kw));
+      
+      // Check if it's a common name OR looks like a name (using pre-computed lowercase array)
+      const isCommonName = COMMON_NAMES_LOWER.some(cn => lowerName.includes(cn));
+      const looksLikeName = /^[\p{L}\s]+$/u.test(potentialName);
+      
+      if (validLength && noDigits && notProductKeyword && looksLikeName) {
+        // Additional check: if awaiting customer info or it's a common name, accept it
+        if (ctx.awaitingCustomerInfo || isCommonName) {
+          name = potentialName.slice(0, 80);
+        }
+      }
+    }
+  }
+
   let address = null;
+  // Existing address pattern with prefix
   const addressMatch = ascii.match(
     /(?:العنوان|ساكن\s*ف?|حي|زنقة|شارع|اقامة|إقامة|شقة|residence|quartier|adresse|address|rue|immeuble|apartment|appartement)[:\-\s]*([^\n]{6,120})/i
   );
@@ -4122,14 +4224,38 @@ function detectContactInfo(text, ctx = {}) {
     address = String(addressMatch[1]).trim();
   }
 
+  // Bare address detection (Moroccan cities and neighborhoods)
+  if (!address) {
+    const lowerText = ascii.toLowerCase();
+    
+    // Check for city names (using pre-computed lowercase array)
+    const hasCity = MOROCCAN_CITIES_LOWER.some(city => lowerText.includes(city));
+    
+    // Check for neighborhood keywords (using pre-computed lowercase array)
+    const hasNeighborhood = NEIGHBORHOOD_KEYWORDS_LOWER.some(kw => lowerText.includes(kw));
+    
+    // If we find a city or neighborhood and it's not too short
+    if ((hasCity || hasNeighborhood) && ascii.length >= 4 && ascii.length <= 120) {
+      // Context-aware: accept if awaiting customer info
+      if (ctx.awaitingCustomerInfo) {
+        address = ascii.slice(0, 120);
+      } else if (hasCity && hasNeighborhood) {
+        // Accept if both city and neighborhood mentioned
+        address = ascii.slice(0, 120);
+      }
+    }
+  }
+
   const hasName = Boolean(name);
   const hasPhone = Boolean(phone);
   const hasAddress = Boolean(address);
 
-  const isNewInfo =
+  const isNewInfo = Boolean(
     (hasName && !sameVal(name, prev.name)) ||
     (hasPhone && !sameVal(phone, prev.phone)) ||
-    (hasAddress && !sameVal(address, prev.address));
+    (hasAddress && !sameVal(address, prev.address)) ||
+    (ctx.awaitingCustomerInfo && (hasName || hasPhone || hasAddress))
+  );
 
   return {
     hasName,
@@ -6500,6 +6626,8 @@ app.post("/wanotifier", express.raw({ type: "*/*", limit: "2mb" }), parseWanotif
       const reply = finalizeReply(BUY_INTENT_TEMPLATE.replace("{ORDER_LINK}", ORDER_FORM_URL), 520);
       memory.push(key, "assistant", reply);
       resetStrikes(key);
+      // Set flag to indicate we're awaiting customer info
+      setCtx(key, Object.assign({}, ctxData, { awaitingCustomerInfo: true }));
       return logAndReturn(reply, { primaryIntent: 'buy_intent', confidenceScore: 0.85 });
     }
 
@@ -6602,15 +6730,16 @@ app.post("/wanotifier", express.raw({ type: "*/*", limit: "2mb" }), parseWanotif
         address: contactInfo.extracted.address || prevCustomer.address || null,
         updatedAt: getNowMs(),
       };
-      setCtx(key, Object.assign({}, ctxData, { customer: nextCustomer }));
+      setCtx(key, Object.assign({}, ctxData, { customer: nextCustomer, awaitingCustomerInfo: false }));
 
       const hasPurchaseSignal =
         isBuyIntent(userTextRaw) ||
         hasProductInquirySignal(userTextRaw) ||
         Boolean(ctxData.lastOffersShown || ctxData.lastBrand || ctxData.lastClass || ctxData.lastSize);
-      const followUp = hasPurchaseSignal && hasProductInquirySignal(userTextRaw) ? "\n\nشنو هو الموديل/الحجم اللي بغيتي؟" : "";
+      
+      // Use order confirmation template when customer provides info in purchase context
       const reply = finalizeReply(
-        hasPurchaseSignal ? contactCtaMessage(lang) + followUp : contactInfoSavedMessage(lang),
+        hasPurchaseSignal ? orderConfirmationTemplate(lang) : contactInfoSavedMessage(lang),
         520
       );
       memory.push(key, "assistant", reply);
