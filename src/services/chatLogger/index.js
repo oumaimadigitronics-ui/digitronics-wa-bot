@@ -36,6 +36,13 @@ directories.forEach(dir => {
 
 /**
  * Log a single message exchange
+ * 
+ * Note: This function performs async file I/O operations but returns immediately
+ * with the messageLog object. File writes are queued and happen asynchronously.
+ * If you need to ensure all writes complete, await the returned Promise.
+ * 
+ * @param {Object} data - Message data to log
+ * @returns {Promise<Object>} - Promise that resolves with the messageLog when all writes complete
  */
 export function logMessage(data) {
   const {
@@ -93,16 +100,13 @@ export function logMessage(data) {
     }
   };
 
-  // Append to daily log
-  appendToDailyLog(date, messageLog);
-  
-  // Update conversation log
-  updateConversationLog(conversationId, messageLog);
-
-  // Track issues
-  trackIssues(messageLog);
-
-  return messageLog;
+  // Queue all write operations and wait for them to complete
+  // This ensures atomicity and prevents race conditions
+  return Promise.all([
+    appendToDailyLog(date, messageLog),
+    updateConversationLog(conversationId, messageLog),
+    trackIssues(messageLog)
+  ]).then(() => messageLog);
 }
 
 /**

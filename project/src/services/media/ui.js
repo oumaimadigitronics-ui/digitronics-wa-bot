@@ -101,7 +101,6 @@ export function voiceNotUnderstoodTemplate() {
 export function shouldSendAudioReminder(key) {
   const last = audioReminderStore.get(key);
   const now = Date.now();
-  const ONE_DAY = 24 * 60 * 60 * 1000;
   if (!last || now - last > ONE_DAY) {
     audioReminderStore.set(key, now);
     return true;
