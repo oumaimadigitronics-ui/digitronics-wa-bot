@@ -63,7 +63,7 @@ describe('Chat Logger Service', () => {
     }
   });
   
-  it('should track issues for unmatched intents', () => {
+  it('should track issues for unmatched intents', async () => {
     // Set test logs directory
     process.env.LOGS_DIR = testLogsDir;
     
@@ -105,7 +105,10 @@ describe('Chat Logger Service', () => {
       }
     };
     
-    logMessage(testMessage);
+    await logMessage(testMessage);
+    
+    // Wait for async write to complete
+    await new Promise(resolve => setTimeout(resolve, 100));
     
     const issues = getIssues(testDate);
     assert.ok(issues);
@@ -154,7 +157,10 @@ describe('Auto-Analyzer Service', () => {
       }
     ];
     
-    testMessages.forEach(msg => logMessage(msg));
+    await Promise.all(testMessages.map(msg => logMessage(msg)));
+    
+    // Wait for async writes to complete
+    await new Promise(resolve => setTimeout(resolve, 100));
     
     const report = await autoAnalyzer.analyzeDailyLogs(testDate);
     

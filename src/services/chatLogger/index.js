@@ -297,7 +297,12 @@ function redactName(name) {
 export function getDailyLogs(date) {
   const filePath = path.join(LOGS_DIR, 'daily', `${date}.json`);
   if (!fs.existsSync(filePath)) return null;
-  return JSON.parse(fs.readFileSync(filePath, 'utf8'));
+  try {
+    return JSON.parse(fs.readFileSync(filePath, 'utf8'));
+  } catch (err) {
+    console.error(`[ChatLogger] Failed to read ${filePath}: ${err.message}`);
+    return null;
+  }
 }
 
 /**
@@ -306,7 +311,12 @@ export function getDailyLogs(date) {
 export function getConversation(conversationId) {
   const filePath = path.join(LOGS_DIR, 'conversations', `${conversationId}.json`);
   if (!fs.existsSync(filePath)) return null;
-  return JSON.parse(fs.readFileSync(filePath, 'utf8'));
+  try {
+    return JSON.parse(fs.readFileSync(filePath, 'utf8'));
+  } catch (err) {
+    console.error(`[ChatLogger] Failed to read ${filePath}: ${err.message}`);
+    return null;
+  }
 }
 
 /**
@@ -315,7 +325,12 @@ export function getConversation(conversationId) {
 export function getIssues(date) {
   const filePath = path.join(LOGS_DIR, 'issues', `${date}-issues.json`);
   if (!fs.existsSync(filePath)) return null;
-  return JSON.parse(fs.readFileSync(filePath, 'utf8'));
+  try {
+    return JSON.parse(fs.readFileSync(filePath, 'utf8'));
+  } catch (err) {
+    console.error(`[ChatLogger] Failed to read ${filePath}: ${err.message}`);
+    return null;
+  }
 }
 
 /**
