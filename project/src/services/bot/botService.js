@@ -17,6 +17,7 @@ import { buildBotContext } from './context.js';
 import { pickOverride } from './overrides/index.js';
 import { barePriceClarification } from '../nlp/sizeExtraction.js';
 import { getAudioErrorMessage, classifyAudioError } from '../audio/errorMessages.js';
+import { logMessage } from '../../../../src/services/chatLogger/index.js';
 
 function getAudioPayload(body = {}) {
   const media = body.media || {};
@@ -62,6 +63,21 @@ function getUserText(body = {}) {
 
 function getBodyText(body = {}) {
   return typeof body.text === 'string' ? body.text.trim() : '';
+}
+
+/**
+ * Detect if reply is a fallback (promo message indicating bot didn't understand)
+ */
+function looksLikeFallback(reply) {
+  if (!reply) return false;
+  const fallbackIndicators = [
+    'PROMO FLASH',
+    '🔥 *PROMO',
+    'تخفيضات',
+    'Voici nos meilleures offres',
+    'Daba  3anna'
+  ];
+  return fallbackIndicators.some(indicator => reply.includes(indicator));
 }
 
 function resolvePreferredLangFromText(userText = '') {
@@ -326,6 +342,50 @@ export class BotService {
       });
     }
     this.memoryStore?.appendMessage?.(conversationId, { text: safeReply, ts: Date.now() });
+    
+    // Log message exchange for analysis
+    try {
+      const usedFallback = looksLikeFallback(safeReply);
+      const responseTime = Date.now() - (botContext.startTime || Date.now());
+      
+      logMessage({
+        conversationId,
+        customerId: body.wa_number || body.waId || body.senderId || 'unknown',
+        customerName: body.senderName || body.customerName || null,
+        input: {
+          text: userText || getBodyText(body) || '[no text]',
+          normalized: userText || '',
+          lang: preferredLang || 'dzl',
+          type: sttFailed ? 'audio' : 'text',
+          audioTranscript: sttFailed ? null : (body.audioTranscript || null)
+        },
+        output: {
+          reply: safeReply,
+          template: null,
+          offers: [],
+          responseTime,
+          fallbackUsed: usedFallback
+        },
+        analysis: {
+          intents: [],
+          primaryIntent: usedFallback ? 'unmatched' : 'matched',
+          brand: null,
+          size: null,
+          budget: extractedPhone ? null : (isPriceQuery(userText) ? extractBudgetMad(userText) : null),
+          category: detectCategory(userText || '') || null,
+          productType: null,
+          context: ctx || {}
+        },
+        quality: {
+          confidence: usedFallback ? 0.5 : 0.85,
+          flags: sttFailed ? ['audio_failed'] : []
+        }
+      });
+    } catch (logErr) {
+      // Silent fail - don't break bot if logging fails
+      console.error('[Chat Logger Error]', logErr.message || String(logErr));
+    }
+    
     return { ok: true, reply: safeReply, requestId: botContext.requestId };
   }
 }
