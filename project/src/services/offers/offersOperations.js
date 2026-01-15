@@ -166,7 +166,12 @@ export function listOffersForBrand(brand, opts) {
   const hasCapacity = Number.isFinite(capacityNum);
   const limit = Number(o.limit) || MAX_OFFERS;
   const withOffers = Boolean(o.withOffers);
-  const useTvFilter = Boolean(o.tvOnly) || (cls && normMatch(cls) === normMatch(OFFERS_INDEX.classCanon?.tv || ""));
+  
+  // Pre-compute normalized values to avoid repeated normMatch() calls
+  const tvCanonNorm = normMatch(OFFERS_INDEX.classCanon?.tv || "");
+  const clsNorm = cls ? normMatch(cls) : null;
+  const categoryNorm = category ? normMatch(category) : null;
+  const useTvFilter = Boolean(o.tvOnly) || (clsNorm && clsNorm === tvCanonNorm);
 
   // Find the actual brand key in OFFERS.offers using case-insensitive matching
   // Use pre-computed brandNorm map from OFFERS_INDEX for O(1) lookup instead of O(n) iteration
@@ -188,10 +193,10 @@ export function listOffersForBrand(brand, opts) {
       const o1 = it.offer || {};
       if (useTvFilter) {
         if (!isTvOffer(o1)) return false;
-      } else if (cls && normMatch(o1.class || "") !== normMatch(cls)) {
+      } else if (clsNorm && normMatch(o1.class || "") !== clsNorm) {
         return false;
       }
-      if (category && normMatch(o1.category || "") !== normMatch(category)) return false;
+      if (categoryNorm && normMatch(o1.category || "") !== categoryNorm) return false;
       if (hasSize && Number(o1.size) !== sizeNum) return false;
       return true;
     });
@@ -237,6 +242,9 @@ export function listOffersForSizeAcrossBrands(size, opts) {
   const o = opts || {};
   const cls = o.cls || null;
   const limit = Number(o.limit) || MAX_OFFERS;
+  
+  // Pre-compute normalized class to avoid repeated normMatch() calls in loop
+  const clsNorm = cls ? normMatch(cls) : null;
 
   const items = [];
   const brands = OFFERS_INDEX?.brands || [];
@@ -246,7 +254,7 @@ export function listOffersForSizeAcrossBrands(size, opts) {
       .map((offer, idx) => ({ brand: b, offer, originalIdx: idx }))
       .filter((it) => {
         const o1 = it.offer || {};
-        if (cls && normMatch(o1.class || "") !== normMatch(cls)) return false;
+        if (clsNorm && normMatch(o1.class || "") !== clsNorm) return false;
         return Number(o1.size) === Number(size);
       });
 
