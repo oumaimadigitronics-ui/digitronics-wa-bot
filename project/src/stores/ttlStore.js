@@ -22,20 +22,27 @@ export class TTLStore {
       this.map.delete(key);
       return undefined;
     }
+    // LRU behavior: move to end by deleting and re-inserting
     this.map.delete(key);
     this.map.set(key, entry);
     return entry.value;
   }
 
   set(key, value) {
-    this._pruneExpired();
+    // Lazy expiration: only prune on set if we're approaching capacity
+    // This avoids O(n) scan on every write
+    if (this.map.size >= this.maxSize * 0.9) {
+      this._pruneExpired();
+    }
+    
     if (this.map.has(key)) this.map.delete(key);
     this.map.set(key, { value, expires: Date.now() + this.ttlMs });
     this._pruneSize();
   }
 
   _pruneSize() {
-    this._pruneExpired();
+    // Only prune for size if we exceed maxSize after the set
+    // Skip expensive _pruneExpired() here since we already did it in set() if needed
     while (this.map.size > this.maxSize) {
       const oldestKey = this.map.keys().next().value;
       this.map.delete(oldestKey);

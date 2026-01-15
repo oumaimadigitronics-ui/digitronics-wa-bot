@@ -6,6 +6,7 @@
  */
 
 import fs from "fs";
+import { promises as fsPromises } from "fs";
 import path from "path";
 
 /**
@@ -25,11 +26,43 @@ class Memory {
     this.maxConversations = 5000;
   }
 
+  async ensureDirAsync() {
+    if (!this.persist) return;
+    try {
+      await fsPromises.mkdir(this.dirAbs, { recursive: true, mode: 0o700 });
+    } catch {}
+  }
+
   ensureDir() {
     if (!this.persist) return;
     try {
       if (!fs.existsSync(this.dirAbs)) fs.mkdirSync(this.dirAbs, { recursive: true, mode: 0o700 });
     } catch {}
+  }
+
+  async loadAsync() {
+    if (!this.persist) return;
+    await this.ensureDirAsync();
+    try {
+      const exists = await fsPromises.access(this.file).then(() => true).catch(() => false);
+      if (!exists) return;
+      const raw = await fsPromises.readFile(this.file, "utf8");
+      const parsed = JSON.parse(raw || "{}");
+      const entries = (parsed && parsed.entries) || {};
+      const keys = Object.keys(entries);
+      for (let i = 0; i < keys.length; i += 1) {
+        const k = keys[i];
+        const v = entries[k];
+        if (!v || !Array.isArray(v.msgs)) continue;
+        const msgs = v.msgs
+          .filter((m) => m && (m.role === "user" || m.role === "assistant") && typeof m.content === "string")
+          .slice(-this.maxMessages);
+        this.store.set(k, { msgs, lastSeen: Number(v.lastSeen) || Date.now() });
+      }
+      console.log("Memory loaded:", this.store.size, "conversations");
+    } catch (e) {
+      console.log("Memory load failed:", (e && e.message) || String(e));
+    }
   }
 
   load() {
@@ -70,8 +103,33 @@ class Memory {
     if (this.flushTimer) return;
     this.flushTimer = setTimeout(() => {
       this.flushTimer = null;
-      this.flushNow();
+      this.flushNowAsync().catch((e) => {
+        console.log("Async memory flush failed:", (e && e.message) || String(e));
+      });
     }, 1500);
+  }
+
+  async flushNowAsync() {
+    if (!this.persist) return;
+    await this.ensureDirAsync();
+    try {
+      const entries = {};
+      for (const [k, v] of this.store.entries()) {
+        entries[k] = { lastSeen: v.lastSeen, msgs: v.msgs.slice(-this.maxMessages) };
+      }
+      const tmp = this.file + ".tmp";
+      await fsPromises.writeFile(tmp, JSON.stringify({ version: 1, entries }, null, 2), { encoding: "utf8", mode: 0o600 });
+      try {
+        await fsPromises.rename(tmp, this.file);
+      } catch {
+        await fsPromises.writeFile(this.file, JSON.stringify({ version: 1, entries }, null, 2), { encoding: "utf8", mode: 0o600 });
+        try {
+          await fsPromises.unlink(tmp);
+        } catch {}
+      }
+    } catch (e) {
+      console.log("Memory flush failed:", (e && e.message) || String(e));
+    }
   }
 
   flushNow() {

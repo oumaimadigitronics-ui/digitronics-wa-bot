@@ -58,42 +58,53 @@ export function refreshOffersReference() {
  */
 function buildOfferContextEntries(entries) {
   const list = Array.isArray(entries) ? entries : [];
+  
+  // Single-pass optimization: build all three arrays in one iteration
+  const lastOffersShown = [];
+  const lastOfferPicks = [];
+  const lastOfferItems = [];
+  
+  for (let i = 0; i < list.length; i += 1) {
+    const entry = list[i];
+    const offer = entry && entry.offer ? entry.offer : entry;
+    const brand = (entry && entry.brand) || (offer && offer.brand) || "";
+    
+    // Build lastOffersShown entry
+    lastOffersShown.push({
+      brand,
+      model: (offer && (offer.model || offer.sku || offer.name)) || "",
+    });
+    
+    // Build lastOfferPicks entry
+    lastOfferPicks.push({
+      brand,
+      offer,
+    });
+    
+    // Build lastOfferItems entry (with filtering)
+    if (offer && typeof offer === "object") {
+      lastOfferItems.push({
+        brand,
+        offer: {
+          name: offer.name || null,
+          model: offer.model || offer.sku || offer.name || null,
+          sku: offer.sku || null,
+          price: Number.isFinite(Number(offer.price)) ? Number(offer.price) : offer.price || null,
+          size: offer.size || null,
+          type: offer.type || null,
+          class: offer.class || offer.className || null,
+          category: offer.category || offer.categoryName || null,
+          capacity_l: offer.capacity_l || null,
+          link: offer.link || offer.url || null,
+        },
+      });
+    }
+  }
+  
   return {
-    lastOffersShown: list.map((entry) => {
-      const offer = entry && entry.offer ? entry.offer : entry;
-      return {
-        brand: (entry && entry.brand) || (offer && offer.brand) || "",
-        model: (offer && (offer.model || offer.sku || offer.name)) || "",
-      };
-    }),
-    lastOfferPicks: list.map((entry) => {
-      const offer = entry && entry.offer ? entry.offer : entry;
-      return {
-        brand: (entry && entry.brand) || (offer && offer.brand) || "",
-        offer,
-      };
-    }),
-    lastOfferItems: list
-      .map((entry) => {
-        const offer = entry && entry.offer ? entry.offer : entry;
-        if (!offer || typeof offer !== "object") return null;
-        return {
-          brand: (entry && entry.brand) || (offer && offer.brand) || "",
-          offer: {
-            name: offer.name || null,
-            model: offer.model || offer.sku || offer.name || null,
-            sku: offer.sku || null,
-            price: Number.isFinite(Number(offer.price)) ? Number(offer.price) : offer.price || null,
-            size: offer.size || null,
-            type: offer.type || null,
-            class: offer.class || offer.className || null,
-            category: offer.category || offer.categoryName || null,
-            capacity_l: offer.capacity_l || null,
-            link: offer.link || offer.url || null,
-          },
-        };
-      })
-      .filter(Boolean),
+    lastOffersShown,
+    lastOfferPicks,
+    lastOfferItems,
   };
 }
 
@@ -158,17 +169,15 @@ export function listOffersForBrand(brand, opts) {
   const useTvFilter = Boolean(o.tvOnly) || (cls && normMatch(cls) === normMatch(OFFERS_INDEX.classCanon?.tv || ""));
 
   // Find the actual brand key in OFFERS.offers using case-insensitive matching
+  // Use pre-computed brandNorm map from OFFERS_INDEX for O(1) lookup instead of O(n) iteration
   let actualBrandKey = brand;
   
-  // If no offers found with exact brand, try to find the correct key using normalized matching
   if (brand && OFFERS && OFFERS.offers && !OFFERS.offers[brand]) {
+    // Use pre-built normalized brand map from OFFERS_INDEX
     const brandNorm = normMatch(brand);
-    const keys = Object.keys(OFFERS.offers);
-    for (let i = 0; i < keys.length; i += 1) {
-      if (normMatch(keys[i]) === brandNorm) {
-        actualBrandKey = keys[i];
-        break;
-      }
+    const normalizedMap = OFFERS_INDEX?.brandNorm;
+    if (normalizedMap && normalizedMap.has(brandNorm)) {
+      actualBrandKey = normalizedMap.get(brandNorm);
     }
   }
 
@@ -202,18 +211,6 @@ export function listOffersForBrand(brand, opts) {
   const lines = picked.map((r) => formatOfferLine(r.brand, r.offer || r));
   
   // Debug logging to track brand lookup and filtering
-  // Count TV offers during initial filtering if needed, avoiding extra pass
-  let tvOffersCount = 0;
-  if (useTvFilter) {
-    // When TV filter is active, filtered already contains only TV offers
-    tvOffersCount = filtered.length;
-  } else {
-    // Only count TV offers if TV filter wasn't used (for debugging mixed results)
-    for (let i = 0; i < filtered.length; i += 1) {
-      if (isTvOffer(filtered[i].offer || {})) tvOffersCount += 1;
-    }
-  }
-  
   logger.info({
     msg: "listOffersForBrand_debug",
     inputBrand: brand,

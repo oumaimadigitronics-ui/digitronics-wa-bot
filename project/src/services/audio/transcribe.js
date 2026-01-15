@@ -3,6 +3,8 @@
  */
 
 import fs from "fs";
+import { promises as fsPromises } from "fs";
+import { createReadStream } from "fs";
 import path from "path";
 import os from "os";
 import { sniffAudioMime, extFromAudioMime, cleanMimeType, inferMimeFromPath } from "./mime.js";
@@ -38,12 +40,26 @@ export async function transcribeAudioOpenAI(
   }
 
   const client = openaiClient;
-  const fileData = fs.readFileSync(filePath);
-  const bufferSize = fileData.length;
+  
+  // Optimized: Use async file operations and stream for large files
+  // Get file stats first to avoid loading entire file into memory
+  const stats = await fsPromises.stat(filePath);
+  const bufferSize = stats.size;
+  
+  // For MIME sniffing, only read the first few KB instead of entire file
+  let fileData = null;
+  let sniffedMime = "";
+  if (CFG.featureAudioSniffMime && (!mimeType || mimeType === "application/octet-stream")) {
+    // Read only first 8KB for MIME detection instead of entire file
+    const handle = await fsPromises.open(filePath, 'r');
+    const buffer = Buffer.allocUnsafe(Math.min(8192, bufferSize));
+    await handle.read(buffer, 0, buffer.length, 0);
+    await handle.close();
+    sniffedMime = sniffAudioMime(buffer);
+  }
+  
   const mimeTypeRaw = String(mimeType || "");
   const mimeTypeClean = CFG.featureAudioCleanMime ? cleanMimeType(mimeTypeRaw) : mimeTypeRaw.trim().toLowerCase();
-  const sniffedMime =
-    CFG.featureAudioSniffMime && (!mimeType || mimeType === "application/octet-stream") ? sniffAudioMime(fileData) : "";
   const inferredMimeRaw = sniffedMime || inferMimeFromPath(filePath, mimeTypeClean || "");
   const inferredMime = CFG.featureAudioCleanMime ? cleanMimeType(inferredMimeRaw) : String(inferredMimeRaw || "").toLowerCase();
   const pathExt = path.extname(filePath || "");
@@ -79,7 +95,10 @@ export async function transcribeAudioOpenAI(
   );
 
   try {
-    const file = await toFileImpl(fileData, chosenFilename, inferredMime ? { type: inferredMime } : undefined);
+    // Optimized: Use file stream for large audio files instead of loading entire file into memory
+    // toFile can accept a ReadStream which streams data incrementally
+    const fileStream = createReadStream(filePath);
+    const file = await toFileImpl(fileStream, chosenFilename, inferredMime ? { type: inferredMime } : undefined);
     const resp = await client.audio.transcriptions.create({
       file,
       model: chosenModel,
