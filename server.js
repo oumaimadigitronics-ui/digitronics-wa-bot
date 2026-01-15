@@ -20,6 +20,9 @@ import {
   isContactIntent,
   isDeliveryIntent,
   isPaymentIntent,
+  isInstallmentIntent,
+  isTradeInIntent,
+  isWholesaleIntent,
   isWarrantyIntent,
   isAngryIntent,
   isConfusedIntent,
@@ -37,6 +40,8 @@ import {
   isSizeGuideIntent,
   isComparisonIntent,
   isThankYouIntent,
+  isImageRequestIntent,
+  isModelInquiryIntent,
   routeTemplate
 } from './project/src/domain/index.js';
 
@@ -64,6 +69,10 @@ import {
 } from './project/src/services/replies/templates.js';
 
 import {
+  OFFERS_SEPARATOR as OFFERS_SEPARATOR_IMPL
+} from './project/src/services/replies/constraints.js';
+
+import {
   t as tImpl,
   CONTACTS as CONTACTS_IMPL,
 } from './project/src/services/replies/i18n.js';
@@ -72,6 +81,8 @@ import {
   OFFERS_FALLBACK_MESSAGE,
   offersFallbackMessage
 } from './project/src/config/promoOffers.js';
+
+const OFFERS_SEPARATOR = OFFERS_SEPARATOR_IMPL;
 
 import {
   stripQuestions as stripQuestionsImpl,
@@ -4342,6 +4353,79 @@ function thankYouFollowUpMessage(lang) {
   return "Shokran 👍 Sift lia l-marque w l-model w l-taille wla l-budget bach nkemlo.";
 }
 
+const CONVERSATION_PHASE_ORDER = ["browsing", "interested", "buying", "order_placed"];
+
+function phaseRank(phase) {
+  const idx = CONVERSATION_PHASE_ORDER.indexOf(String(phase || ""));
+  return idx < 0 ? -1 : idx;
+}
+
+function advanceConversationPhase(ctxData, nextPhase) {
+  const currentPhase = ctxData?.conversationPhase || "";
+  const currentRank = phaseRank(currentPhase);
+  const nextRank = phaseRank(nextPhase);
+  if (nextRank > currentRank) return nextPhase;
+  return currentPhase || nextPhase;
+}
+
+function shouldTreatNextAsCustomerInfo(historyMsgs) {
+  const history = Array.isArray(historyMsgs) ? historyMsgs : [];
+  const lastAssistant = [...history].reverse().find((msg) => msg && msg.role === "assistant" && msg.content);
+  if (!lastAssistant) return false;
+  const s = normMatch(lastAssistant.content);
+  if (!s) return false;
+
+  const requestTokens = [
+    "send",
+    "envoyez",
+    "sift",
+    "صيفط",
+    "أرسل",
+    "ارسلي",
+  ];
+
+  const infoTokens = [
+    "name",
+    "nom",
+    "prenom",
+    "prénom",
+    "phone",
+    "numero",
+    "numéro",
+    "telephone",
+    "téléphone",
+    "whatsapp",
+    "address",
+    "adresse",
+    "اسم",
+    "الاسم",
+    "رقم",
+    "هاتف",
+    "واتساب",
+    "عنوان",
+    "العنوان",
+  ];
+
+  const hasRequest = requestTokens.some((token) => includesToken(s, token));
+  const hasInfo = infoTokens.some((token) => includesToken(s, token));
+  return hasRequest && hasInfo;
+}
+
+function hasOfferContext(ctxData) {
+  return (
+    (Array.isArray(ctxData?.lastOfferPicks) && ctxData.lastOfferPicks.length > 0) ||
+    (Array.isArray(ctxData?.lastOfferItems) && ctxData.lastOfferItems.length > 0)
+  );
+}
+
+function shouldSkipGreetingForProductContext(text) {
+  return hasProductInquirySignal(text) || Boolean(detectModel(text));
+}
+
+function shouldTreatAsOptionSelection(text, ctxData) {
+  return Boolean(parseSelectedOptionNumber(text) && hasOfferContext(ctxData));
+}
+
 function hasProductInquirySignal(text) {
   const raw = String(text || "");
   const optionKeywords = [
@@ -4366,8 +4450,23 @@ function hasProductInquirySignal(text) {
     Boolean(detectBrand(raw)) ||
     Boolean(detectCategory(raw)) ||
     Boolean(detectClass(raw)) ||
+    isModelInquiryIntent(raw) ||
     Number.isFinite(extractTvSize(raw, { allowNoHint: true }))
   );
+}
+
+function tradeInReply(lang) {
+  const L = lang || "dzl";
+  if (L === "fr") return "Pour reprise/échange d’ancien appareil, envoyez le modèle et l’état et un agent confirmera la possibilité.";
+  if (L === "ar") return "بالنسبة للاستبدال أو تبديل الجهاز القديم، صيفط الموديل والحالة وغادي يتأكد الفريق من الإمكانية.";
+  return "Ila bghiti échange d l-appareil l-9dim, sift l-model w l-état w ghadi n2kdo l-imkaniya.";
+}
+
+function wholesaleReply(lang) {
+  const L = lang || "dzl";
+  if (L === "fr") return "Prix en gros disponibles. Envoyez la liste des produits et quantités pour une offre dédiée.";
+  if (L === "ar") return "أثمنة الجملة متوفرة. صيفط لائحة المنتجات والكميات باش نعطيوك عرض خاص.";
+  return "ثمن الجملة كاين. Sift l-lista dyal l-montajat w l-kamiat bach n3tik عرض خاص.";
 }
 
 const wantsProductDetails = (text, lang) => wantsProductDetailsImpl(text, lang);
@@ -4448,6 +4547,22 @@ function getOfferImageUrl(offer) {
 const detailsNeedOptionReply = (lang) => detailsNeedOptionReplyImpl(lang);
 
 const detailsNoContextReply = (lang) => detailsNoContextReplyImpl(lang);
+
+function boxHeader(title) {
+  const safeTitle = String(title || "").trim() || "Offres Premium";
+  const inner = `   ${safeTitle}   `;
+  const width = Math.max(30, inner.length);
+  const top = `╭${"─".repeat(width)}╮`;
+  const mid = `│${inner}${" ".repeat(width - inner.length)}│`;
+  const bottom = `╰${"─".repeat(width)}╯`;
+  return [top, mid, bottom].join("\n");
+}
+
+function buildDetailsHeader(lang) {
+  if (lang === "fr") return "ℹ️ Détails produit";
+  if (lang === "ar") return "ℹ️ تفاصيل المنتج";
+  return "ℹ️ Product details";
+}
 
 function formatSpecLine(lang, labelFr, labelAr, value) {
   const safeValue = String(value || "").trim();
@@ -6556,7 +6671,8 @@ app.post("/wanotifier", express.raw({ type: "*/*", limit: "2mb" }), parseWanotif
       });
     }
 
-    const menuSelection = parseMenuSelection(userTextRaw);
+    const ctxForMenu = getCtx(key);
+    const menuSelection = shouldTreatAsOptionSelection(userTextRaw, ctxForMenu) ? null : parseMenuSelection(userTextRaw);
     if (menuSelection) {
       const reply = finalizeReply(routeMenuSelection(menuSelection, lang, key), 520);
       memory.push(key, "assistant", reply);
@@ -6588,13 +6704,16 @@ app.post("/wanotifier", express.raw({ type: "*/*", limit: "2mb" }), parseWanotif
     const knowledgeCategory = detectCategoryKnowledge(userTextRaw);
     const knowledgeProduct = detectProductModel(userTextRaw);
 
-    const forcedGreeting = isForcedGreeting(userTextRaw) && !isBuyIntent(userTextRaw);
+    const skipGreetingForProduct = shouldSkipGreetingForProductContext(userTextRaw);
+    const forcedGreeting = isForcedGreeting(userTextRaw) && !isBuyIntent(userTextRaw) && !skipGreetingForProduct;
     const greetingLang = resolveGreetingLang(lang, userTextRaw, preferredLang);
     const greetingReply = forcedGreeting
       ? maybeSendInitialGreeting({ key, lang: greetingLang })
       : isBuyIntent(userTextRaw)
         ? null
-        : handleGreetingMessage({ key, lang, text: userTextRaw, preferredLang });
+        : skipGreetingForProduct
+          ? null
+          : handleGreetingMessage({ key, lang, text: userTextRaw, preferredLang });
     if (greetingReply) {
       const reply = finalizeReply(greetingReply, 520);
       memory.push(key, "assistant", reply);
@@ -6654,7 +6773,9 @@ app.post("/wanotifier", express.raw({ type: "*/*", limit: "2mb" }), parseWanotif
             lastTags: Array.isArray(knowledgeProduct.tags) ? [...knowledgeProduct.tags] : ctxData.lastTags,
           }
         : ctxData;
+      const nextPhase = advanceConversationPhase(ctxData, "interested");
       const reply = finalizeReply(resolveAdvice(userTextRaw, adviceCtx), 650);
+      setCtx(key, Object.assign({}, ctxData, { conversationPhase: nextPhase }));
       memory.push(key, "assistant", reply);
       resetStrikes(key);
       return logAndReturn(reply, { primaryIntent: 'product_advice', confidenceScore: 0.85 });
@@ -6665,7 +6786,8 @@ app.post("/wanotifier", express.raw({ type: "*/*", limit: "2mb" }), parseWanotif
       memory.push(key, "assistant", reply);
       resetStrikes(key);
       // Set flag to indicate we're awaiting customer info
-      setCtx(key, Object.assign({}, ctxData, { awaitingCustomerInfo: true }));
+      const nextPhase = advanceConversationPhase(ctxData, "buying");
+      setCtx(key, Object.assign({}, ctxData, { awaitingCustomerInfo: true, conversationPhase: nextPhase }));
       return logAndReturn(reply, { primaryIntent: 'buy_intent', confidenceScore: 0.85 });
     }
 
@@ -6733,6 +6855,13 @@ app.post("/wanotifier", express.raw({ type: "*/*", limit: "2mb" }), parseWanotif
       return logAndReturn(reply, { primaryIntent: 'delivery', confidenceScore: 0.95 });
     }
 
+    if (isInstallmentIntent(userTextRaw)) {
+      const reply = shorten(applyAudioNote(PAYMENT_TEMPLATE), 420);
+      memory.push(key, "assistant", reply);
+      resetStrikes(key);
+      return logAndReturn(reply, { primaryIntent: 'installment', confidenceScore: 0.9 });
+    }
+
     if (isWarrantyIntent(userTextRaw)) {
       const historyText = history.map((m) => m.content).join(" ");
       const brandHint = ctxData.lastBrand || detectBrand(historyText) || null;
@@ -6743,6 +6872,24 @@ app.post("/wanotifier", express.raw({ type: "*/*", limit: "2mb" }), parseWanotif
       memory.push(key, "assistant", reply);
       resetStrikes(key);
       return logAndReturn(reply, { primaryIntent: 'warranty', confidenceScore: 0.95 });
+    }
+
+    if (isTradeInIntent(userTextRaw)) {
+      const nextPhase = advanceConversationPhase(ctxData, "interested");
+      const reply = finalizeReply(tradeInReply(lang), 420);
+      setCtx(key, Object.assign({}, ctxData, { conversationPhase: nextPhase }));
+      memory.push(key, "assistant", reply);
+      resetStrikes(key);
+      return logAndReturn(reply, { primaryIntent: 'trade_in', confidenceScore: 0.85 });
+    }
+
+    if (isWholesaleIntent(userTextRaw)) {
+      const nextPhase = advanceConversationPhase(ctxData, "interested");
+      const reply = finalizeReply(wholesaleReply(lang), 420);
+      setCtx(key, Object.assign({}, ctxData, { conversationPhase: nextPhase }));
+      memory.push(key, "assistant", reply);
+      resetStrikes(key);
+      return logAndReturn(reply, { primaryIntent: 'wholesale', confidenceScore: 0.85 });
     }
 
     if (isAngryOrProblemIntent(userTextRaw)) {
@@ -6759,6 +6906,12 @@ app.post("/wanotifier", express.raw({ type: "*/*", limit: "2mb" }), parseWanotif
       return logAndReturn(reply, { primaryIntent: 'contact_template', confidenceScore: 0.95 });
     }
 
+    const shouldAwaitCustomerInfo = shouldTreatNextAsCustomerInfo(history);
+    if (shouldAwaitCustomerInfo && !ctxData.awaitingCustomerInfo) {
+      setCtx(key, Object.assign({}, ctxData, { awaitingCustomerInfo: true }));
+      ctxData = getCtx(key);
+    }
+
     const contactInfo = detectContactInfo(userTextRaw, ctxData);
     if (contactInfo && contactInfo.isNewInfo) {
       const prevCustomer = ctxData.customer || { name: null, phone: null, address: null };
@@ -6768,7 +6921,8 @@ app.post("/wanotifier", express.raw({ type: "*/*", limit: "2mb" }), parseWanotif
         address: contactInfo.extracted.address || prevCustomer.address || null,
         updatedAt: getNowMs(),
       };
-      setCtx(key, Object.assign({}, ctxData, { customer: nextCustomer, awaitingCustomerInfo: false }));
+      const nextPhase = advanceConversationPhase(ctxData, "order_placed");
+      setCtx(key, Object.assign({}, ctxData, { customer: nextCustomer, awaitingCustomerInfo: false, conversationPhase: nextPhase }));
 
       const hasPurchaseSignal =
         isBuyIntent(userTextRaw) ||
@@ -6837,6 +6991,57 @@ app.post("/wanotifier", express.raw({ type: "*/*", limit: "2mb" }), parseWanotif
       return logAndReturn(reply, { primaryIntent: 'tv_receiver', confidenceScore: 0.85 });
     }
 
+    if (isImageRequestIntent(userTextRaw)) {
+      const optionNumber = parseSelectedOptionNumber(userTextRaw);
+      const ctx = getCtx(key);
+      const lastPicks = Array.isArray(ctx.lastOfferPicks) ? ctx.lastOfferPicks : [];
+      const lastItems = Array.isArray(ctx.lastOfferItems) ? ctx.lastOfferItems : [];
+      const nextPhase = advanceConversationPhase(ctxData, "interested");
+
+      if (optionNumber) {
+        const selected = lastPicks[optionNumber - 1] || lastItems[optionNumber - 1] || null;
+        if (selected) {
+          const reply = finalizeReply(buildProductDetailsReply(selected, lang, true), 620);
+          setCtx(key, Object.assign({}, ctxData, { conversationPhase: nextPhase }));
+          memory.push(key, "assistant", reply);
+          resetStrikes(key);
+          return logAndReturn(reply, { primaryIntent: 'image_request', confidenceScore: 0.9 });
+        }
+        const reply = finalizeReply(t(lang, "photoNoLink"), 420);
+        memory.push(key, "assistant", reply);
+        resetStrikes(key);
+        return logAndReturn(reply, { primaryIntent: 'image_request', confidenceScore: 0.75 });
+      }
+
+      if (hasOfferContext(ctx)) {
+        const reply = finalizeReply(detailsNeedOptionReply(lang), 420);
+        setCtx(key, Object.assign({}, ctxData, { conversationPhase: nextPhase }));
+        memory.push(key, "assistant", reply);
+        resetStrikes(key);
+        return logAndReturn(reply, { primaryIntent: 'image_request', confidenceScore: 0.85 });
+      }
+
+      const reply = finalizeReply(t(lang, "photoNoLink"), 420);
+      memory.push(key, "assistant", reply);
+      resetStrikes(key);
+      return logAndReturn(reply, { primaryIntent: 'image_request', confidenceScore: 0.7 });
+    }
+
+    if (shouldTreatAsOptionSelection(userTextRaw, ctxData)) {
+      const optionNumberOnly = parseSelectedOptionNumber(userTextRaw);
+      const lastPicks = Array.isArray(ctxData.lastOfferPicks) ? ctxData.lastOfferPicks : [];
+      const lastItems = Array.isArray(ctxData.lastOfferItems) ? ctxData.lastOfferItems : [];
+      const selected = lastPicks[optionNumberOnly - 1] || lastItems[optionNumberOnly - 1] || null;
+      if (selected) {
+        const nextPhase = advanceConversationPhase(ctxData, "interested");
+        const reply = finalizeReply(buildProductDetailsReply(selected, lang, false), 620);
+        setCtx(key, Object.assign({}, ctxData, { conversationPhase: nextPhase }));
+        memory.push(key, "assistant", reply);
+        resetStrikes(key);
+        return logAndReturn(reply, { primaryIntent: 'option_selection', confidenceScore: 0.85 });
+      }
+    }
+
     if (wantsProductDetails(userTextRaw, lang)) {
       const optionNumber = parseSelectedOptionNumber(userTextRaw);
       const ctx = getCtx(key);
@@ -6850,14 +7055,18 @@ app.post("/wanotifier", express.raw({ type: "*/*", limit: "2mb" }), parseWanotif
           resetStrikes(key);
           return logAndReturn(reply, { primaryIntent: 'product_details', confidenceScore: 0.85 });
         }
-        const wantsImage = isPhotoRequestIntent(userTextRaw);
+        const wantsImage = isPhotoRequestIntent(userTextRaw) || isImageRequestIntent(userTextRaw);
+        const nextPhase = advanceConversationPhase(ctxData, "interested");
         const reply = finalizeReply(buildProductDetailsReply(selected, lang, wantsImage), 620);
+        setCtx(key, Object.assign({}, ctxData, { conversationPhase: nextPhase }));
         memory.push(key, "assistant", reply);
         resetStrikes(key);
         return logAndReturn(reply, { primaryIntent: 'product_details', confidenceScore: 0.9 });
       }
       const hasContext = lastPicks.length || lastItems.length;
+      const nextPhase = advanceConversationPhase(ctxData, "interested");
       const reply = finalizeReply(hasContext ? detailsNeedOptionReply(lang) : detailsNoContextReply(lang), 420);
+      setCtx(key, Object.assign({}, ctxData, { conversationPhase: nextPhase }));
       memory.push(key, "assistant", reply);
       resetStrikes(key);
       return logAndReturn(reply, { primaryIntent: 'product_details', confidenceScore: 0.85 });
@@ -6992,6 +7201,14 @@ app.post("/wanotifier", express.raw({ type: "*/*", limit: "2mb" }), parseWanotif
     );
     const hasShoppingIntent = shoppingSignal || hasProductInquirySignal(userTextRaw);
     if (wasInSupport && shoppingSignal) supportModeStore.delete(key);
+
+    if (hasShoppingIntent) {
+      const nextPhase = advanceConversationPhase(ctxData, "browsing");
+      if (nextPhase !== ctxData.conversationPhase) {
+        setCtx(key, Object.assign({}, ctxData, { conversationPhase: nextPhase }));
+        ctxData = getCtx(key);
+      }
+    }
 
     if (supportModeStore.has(key)) {
       let reply = "";
@@ -7295,6 +7512,9 @@ export {
   maybeSendInitialGreeting,
   handleGreetingMessage,
   isGreetingLikeOpener,
+  shouldTreatNextAsCustomerInfo,
+  shouldSkipGreetingForProductContext,
+  shouldTreatAsOptionSelection,
   findOfferFromLinks,
   buildSystemPrompt,
   buildAnswerPlan,

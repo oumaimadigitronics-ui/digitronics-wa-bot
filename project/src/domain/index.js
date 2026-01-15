@@ -13,6 +13,9 @@ export {
   isContactIntent,
   isDeliveryIntent,
   isPaymentIntent,
+  isInstallmentIntent,
+  isTradeInIntent,
+  isWholesaleIntent,
   isWarrantyIntent,
   isAngryIntent,
   isConfusedIntent,
@@ -29,7 +32,9 @@ export {
   isInstallationIntent,
   isSizeGuideIntent,
   isComparisonIntent,
-  isThankYouIntent
+  isThankYouIntent,
+  isImageRequestIntent,
+  isModelInquiryIntent
 } from './intents.js';
 
 // Re-export routing function
