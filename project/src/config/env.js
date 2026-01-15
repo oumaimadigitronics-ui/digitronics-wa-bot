@@ -39,5 +39,6 @@ export function loadEnv(env) {
       Number(env.WANOTIFIER_MAX_SKEW_SECONDS || DEFAULTS.WANOTIFIER_MAX_TS_SKEW_SECONDS),
     ),
     LOG_DEBUG: env.LOG_DEBUG === 'true' || env.LOG_DEBUG === true,
+    ADMIN_API_TOKEN: env.ADMIN_API_TOKEN || '',
   };
 }
