@@ -137,7 +137,10 @@ function appendToDailyLog(date, message) {
         try {
           fs.renameSync(filePath, backupPath);
           console.error(`[ChatLogger] Corrupted file backed up to ${backupPath}`);
-        } catch {}
+        } catch (backupErr) {
+          // Ignore backup failures - corrupted file may already be moved or deleted
+          // We'll proceed with creating a fresh log file
+        }
         dailyLog = { date, messages: [] };
       }
     }
@@ -187,7 +190,10 @@ function updateConversationLog(conversationId, message) {
         try {
           fs.renameSync(filePath, backupPath);
           console.error(`[ChatLogger] Corrupted file backed up to ${backupPath}`);
-        } catch {}
+        } catch (backupErr) {
+          // Ignore backup failures - corrupted file may already be moved or deleted
+          // We'll proceed with creating a fresh log file
+        }
         convLog = {
           conversationId,
           startTime: message.timestamp,
@@ -236,7 +242,10 @@ function trackIssues(message) {
         try {
           fs.renameSync(issuesPath, backupPath);
           console.error(`[ChatLogger] Corrupted file backed up to ${backupPath}`);
-        } catch {}
+        } catch (backupErr) {
+          // Ignore backup failures - corrupted file may already be moved or deleted
+          // We'll proceed with creating a fresh log file
+        }
         issues = { date, issues: [] };
       }
     }
