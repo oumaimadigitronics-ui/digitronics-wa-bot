@@ -6140,6 +6140,62 @@ app.post("/wanotifier", express.raw({ type: "*/*", limit: "2mb" }), parseWanotif
     };
     const finalizeReply = (text, limit) => shortenNoQuestion(applyAudioNote(text), limit, logContext);
 
+    // Helper function to log message and return response
+    const logAndReturn = (reply, intentData = {}, responseOverride = null) => {
+      const ms = Date.now() - t0;
+      const { 
+        primaryIntent = 'unknown',
+        inputType = 'text',
+        audioTranscript = null,
+        fallbackUsed = false,
+        confidenceScore = 0.8
+      } = intentData;
+
+      try {
+        logMessage({
+          conversationId: key,
+          customerId: phone,
+          customerName: incoming.senderName || null,
+          input: {
+            text: userTextRaw,
+            normalized: normMatch(userTextRaw),
+            lang: lang,
+            type: inputType,
+            audioTranscript: audioTranscript
+          },
+          output: {
+            reply: reply,
+            template: null,
+            offers: [],
+            responseTime: ms,
+            fallbackUsed: fallbackUsed
+          },
+          analysis: {
+            intents: [],
+            primaryIntent: primaryIntent,
+            brand: detectBrand(userTextRaw) || null,
+            size: extractTvSize(userTextRaw) || null,
+            budget: null,
+            category: detectCategory(userTextRaw) || null,
+            context: getCtx(key) || {}
+          },
+          quality: {
+            confidence: confidenceScore,
+            flags: []
+          }
+        });
+      } catch (logErr) {
+        console.error(JSON.stringify({ 
+          level: "error", 
+          msg: "chat_logging_failed", 
+          reqId, 
+          error: (logErr && logErr.message) || String(logErr) 
+        }));
+      }
+
+      return res.json(responseOverride || { ok: true, reply });
+    };
+
     // Immediate image handling with vision before deriving text
     if (mediaInfo && (mediaInfo.kind === "image" || guessMediaKind(mediaInfo) === "image")) {
       try {
@@ -6148,7 +6204,11 @@ app.post("/wanotifier", express.raw({ type: "*/*", limit: "2mb" }), parseWanotif
         memory.push(key, "assistant", reply);
         resetStrikes(key);
         console.log(JSON.stringify({ level: "info", msg: "vision_reply_sent", reqId, confidence: visionOut.confidence || 0 }));
-        return res.json({ ok: true, reply });
+        return logAndReturn(reply, { 
+          primaryIntent: 'image_vision', 
+          inputType: 'image',
+          confidenceScore: visionOut.confidence || 0.9
+        });
       } catch (e) {
         console.error(JSON.stringify({ level: "error", msg: "vision_entry_failed", reqId, error: (e && e.message) || String(e) }));
       }
@@ -6184,7 +6244,11 @@ app.post("/wanotifier", express.raw({ type: "*/*", limit: "2mb" }), parseWanotif
           memory.push(key, "assistant", reply);
           resetStrikes(key);
           console.log(JSON.stringify({ level: "info", msg: "audio_error_reply_sent", reqId }));
-          return res.json({ ok: true, reply });
+          return logAndReturn(reply, { 
+            primaryIntent: 'audio_error', 
+            inputType: 'audio',
+            confidenceScore: 0.5
+          });
         }
       } catch (e) {
         console.error(JSON.stringify({ level: "error", msg: "audio_entry_failed", reqId, error: (e && e.message) || String(e) }));
@@ -6221,7 +6285,12 @@ app.post("/wanotifier", express.raw({ type: "*/*", limit: "2mb" }), parseWanotif
         const reply = finalizeReply(voiceNotUnderstoodTemplate(), 520);
         memory.push(key, "assistant", reply);
         resetStrikes(key);
-        return res.json({ ok: true, reply });
+        return logAndReturn(reply, { 
+          primaryIntent: 'audio_invalid_transcript', 
+          inputType: 'audio',
+          audioTranscript: transcript,
+          confidenceScore: 0.3
+        });
       }
 
       userTextRaw = transcript;
@@ -6266,14 +6335,22 @@ app.post("/wanotifier", express.raw({ type: "*/*", limit: "2mb" }), parseWanotif
       const reply = finalizeReply(t(lang, "askTextInsteadMedia"), 420);
       memory.push(key, "assistant", reply);
       resetStrikes(key);
-      return res.json({ ok: true, reply });
+      return logAndReturn(reply, { 
+        primaryIntent: 'media_not_supported', 
+        inputType: 'media',
+        confidenceScore: 0.9
+      });
     }
 
     if (!userTextRaw) {
       const reply = finalizeReply(t(lang, "typeYourMessage"), 420);
       memory.push(key, "assistant", reply);
       resetStrikes(key);
-      return res.json({ ok: true, reply });
+      return logAndReturn(reply, { 
+        primaryIntent: 'missing_input', 
+        inputType: 'empty',
+        confidenceScore: 0.9
+      });
     }
 
     const preferredLang = resolvePreferredLang({ key, text: userTextRaw || incoming.lang || "" });
@@ -6309,7 +6386,10 @@ app.post("/wanotifier", express.raw({ type: "*/*", limit: "2mb" }), parseWanotif
         senderId: logContext.senderId || null,
         mediaKind: logContext.mediaKind || null,
       });
-      return res.json({ ok: true, reply });
+      return logAndReturn(reply, { 
+        primaryIntent: 'override', 
+        confidenceScore: 0.95
+      });
     }
 
     const menuSelection = parseMenuSelection(userTextRaw);
@@ -6328,7 +6408,10 @@ app.post("/wanotifier", express.raw({ type: "*/*", limit: "2mb" }), parseWanotif
           selection: menuSelection,
         })
       );
-      return res.json({ ok: true, reply });
+      return logAndReturn(reply, { 
+        primaryIntent: 'menu_selection', 
+        confidenceScore: 0.95
+      });
     }
 
     let ctxData = getCtx(key);
@@ -6374,14 +6457,17 @@ app.post("/wanotifier", express.raw({ type: "*/*", limit: "2mb" }), parseWanotif
           });
         }
       }
-      return res.json(response);
+      return logAndReturn(reply, { 
+        primaryIntent: 'greeting', 
+        confidenceScore: 0.95
+      }, response);
     }
 
     if (FEATURE_CATALOG_OVERVIEW_INTENT && isCatalogOverviewIntent(userTextRaw, ctxData)) {
       const reply = finalizeReply(catalogOverviewMessage(lang), 520);
       memory.push(key, "assistant", reply);
       resetStrikes(key);
-      return res.json({ ok: true, reply });
+      return logAndReturn(reply, { primaryIntent: 'catalog_overview', confidenceScore: 0.95 });
     }
 
     const topicKey = detectTechTopic(userTextRaw);
@@ -6391,7 +6477,7 @@ app.post("/wanotifier", express.raw({ type: "*/*", limit: "2mb" }), parseWanotif
         const reply = finalizeReply(topicReply, 900);
         memory.push(key, "assistant", reply);
         resetStrikes(key);
-        return res.json({ ok: true, reply });
+        return logAndReturn(reply, { primaryIntent: 'tech_topic', confidenceScore: 0.85 });
       }
     }
 
@@ -6407,14 +6493,14 @@ app.post("/wanotifier", express.raw({ type: "*/*", limit: "2mb" }), parseWanotif
       const reply = finalizeReply(resolveAdvice(userTextRaw, adviceCtx), 650);
       memory.push(key, "assistant", reply);
       resetStrikes(key);
-      return res.json({ ok: true, reply });
+      return logAndReturn(reply, { primaryIntent: 'product_advice', confidenceScore: 0.85 });
     }
 
     if (isBuyIntent(userTextRaw) && !isExplicitOrderStatusQuery(userTextRaw)) {
       const reply = finalizeReply(BUY_INTENT_TEMPLATE.replace("{ORDER_LINK}", ORDER_FORM_URL), 520);
       memory.push(key, "assistant", reply);
       resetStrikes(key);
-      return res.json({ ok: true, reply });
+      return logAndReturn(reply, { primaryIntent: 'buy_intent', confidenceScore: 0.85 });
     }
 
     // Check for thank you / blessing / farewell (end of chat) - high priority
@@ -6422,14 +6508,14 @@ app.post("/wanotifier", express.raw({ type: "*/*", limit: "2mb" }), parseWanotif
       const reply = thankYouTemplate(lang);
       memory.push(key, "assistant", reply);
       resetStrikes(key);
-      return res.json({ ok: true, reply });
+      return logAndReturn(reply, { primaryIntent: 'thank_you', confidenceScore: 0.95 });
     }
 
     if (!offersAvailable) {
       const reply = finalizeReply(t(lang, "cannot3"), 420);
       console.error(JSON.stringify({ level: "error", msg: "offers_unavailable", lastOffersSync }));
       memory.push(key, "assistant", reply);
-      return res.json({ ok: true, reply });
+      return logAndReturn(reply, { primaryIntent: 'offers_unavailable', confidenceScore: 0.9 });
     }
 
     if (isOffersIntent(userTextRaw)) {
@@ -6437,7 +6523,7 @@ app.post("/wanotifier", express.raw({ type: "*/*", limit: "2mb" }), parseWanotif
         const reply = finalizeReply(offersFallbackMessage(lang), 520);
         memory.push(key, "assistant", reply);
         resetStrikes(key);
-        return res.json({ ok: true, reply });
+        return logAndReturn(reply, { primaryIntent: 'offers_intent', confidenceScore: 0.7 });
       }
 
       const brandHint = detectBrand(userTextRaw) || knowledgeBrand || ctxData.lastBrand || null;
@@ -6449,7 +6535,7 @@ app.post("/wanotifier", express.raw({ type: "*/*", limit: "2mb" }), parseWanotif
         const reply = finalizeReply(offersFallbackMessage(lang), 520);
         memory.push(key, "assistant", reply);
         resetStrikes(key);
-        return res.json({ ok: true, reply });
+        return logAndReturn(reply, { primaryIntent: 'offers_intent', confidenceScore: 0.7 });
       }
     }
 
@@ -6457,28 +6543,28 @@ app.post("/wanotifier", express.raw({ type: "*/*", limit: "2mb" }), parseWanotif
       const reply = fixedPriceTemplate();
       memory.push(key, "assistant", reply);
       resetStrikes(key);
-      return res.json({ ok: true, reply });
+      return logAndReturn(reply, { primaryIntent: 'negotiation', confidenceScore: 0.85 });
     }
 
     if (isContactIntent(userTextRaw)) {
       const reply = shorten(applyAudioNote(t(lang, "CONTACT_DETAILS")), 420);
       memory.push(key, "assistant", reply);
       resetStrikes(key);
-      return res.json({ ok: true, reply });
+      return logAndReturn(reply, { primaryIntent: 'contact', confidenceScore: 0.95 });
     }
 
     if (isOpeningHoursIntent(userTextRaw)) {
       const reply = shorten(applyAudioNote(t(lang, "OPENING_HOURS")), 420);
       memory.push(key, "assistant", reply);
       resetStrikes(key);
-      return res.json({ ok: true, reply });
+      return logAndReturn(reply, { primaryIntent: 'opening_hours', confidenceScore: 0.95 });
     }
 
     if (isDeliveryIntent(userTextRaw)) {
       const reply = shorten(applyAudioNote(t(lang, "DELIVERY_INFO")), 420);
       memory.push(key, "assistant", reply);
       resetStrikes(key);
-      return res.json({ ok: true, reply });
+      return logAndReturn(reply, { primaryIntent: 'delivery', confidenceScore: 0.95 });
     }
 
     if (isWarrantyIntent(userTextRaw)) {
@@ -6490,21 +6576,21 @@ app.post("/wanotifier", express.raw({ type: "*/*", limit: "2mb" }), parseWanotif
       const reply = shorten(applyAudioNote(t(lang, "WARRANTY_INFO", { daikoTv: isDaikoTv })), 420);
       memory.push(key, "assistant", reply);
       resetStrikes(key);
-      return res.json({ ok: true, reply });
+      return logAndReturn(reply, { primaryIntent: 'warranty', confidenceScore: 0.95 });
     }
 
     if (isAngryOrProblemIntent(userTextRaw)) {
       const reply = shorten(applyAudioNote(t(lang, "SUPPORT_PROBLEM")), 420);
       memory.push(key, "assistant", reply);
       resetStrikes(key);
-      return res.json({ ok: true, reply });
+      return logAndReturn(reply, { primaryIntent: 'angry_or_problem', confidenceScore: 0.85 });
     }
 
     if (isContactTemplateIntent(userTextRaw)) {
       const reply = finalizeReply(contactTemplate(), 520);
       memory.push(key, "assistant", reply);
       resetStrikes(key);
-      return res.json({ ok: true, reply });
+      return logAndReturn(reply, { primaryIntent: 'contact_template', confidenceScore: 0.95 });
     }
 
     const contactInfo = detectContactInfo(userTextRaw, ctxData);
@@ -6529,20 +6615,20 @@ app.post("/wanotifier", express.raw({ type: "*/*", limit: "2mb" }), parseWanotif
       );
       memory.push(key, "assistant", reply);
       resetStrikes(key);
-      return res.json({ ok: true, reply });
+      return logAndReturn(reply, { primaryIntent: 'contact_info_saved', confidenceScore: 0.95 });
     }
     if (isIptvIntent(userTextRaw)) {
       const out = finalizeReply(t(lang, "iptvCall"), 220);
       memory.push(key, "assistant", out);
       resetStrikes(key);
-      return res.json({ ok: true, reply: out });
+      return logAndReturn(out, { primaryIntent: 'iptv', confidenceScore: 0.95 });
     }
 
     if (isLocationIntent(userTextRaw)) {
       const reply = finalizeReply(t(lang, "address"), 420);
       memory.push(key, "assistant", reply);
       resetStrikes(key);
-      return res.json({ ok: true, reply });
+      return logAndReturn(reply, { primaryIntent: 'location', confidenceScore: 0.95 });
     }
 
     const linkMatch = findOfferFromLinks(userTextRaw);
@@ -6571,7 +6657,7 @@ app.post("/wanotifier", express.raw({ type: "*/*", limit: "2mb" }), parseWanotif
       });
       memory.push(key, "assistant", reply);
       resetStrikes(key);
-      return res.json({ ok: true, reply });
+      return logAndReturn(reply, { primaryIntent: 'link_match', confidenceScore: 0.9 });
     }
 
     if (isTvReceiverIntent(userTextRaw)) {
@@ -6581,7 +6667,7 @@ app.post("/wanotifier", express.raw({ type: "*/*", limit: "2mb" }), parseWanotif
       const reply = finalizeReply(ensureNoQuestion(combined || receiverMsg), 520);
       memory.push(key, "assistant", reply);
       resetStrikes(key);
-      return res.json({ ok: true, reply });
+      return logAndReturn(reply, { primaryIntent: 'tv_receiver', confidenceScore: 0.85 });
     }
 
     if (wantsProductDetails(userTextRaw, lang)) {
@@ -6595,19 +6681,19 @@ app.post("/wanotifier", express.raw({ type: "*/*", limit: "2mb" }), parseWanotif
           const reply = finalizeReply(detailsNoContextReply(lang), 420);
           memory.push(key, "assistant", reply);
           resetStrikes(key);
-          return res.json({ ok: true, reply });
+          return logAndReturn(reply, { primaryIntent: 'product_details', confidenceScore: 0.85 });
         }
         const wantsImage = isPhotoRequestIntent(userTextRaw);
         const reply = finalizeReply(buildProductDetailsReply(selected, lang, wantsImage), 620);
         memory.push(key, "assistant", reply);
         resetStrikes(key);
-        return res.json({ ok: true, reply });
+        return logAndReturn(reply, { primaryIntent: 'product_details', confidenceScore: 0.9 });
       }
       const hasContext = lastPicks.length || lastItems.length;
       const reply = finalizeReply(hasContext ? detailsNeedOptionReply(lang) : detailsNoContextReply(lang), 420);
       memory.push(key, "assistant", reply);
       resetStrikes(key);
-      return res.json({ ok: true, reply });
+      return logAndReturn(reply, { primaryIntent: 'product_details', confidenceScore: 0.85 });
     }
 
     const detectedBrand = detectBrand(userTextRaw);
@@ -6624,14 +6710,16 @@ app.post("/wanotifier", express.raw({ type: "*/*", limit: "2mb" }), parseWanotif
       !hasProductMatch &&
       !hasCategoryMatch
     ) {
-      return res.json({ ok: true, reply: offersFallbackMessage(lang) });
+      const reply = offersFallbackMessage(lang);
+      memory.push(key, "assistant", reply);
+      return logAndReturn(reply, { primaryIntent: 'generic_price', confidenceScore: 0.7 });
     }
 
     if (isBankTransferIntent(userTextRaw)) {
       const reply = finalizeReply(t(lang, "bankTransferHow"), 520);
       memory.push(key, "assistant", reply);
       resetStrikes(key);
-      return res.json({ ok: true, reply });
+      return logAndReturn(reply, { primaryIntent: 'bank_transfer', confidenceScore: 0.85 });
     }
 
     if (asksAboutDeliveryPaymentWarranty(userTextRaw)) {
@@ -6656,7 +6744,7 @@ app.post("/wanotifier", express.raw({ type: "*/*", limit: "2mb" }), parseWanotif
         const reply = finalizeReply(parts.join("\n\n"), 520);
         memory.push(key, "assistant", reply);
         resetStrikes(key);
-        return res.json({ ok: true, reply });
+        return logAndReturn(reply, { primaryIntent: 'delivery_payment_warranty', confidenceScore: 0.85 });
       }
     }
 
@@ -6673,7 +6761,7 @@ app.post("/wanotifier", express.raw({ type: "*/*", limit: "2mb" }), parseWanotif
       const out = finalizeReply(reply, 420);
       memory.push(key, "assistant", out);
       resetStrikes(key);
-      return res.json({ ok: true, reply: out });
+      return logAndReturn(out, { primaryIntent: 'order_status', confidenceScore: 0.9 });
     }
 
     if (pending && pending.waiting) {
@@ -6684,14 +6772,14 @@ app.post("/wanotifier", express.raw({ type: "*/*", limit: "2mb" }), parseWanotif
         const out = finalizeReply(t(lang, "gotOrderNo"), 520);
         memory.push(key, "assistant", out);
         resetStrikes(key);
-        return res.json({ ok: true, reply: out });
+        return logAndReturn(out, { primaryIntent: 'order_status', confidenceScore: 0.95 });
       }
       pendingOrderStore.delete(key);
       clearOrderAsk(key);
       const out = finalizeReply(t(lang, "orderHumanHandoff"), 420);
       memory.push(key, "assistant", out);
       resetStrikes(key);
-      return res.json({ ok: true, reply: out });
+      return logAndReturn(out, { primaryIntent: 'order_status', confidenceScore: 0.85 });
     }
 
     if (isCallMeIntent(userTextRaw)) {
@@ -6704,7 +6792,7 @@ app.post("/wanotifier", express.raw({ type: "*/*", limit: "2mb" }), parseWanotif
       if (!okRecent && out === t(lang, "callSoonNeedOrder")) markOrderAsk(key, "callSoonNeedOrder");
       memory.push(key, "assistant", out);
       resetStrikes(key);
-      return res.json({ ok: true, reply: out });
+      return logAndReturn(out, { primaryIntent: 'order_status', confidenceScore: 0.9 });
     }
 
     if (isOrderStatusIntent(userTextRaw)) {
@@ -6715,13 +6803,13 @@ app.post("/wanotifier", express.raw({ type: "*/*", limit: "2mb" }), parseWanotif
         const out = finalizeReply(t(lang, "gotOrderNo"), 520);
         memory.push(key, "assistant", out);
         resetStrikes(key);
-        return res.json({ ok: true, reply: out });
+        return logAndReturn(out, { primaryIntent: 'order_status', confidenceScore: 0.95 });
       }
       const out = finalizeReply(t(lang, "orderHumanHandoff"), 420);
       pendingOrderStore.delete(key);
       clearOrderAsk(key);
       memory.push(key, "assistant", out);
-      return res.json({ ok: true, reply: out });
+      return logAndReturn(out, { primaryIntent: 'order_status', confidenceScore: 0.85 });
     }
 
     const wasInSupport = supportModeStore.has(key);
@@ -6746,14 +6834,14 @@ app.post("/wanotifier", express.raw({ type: "*/*", limit: "2mb" }), parseWanotif
       const out = finalizeReply(reply, 520);
       memory.push(key, "assistant", out);
       resetStrikes(key);
-      return res.json({ ok: true, reply: out });
+      return logAndReturn(out, { primaryIntent: 'support_mode', confidenceScore: 0.85 });
     }
 
     if (isThankYouMessage(userTextRaw)) {
       const out = finalizeReply(thankYouFollowUpMessage(lang), 420);
       memory.push(key, "assistant", out);
       resetStrikes(key);
-      return res.json({ ok: true, reply: out });
+      return logAndReturn(out, { primaryIntent: 'thank_you_followup', confidenceScore: 0.95 });
     }
 
     if (isPreferBest(userTextRaw) || isPreferCheapest(userTextRaw)) {
@@ -6768,13 +6856,13 @@ app.post("/wanotifier", express.raw({ type: "*/*", limit: "2mb" }), parseWanotif
         const out = finalizeReply([msg, offerBlock].filter(Boolean).join("\n\n"), 520);
         memory.push(key, "assistant", out);
         resetStrikes(key);
-        return res.json({ ok: true, reply: out });
+        return logAndReturn(out, { primaryIntent: 'prefer_best', confidenceScore: 0.75 });
       }
 
       const out = finalizeReply(t(lang, "preferNeedContext"), 420);
       memory.push(key, "assistant", out);
       resetStrikes(key);
-      return res.json({ ok: true, reply: out });
+      return logAndReturn(out, { primaryIntent: 'prefer_best', confidenceScore: 0.7 });
     }
 
     const modelCode = extractModelCode(userTextRaw);
@@ -6832,7 +6920,7 @@ app.post("/wanotifier", express.raw({ type: "*/*", limit: "2mb" }), parseWanotif
         );
         memory.push(key, "assistant", reply);
         resetStrikes(key);
-        return res.json({ ok: true, reply });
+        return logAndReturn(reply, { primaryIntent: 'out_of_stock', confidenceScore: 0.95 });
       }
     }
 
@@ -6843,7 +6931,7 @@ app.post("/wanotifier", express.raw({ type: "*/*", limit: "2mb" }), parseWanotif
         const reply = finalizeReply(cmReply, 520);
         memory.push(key, "assistant", reply);
         resetStrikes(key);
-        return res.json({ ok: true, reply });
+        return logAndReturn(reply, { primaryIntent: 'cm_dimension', confidenceScore: 0.85 });
       }
     }
 
@@ -6852,7 +6940,7 @@ app.post("/wanotifier", express.raw({ type: "*/*", limit: "2mb" }), parseWanotif
       const reply = finalizeReply(directReply, 520);
       memory.push(key, "assistant", reply);
       resetStrikes(key);
-      return res.json({ ok: true, reply });
+      return logAndReturn(reply, { primaryIntent: 'direct_offer', confidenceScore: 0.8 });
     }
 
     const siteReply = await tryWebsiteCatalogAnswer(userTextRaw, lang, key);
@@ -6860,7 +6948,7 @@ app.post("/wanotifier", express.raw({ type: "*/*", limit: "2mb" }), parseWanotif
       const reply = finalizeReply(siteReply, 520);
       memory.push(key, "assistant", reply);
       resetStrikes(key);
-      return res.json({ ok: true, reply });
+      return logAndReturn(reply, { primaryIntent: 'website_catalog', confidenceScore: 0.8 });
     }
 
     if (hasShoppingIntent && !isAcknowledgementMessage(userTextRaw)) {
@@ -6869,7 +6957,7 @@ app.post("/wanotifier", express.raw({ type: "*/*", limit: "2mb" }), parseWanotif
         const reply = finalizeReply(bestGuess + "\n\n" + agentWillFinalize(lang), 520);
         memory.push(key, "assistant", reply);
         resetStrikes(key);
-        return res.json({ ok: true, reply });
+        return logAndReturn(reply, { primaryIntent: 'shopping_intent', confidenceScore: 0.75 });
       }
     }
 
@@ -6880,7 +6968,7 @@ app.post("/wanotifier", express.raw({ type: "*/*", limit: "2mb" }), parseWanotif
         const reply = finalizeReply(bestGuess, 520);
         memory.push(key, "assistant", reply);
         resetStrikes(key);
-        return res.json({ ok: true, reply });
+        return logAndReturn(reply, { primaryIntent: 'shopping_intent', confidenceScore: 0.7 });
       }
     }
 
@@ -6892,7 +6980,7 @@ app.post("/wanotifier", express.raw({ type: "*/*", limit: "2mb" }), parseWanotif
           const reply = finalizeReply(categoryReply, 520);
           memory.push(key, "assistant", reply);
           resetStrikes(key);
-          return res.json({ ok: true, reply });
+          return logAndReturn(reply, { primaryIntent: 'commerce_routing', confidenceScore: 0.8 });
         }
       }
 
@@ -6901,13 +6989,13 @@ app.post("/wanotifier", express.raw({ type: "*/*", limit: "2mb" }), parseWanotif
         const reply = finalizeReply(directCommerce, 520);
         memory.push(key, "assistant", reply);
         resetStrikes(key);
-        return res.json({ ok: true, reply });
+        return logAndReturn(reply, { primaryIntent: 'commerce_routing', confidenceScore: 0.8 });
       }
 
       const reply = finalizeReply(offersFallbackMessage(lang), 520);
       memory.push(key, "assistant", reply);
       resetStrikes(key);
-      return res.json({ ok: true, reply });
+      return logAndReturn(reply, { primaryIntent: 'commerce_routing', confidenceScore: 0.7 });
     }
 
     // Try template-based routing for common intents (thanks, farewell, affirmation, etc.)
@@ -6919,7 +7007,7 @@ app.post("/wanotifier", express.raw({ type: "*/*", limit: "2mb" }), parseWanotif
       const reply = finalizeReply(templateReply, 520);
       memory.push(key, "assistant", reply);
       resetStrikes(key);
-      return res.json({ ok: true, reply });
+      return logAndReturn(reply, { primaryIntent: 'template', confidenceScore: 0.8 });
     }
 
     // No LLM - use offers fallback for any unmatched query
@@ -6993,7 +7081,7 @@ try {
       })
     );
 
-    return res.json({ ok: true, reply });
+    return logAndReturn(reply, { primaryIntent: 'fallback', confidenceScore: looksLikeFallback(reply) ? 0.5 : 0.8 });
   } catch (err) {
     const ms = Date.now() - t0;
     console.error(
