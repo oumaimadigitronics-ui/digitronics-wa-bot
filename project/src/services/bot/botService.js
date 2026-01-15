@@ -347,11 +347,12 @@ export class BotService {
     }
     this.memoryStore?.appendMessage?.(conversationId, { text: safeReply, ts: Date.now() });
     
-    // Log message exchange for analysis
+    // Log message exchange for analysis (Bug #5: Fire-and-forget, don't block)
     try {
       const usedFallback = looksLikeFallback(safeReply);
       const responseTime = Date.now() - (botContext.startTime || Date.now());
       
+      // Fire-and-forget async logging (don't block response)
       logMessage({
         conversationId,
         customerId: body.wa_number || body.waId || body.senderId || 'unknown',
@@ -384,10 +385,11 @@ export class BotService {
           confidence: usedFallback ? CONFIDENCE_FALLBACK : CONFIDENCE_MATCHED,
           flags: sttFailed ? ['audio_failed'] : []
         }
+      }).catch(err => {
+        console.error('[BotService] Logging failed:', err.message);
       });
     } catch (logErr) {
-      // Silent fail - don't break bot if logging fails
-      console.error('[Chat Logger Error]', logErr.message || String(logErr));
+      console.error('[BotService] Logger setup failed:', logErr.message);
     }
     
     return { ok: true, reply: safeReply, requestId: botContext.requestId };

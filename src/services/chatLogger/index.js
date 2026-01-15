@@ -8,6 +8,23 @@ import path from 'path';
 
 const LOGS_DIR = process.env.LOGS_DIR || './logs';
 
+// Queue to serialize writes per file (Bug #4: Race Condition fix)
+const writeQueues = new Map();
+
+function queueFileWrite(filePath, writeOperation) {
+  if (!writeQueues.has(filePath)) {
+    writeQueues.set(filePath, Promise.resolve());
+  }
+  
+  const queue = writeQueues.get(filePath);
+  const newQueue = queue.then(writeOperation).catch(err => {
+    console.error(`[ChatLogger] Write error for ${filePath}:`, err);
+  });
+  
+  writeQueues.set(filePath, newQueue);
+  return newQueue;
+}
+
 // Ensure log directories exist
 const directories = ['daily', 'conversations', 'analytics', 'issues', 'exports'];
 directories.forEach(dir => {
@@ -90,82 +107,168 @@ export function logMessage(data) {
 
 /**
  * Append message to daily log file
+ * Bug #3 fix: Add error handling for JSON.parse
+ * Bug #4 fix: Use atomic writes with queue
  */
 function appendToDailyLog(date, message) {
   const filePath = path.join(LOGS_DIR, 'daily', `${date}.json`);
   
-  let dailyLog = { date, messages: [] };
-  if (fs.existsSync(filePath)) {
-    dailyLog = JSON.parse(fs.readFileSync(filePath, 'utf8'));
-  }
-  
-  dailyLog.messages.push(message);
-  fs.writeFileSync(filePath, JSON.stringify(dailyLog, null, 2));
+  return queueFileWrite(filePath, async () => {
+    let dailyLog = { date, messages: [] };
+    
+    if (fs.existsSync(filePath)) {
+      try {
+        const content = fs.readFileSync(filePath, 'utf8');
+        dailyLog = JSON.parse(content);
+        
+        // Validate structure
+        if (!Array.isArray(dailyLog.messages)) {
+          console.error(`[ChatLogger] Invalid log structure in ${filePath}, resetting`);
+          dailyLog = { date, messages: [] };
+        }
+      } catch (err) {
+        console.error(`[ChatLogger] Failed to parse ${filePath}: ${err.message}`);
+        // Backup corrupted file
+        const backupPath = `${filePath}.corrupted.${Date.now()}`;
+        try {
+          fs.renameSync(filePath, backupPath);
+          console.error(`[ChatLogger] Corrupted file backed up to ${backupPath}`);
+        } catch {}
+        dailyLog = { date, messages: [] };
+      }
+    }
+    
+    dailyLog.messages.push(message);
+    
+    // Atomic write using temp file + rename
+    const tmpPath = `${filePath}.tmp.${process.pid}.${Date.now()}`;
+    fs.writeFileSync(tmpPath, JSON.stringify(dailyLog, null, 2));
+    fs.renameSync(tmpPath, filePath);
+  });
 }
 
 /**
  * Update conversation log file
+ * Bug #3 fix: Add error handling for JSON.parse
+ * Bug #4 fix: Use atomic writes with queue
  */
 function updateConversationLog(conversationId, message) {
   const filePath = path.join(LOGS_DIR, 'conversations', `${conversationId}.json`);
   
-  let convLog = {
-    conversationId,
-    startTime: message.timestamp,
-    messages: []
-  };
-  
-  if (fs.existsSync(filePath)) {
-    convLog = JSON.parse(fs.readFileSync(filePath, 'utf8'));
-  }
-  
-  convLog.messages.push(message);
-  convLog.endTime = message.timestamp;
-  convLog.totalMessages = convLog.messages.length;
-  
-  fs.writeFileSync(filePath, JSON.stringify(convLog, null, 2));
+  return queueFileWrite(filePath, async () => {
+    let convLog = {
+      conversationId,
+      startTime: message.timestamp,
+      messages: []
+    };
+    
+    if (fs.existsSync(filePath)) {
+      try {
+        const content = fs.readFileSync(filePath, 'utf8');
+        convLog = JSON.parse(content);
+        
+        // Validate structure
+        if (!Array.isArray(convLog.messages)) {
+          console.error(`[ChatLogger] Invalid conversation log structure in ${filePath}, resetting`);
+          convLog = {
+            conversationId,
+            startTime: message.timestamp,
+            messages: []
+          };
+        }
+      } catch (err) {
+        console.error(`[ChatLogger] Failed to parse ${filePath}: ${err.message}`);
+        // Backup corrupted file
+        const backupPath = `${filePath}.corrupted.${Date.now()}`;
+        try {
+          fs.renameSync(filePath, backupPath);
+          console.error(`[ChatLogger] Corrupted file backed up to ${backupPath}`);
+        } catch {}
+        convLog = {
+          conversationId,
+          startTime: message.timestamp,
+          messages: []
+        };
+      }
+    }
+    
+    convLog.messages.push(message);
+    convLog.endTime = message.timestamp;
+    convLog.totalMessages = convLog.messages.length;
+    
+    // Atomic write using temp file + rename
+    const tmpPath = `${filePath}.tmp.${process.pid}.${Date.now()}`;
+    fs.writeFileSync(tmpPath, JSON.stringify(convLog, null, 2));
+    fs.renameSync(tmpPath, filePath);
+  });
 }
 
 /**
  * Track issues for analysis
+ * Bug #3 fix: Add error handling for JSON.parse
+ * Bug #4 fix: Use atomic writes with queue
  */
 function trackIssues(message) {
   const date = message.timestamp.split('T')[0];
   const issuesPath = path.join(LOGS_DIR, 'issues', `${date}-issues.json`);
   
-  let issues = { date, issues: [] };
-  if (fs.existsSync(issuesPath)) {
-    issues = JSON.parse(fs.readFileSync(issuesPath, 'utf8'));
-  }
+  return queueFileWrite(issuesPath, async () => {
+    let issues = { date, issues: [] };
+    
+    if (fs.existsSync(issuesPath)) {
+      try {
+        const content = fs.readFileSync(issuesPath, 'utf8');
+        issues = JSON.parse(content);
+        
+        // Validate structure
+        if (!Array.isArray(issues.issues)) {
+          console.error(`[ChatLogger] Invalid issues log structure in ${issuesPath}, resetting`);
+          issues = { date, issues: [] };
+        }
+      } catch (err) {
+        console.error(`[ChatLogger] Failed to parse ${issuesPath}: ${err.message}`);
+        // Backup corrupted file
+        const backupPath = `${issuesPath}.corrupted.${Date.now()}`;
+        try {
+          fs.renameSync(issuesPath, backupPath);
+          console.error(`[ChatLogger] Corrupted file backed up to ${backupPath}`);
+        } catch {}
+        issues = { date, issues: [] };
+      }
+    }
 
-  // Check for fallback (unmatched intent)
-  if (message.output.fallbackUsed) {
-    issues.issues.push({
-      type: 'unmatched_intent',
-      severity: 'medium',
-      timestamp: message.timestamp,
-      conversationId: message.conversationId,
-      customerMessage: message.input.raw,
-      botResponse: message.output.reply.substring(0, 100),
-      autoFixable: true
-    });
-  }
+    // Check for fallback (unmatched intent)
+    if (message.output.fallbackUsed) {
+      issues.issues.push({
+        type: 'unmatched_intent',
+        severity: 'medium',
+        timestamp: message.timestamp,
+        conversationId: message.conversationId,
+        customerMessage: message.input.raw,
+        botResponse: message.output.reply.substring(0, 100),
+        autoFixable: true
+      });
+    }
 
-  // Check for low confidence
-  if (message.quality.confidenceScore < 0.7 && message.quality.confidenceScore > 0) {
-    issues.issues.push({
-      type: 'low_confidence',
-      severity: 'low',
-      timestamp: message.timestamp,
-      conversationId: message.conversationId,
-      customerMessage: message.input.raw,
-      detectedIntent: message.analysis.primaryIntent,
-      confidence: message.quality.confidenceScore,
-      autoFixable: true
-    });
-  }
+    // Check for low confidence
+    if (message.quality.confidenceScore < 0.7 && message.quality.confidenceScore > 0) {
+      issues.issues.push({
+        type: 'low_confidence',
+        severity: 'low',
+        timestamp: message.timestamp,
+        conversationId: message.conversationId,
+        customerMessage: message.input.raw,
+        detectedIntent: message.analysis.primaryIntent,
+        confidence: message.quality.confidenceScore,
+        autoFixable: true
+      });
+    }
 
-  fs.writeFileSync(issuesPath, JSON.stringify(issues, null, 2));
+    // Atomic write using temp file + rename
+    const tmpPath = `${issuesPath}.tmp.${process.pid}.${Date.now()}`;
+    fs.writeFileSync(tmpPath, JSON.stringify(issues, null, 2));
+    fs.renameSync(tmpPath, issuesPath);
+  });
 }
 
 /**

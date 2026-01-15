@@ -30,10 +30,31 @@ jobs:
         run: |
           DATE=$(date +%Y-%m-%d)
           echo "ANALYSIS_DATE=$DATE" >> $GITHUB_ENV
-          curl -s -H "Authorization: Bearer ${{ secrets.ADMIN_API_TOKEN }}" \
-            "${{ secrets.BOT_URL }}/admin/analyze?date=$DATE" \
-            -o analysis-report.json
-        continue-on-error: true
+          
+          # Download with retries and validation
+          for i in 1 2 3; do
+            echo "Attempt $i of 3..."
+            HTTP_CODE=$(curl -s -w "%{http_code}" -o analysis-report.json \
+              -H "Authorization: Bearer ${{ secrets.ADMIN_API_TOKEN }}" \
+              "${{ secrets.BOT_URL }}/admin/analyze?date=$DATE")
+            
+            if [ "$HTTP_CODE" -eq 200 ]; then
+              # Validate JSON
+              if jq empty analysis-report.json 2>/dev/null; then
+                echo "✓ Analysis report downloaded successfully"
+                exit 0
+              else
+                echo "⚠ Invalid JSON received"
+              fi
+            else
+              echo "⚠ HTTP $HTTP_CODE"
+            fi
+            
+            [ $i -lt 3 ] && sleep 10
+          done
+          
+          echo "❌ Failed to download analysis after 3 attempts"
+          echo '{"error":"download_failed","autoFixes":[]}' > analysis-report.json
 
       - name: Check if fixes needed
         id: check-fixes

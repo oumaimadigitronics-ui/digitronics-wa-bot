@@ -15,6 +15,17 @@ export const VOICE_NOT_UNDERSTOOD_TEMPLATE = `╭──────────�
 
 // Audio reminder rate limiting store
 const audioReminderStore = new Map();
+const ONE_DAY = 24 * 60 * 60 * 1000;
+
+// Cleanup old entries every hour to prevent memory leak
+setInterval(() => {
+  const now = Date.now();
+  for (const [key, timestamp] of audioReminderStore.entries()) {
+    if (now - timestamp > ONE_DAY * 2) {  // Keep for 2 days max
+      audioReminderStore.delete(key);
+    }
+  }
+}, 60 * 60 * 1000);
 
 /**
  * Get fallback message when agent needs to handle the request
