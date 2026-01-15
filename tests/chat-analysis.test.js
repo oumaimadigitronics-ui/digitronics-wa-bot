@@ -8,7 +8,7 @@ describe('Chat Logger Service', () => {
   const testDate = '2026-01-14';
   const testLogsDir = './logs-test';
   
-  it('should log a message exchange', () => {
+  it('should log a message exchange', async () => {
     // Set test logs directory
     process.env.LOGS_DIR = testLogsDir;
     
@@ -50,7 +50,7 @@ describe('Chat Logger Service', () => {
       }
     };
     
-    const result = logMessage(testMessage);
+    const result = await logMessage(testMessage);
     
     assert.ok(result);
     assert.ok(result.id);
@@ -63,7 +63,7 @@ describe('Chat Logger Service', () => {
     }
   });
   
-  it('should track issues for unmatched intents', () => {
+  it('should track issues for unmatched intents', async () => {
     // Set test logs directory
     process.env.LOGS_DIR = testLogsDir;
     
@@ -105,7 +105,7 @@ describe('Chat Logger Service', () => {
       }
     };
     
-    logMessage(testMessage);
+    await logMessage(testMessage);
     
     const issues = getIssues(testDate);
     assert.ok(issues);
@@ -154,7 +154,7 @@ describe('Auto-Analyzer Service', () => {
       }
     ];
     
-    testMessages.forEach(msg => logMessage(msg));
+    await Promise.all(testMessages.map(msg => logMessage(msg)));
     
     const report = await autoAnalyzer.analyzeDailyLogs(testDate);
     
