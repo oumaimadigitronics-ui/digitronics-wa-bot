@@ -8,7 +8,6 @@ import { rootRouter } from './http/routes/root.js';
 import { healthRouter } from './http/routes/health.js';
 import { offersRouter } from './http/routes/offers.js';
 import { wanotifierRouter } from './http/routes/wanotifier.js';
-import { adminRouter } from './http/routes/admin.js';
 
 export function createApp({ cfg, services }) {
   const app = express();
@@ -20,7 +19,6 @@ export function createApp({ cfg, services }) {
   app.use('/', rootRouter(cfg));
   app.use('/', healthRouter());
   app.use('/', offersRouter(cfg, services));
-  app.use('/admin', adminRouter(cfg, services));
   app.use('/wanotifier', authWanotifier(cfg));
   app.use('/wanotifier', rateLimit(cfg));
   app.use('/wanotifier', wanotifierRouter(cfg, services));
