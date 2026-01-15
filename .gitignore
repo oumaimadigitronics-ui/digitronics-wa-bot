@@ -7,4 +7,3 @@ push.bat
 .DS_Store
 verify-llm-removal.js
 logs/
-server.js.backup
