@@ -80,6 +80,10 @@ function looksLikeFallback(reply) {
   return fallbackIndicators.some(indicator => reply.includes(indicator));
 }
 
+// Confidence score constants for chat logging
+const CONFIDENCE_FALLBACK = 0.5;
+const CONFIDENCE_MATCHED = 0.85;
+
 function resolvePreferredLangFromText(userText = '') {
   if (!userText) return 'dz';
   return detectUserLanguage(userText) || 'dz';
@@ -371,13 +375,13 @@ export class BotService {
           primaryIntent: usedFallback ? 'unmatched' : 'matched',
           brand: null,
           size: null,
-          budget: extractedPhone ? null : (isPriceQuery(userText) ? extractBudgetMad(userText) : null),
+          budget: extractedPhone ? null : (isPriceQuery(userText || '') ? extractBudgetMad(userText || '') : null),
           category: detectCategory(userText || '') || null,
           productType: null,
           context: ctx || {}
         },
         quality: {
-          confidence: usedFallback ? 0.5 : 0.85,
+          confidence: usedFallback ? CONFIDENCE_FALLBACK : CONFIDENCE_MATCHED,
           flags: sttFailed ? ['audio_failed'] : []
         }
       });
