@@ -4,7 +4,6 @@
 
 import fs from "fs";
 import { promises as fsPromises } from "fs";
-import { createReadStream } from "fs";
 import path from "path";
 import os from "os";
 import { sniffAudioMime, extFromAudioMime, cleanMimeType, inferMimeFromPath } from "./mime.js";
@@ -95,10 +94,9 @@ export async function transcribeAudioOpenAI(
   );
 
   try {
-    // Optimized: Use file stream for large audio files instead of loading entire file into memory
-    // toFile can accept a ReadStream which streams data incrementally
-    const fileStream = createReadStream(filePath);
-    const file = await toFileImpl(fileStream, chosenFilename, inferredMime ? { type: inferredMime } : undefined);
+    // OpenAI SDK toFile accepts file paths, buffers, or streams
+    // Use file path directly for most efficient streaming upload
+    const file = await toFileImpl(filePath, chosenFilename, inferredMime ? { type: inferredMime } : undefined);
     const resp = await client.audio.transcriptions.create({
       file,
       model: chosenModel,

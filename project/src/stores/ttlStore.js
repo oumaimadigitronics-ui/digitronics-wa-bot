@@ -3,6 +3,8 @@ export class TTLStore {
     this.maxSize = maxSize;
     this.ttlMs = ttlMs;
     this.map = new Map();
+    // Pre-compute pruning threshold to avoid repeated floating-point multiplication
+    this.pruneThreshold = Math.floor(maxSize * 0.9);
   }
 
   _isExpired(entry) {
@@ -31,7 +33,7 @@ export class TTLStore {
   set(key, value) {
     // Lazy expiration: only prune on set if we're approaching capacity
     // This avoids O(n) scan on every write
-    if (this.map.size >= this.maxSize * 0.9) {
+    if (this.map.size >= this.pruneThreshold) {
       this._pruneExpired();
     }
     
