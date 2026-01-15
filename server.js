@@ -311,10 +311,6 @@ import {
   getOffTopicFallback
 } from './project/src/services/guardrails/topicGuardrail.js';
 
-import {
-  autoAnalyzer
-} from './src/services/analytics/autoAnalyzer.js';
-
 let toFileImpl = toFile;
 
 const app = express();
