@@ -6,7 +6,11 @@ export function startScheduledJobs(cfg, services) {
     
     // Initial refresh
     offersService?.refresh?.().catch(err => {
-      console.error('Initial offers refresh failed:', err);
+      console.error('[Scheduler] Initial offers refresh failed:', {
+        error: err.message,
+        stack: err.stack,
+        timestamp: new Date().toISOString()
+      });
     });
     
     // Periodic refresh
@@ -14,7 +18,11 @@ export function startScheduledJobs(cfg, services) {
       try {
         await offersService?.refresh?.();
       } catch (err) {
-        console.error('Offers refresh failed:', err);
+        console.error('[Scheduler] Periodic offers refresh failed:', {
+          error: err.message,
+          stack: err.stack,
+          timestamp: new Date().toISOString()
+        });
       }
     }, cfg.OFFERS_REFRESH_MS);
   }
