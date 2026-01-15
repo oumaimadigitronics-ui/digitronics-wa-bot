@@ -222,7 +222,7 @@ export function listOffersForBrand(brand, opts) {
     foundKey: actualBrandKey,
     totalOffersForBrand: brandOffers.length,
     tvOnlyParam: o.tvOnly,
-    tvOffersCount: tvOffersCount,
+    useTvFilter: useTvFilter,
     offersReturned: picked.length
   });
   
