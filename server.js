@@ -12,6 +12,9 @@ import { fileURLToPath } from "url";
 import { getFetch, getOpenAI, getNowMs, setDepsForTests } from "./src/deps.js";
 import { toFile } from "openai/uploads";
 
+// Import chat logger and analytics
+import { logMessage, getDailyLogs, getConversation, getIssues, exportLogs } from './src/services/chatLogger/index.js';
+import { autoAnalyzer } from './src/services/analytics/autoAnalyzer.js';
 // Import modular code from project/src/
 import {
   isContactIntent,
